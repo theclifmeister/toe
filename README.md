@@ -34,14 +34,18 @@ at `~/.config/toe/toe.toml`.
 ## The menu bar
 
 The status item is the workspace strip, styled the way Omarchy's waybar styles it: the
-workspace you are on is a filled rounded square rather than a number, every other occupied
-workspace is its own digit, and workspace 10 shows as `0`. An empty workspace appears only
-while you are on it, dimmed. With several displays, a workspace showing on one you are not
-focused on gets the same square, outlined.
+workspace you are on is a filled rounded square rather than a number, every other workspace
+is its own digit, and workspace 10 shows as `0`. Workspaces 1-5 always have a slot — that is
+waybar's `persistent-workspaces` — dimmed while they are empty; past those, a workspace shows
+up only once it has windows on it. With several displays, a workspace showing on one you are
+not focused on gets the same square, outlined.
 
 ```
-▪ 3 7
+▪ 2 3 4 5 7
 ```
+
+`[bar] persistent_workspaces` sets how many keep a slot: `0` shows only the ones in use, `10`
+always shows all ten.
 
 Clicking a workspace switches to it, as Omarchy's `on-click: activate` does. Right-click —
 or left-click the padding at either end — to open the menu, which breaks each workspace down
@@ -64,15 +68,31 @@ built when the menu opens, so nothing is maintained while it is closed.
 ## Install
 
 ```sh
-make install          # builds, ad-hoc signs, copies to /Applications
+brew tap theclifmeister/toe https://github.com/theclifmeister/toe
+brew install --cask theclifmeister/toe/toe
 open /Applications/Toe.app
-make start-at-login   # optional
 ```
+
+The two-argument `brew tap` is because the cask lives in this repository rather than a
+separate `homebrew-toe` one. `brew upgrade --cask toe` picks up new releases.
 
 Grant **System Settings → Privacy & Security → Accessibility** when asked. That single
 permission is all toe needs.
 
+### From source
+
+```sh
+make install          # builds, signs, copies to /Applications
+open /Applications/Toe.app
+```
+
 `make run` builds and launches in place without installing. `make test` runs the layout suite.
+
+### Start at login
+
+```sh
+make start-at-login   # from a clone; writes a LaunchAgent for /Applications/Toe.app
+```
 
 ## How faithful is the dwindle?
 
@@ -173,3 +193,7 @@ log stream --predicate 'subsystem == "com.clifmeister.toe"' --level info
 
 By design: no scratchpads, no binding modes, no scripting API, no resize bindings, no window
 groups. It is a layout engine and the bindings that drive it.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

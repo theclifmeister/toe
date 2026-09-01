@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # macos-15 is arm64, which is the only architecture toe ships for.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build -c release
+
+      # The layout suite is a plain executable rather than XCTest (see Package.swift), so it
+      # needs no Xcode, no simulator and no signing, and exits nonzero on failure.
+      - name: Test
+        run: swift run -c debug toe-selftest
+
+      # Catches bundling regressions. With no signing identity present this falls back to
+      # ad-hoc signing, so it needs no secrets and works on fork pull requests.
+      - name: Bundle
+        run: ./scripts/bundle.sh release
+
+      - name: Smoke test
+        run: build/Toe.app/Contents/MacOS/toe --version

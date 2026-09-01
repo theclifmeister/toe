@@ -151,6 +151,7 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.gaps = newConfig.gaps
         tracker.floatRules = newConfig.floatRules
         border.apply(newConfig.border)
+        status.persistentWorkspaces = newConfig.bar.persistentWorkspaces
 
         refreshStatus()
         Log.info("config loaded: \(newConfig.bindings.count) binding(s), \(warnings.count) warning(s)")

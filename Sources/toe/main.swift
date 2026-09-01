@@ -16,6 +16,14 @@ if CommandLine.arguments.contains("--print-default-config") {
     exit(0)
 }
 
+// `toe --version` reports what the bundle was stamped with, which is how the release workflow
+// checks that the tag made it into the app. Run outside a bundle there is nothing to report.
+if CommandLine.arguments.contains("--version") {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    print(version ?? "unknown")
+    exit(0)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 // `toe --print-corner-radius` reports what macOS rounds windows to, so the border can be

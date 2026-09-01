@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Not shallow: the cask bump below pushes to main, and git refuses to push
+          # from a shallow clone.
+          fetch-depth: 0
+
+      - name: Derive version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # toe is signed with a self-signed certificate rather than a Developer ID: it cannot be
+      # notarized, but it gives the app a stable designated requirement, so Accessibility
+      # grants survive `brew upgrade`. See scripts/release-cert.sh for the full rationale.
+      - name: Import signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/toe-signing.keychain-db"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/toe-release.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 900 "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$RUNNER_TEMP/toe-release.p12" -k "$keychain" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          # Without this codesign blocks on a GUI keychain prompt and the job hangs.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          # codesign cannot build a chain to an untrusted self-signed root. Runners have
+          # passwordless sudo, so trust the certificate for code signing only.
+          openssl pkcs12 -in "$RUNNER_TEMP/toe-release.p12" -passin pass:"$CERT_PASSWORD" \
+            -clcerts -nokeys -out "$RUNNER_TEMP/toe-release.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/toe-release.pem"
+
+          rm -f "$RUNNER_TEMP/toe-release.p12"
+
+          # find-identity exits 0 even when it finds nothing, so assert instead: without a
+          # *valid* (trusted) identity the build would fail later, inside codesign.
+          security find-identity -v -p codesigning "$keychain"
+          if ! security find-identity -v -p codesigning "$keychain" | grep -q "toe-release"; then
+            echo "toe-release is not a valid signing identity — is the certificate trusted?" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: swift run -c debug toe-selftest
+
+      - name: Build and sign
+        env:
+          TOE_VERSION: ${{ steps.version.outputs.version }}
+          TOE_SIGN_IDENTITY: toe-release
+        run: ./scripts/bundle.sh release
+
+      # Echo the designated requirement into the log: if it ever names a cdhash instead of a
+      # certificate, or names a different certificate, this release just broke every user's
+      # Accessibility grant and we want that visible rather than silent.
+      - name: Verify signature
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 build/Toe.app
+          codesign -d -r - build/Toe.app
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          actual="$(build/Toe.app/Contents/MacOS/toe --version)"
+          expected="${{ steps.version.outputs.version }}"
+          [ "$actual" = "$expected" ] || { echo "version is $actual, expected $expected"; exit 1; }
+
+      # ditto, not zip: it preserves the bundle's metadata and keeps the signature intact.
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          asset="toe-${{ steps.version.outputs.version }}-arm64.zip"
+          ditto -c -k --keepParent build/Toe.app "$asset"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "$asset" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.package.outputs.asset }}" \
+            --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Bump cask
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          /usr/bin/sed -i '' \
+            -e "s|^  version \".*\"$|  version \"$VERSION\"|" \
+            -e "s|^  sha256 \".*\"$|  sha256 \"$SHA256\"|" \
+            Casks/toe.rb
+          if git diff --quiet Casks/toe.rb; then
+            echo "cask already at $VERSION"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Bump toe cask to $VERSION" Casks/toe.rb
+          git push origin main
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/toe-signing.keychain-db" || true

@@ -463,6 +463,7 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(c.warnings, [], "no warnings")
     t.equal(c.superKey, Modifiers.option, "SUPER is Option")
     t.equal(c.gaps, Gaps(inner: 5, outer: 10), "Omarchy gaps")
+    t.equal(c.bar.persistentWorkspaces, 5, "Omarchy's persistent-workspaces 1-5")
     t.equal(c.dwindle.preserveSplit, true, "preserve_split")
     t.equal(c.dwindle.forceSplit, 2, "force_split")
     t.equal(c.border.activeStart, "#33ccffee", "Omarchy active border gradient start")
@@ -502,6 +503,20 @@ h.test("the shipped default config parses cleanly") { t in
     } else {
         t.expect(false, "SUPER+ENTER should be an exec binding")
     }
+}
+
+h.test("persistent_workspaces is configurable and range-checked") { t in
+    let off = try Config.parse("[bar]\npersistent_workspaces = 0\n")
+    t.equal(off.bar.persistentWorkspaces, 0, "0 turns persistent slots off")
+    t.equal(off.warnings, [], "no warnings")
+
+    let all = try Config.parse("[bar]\npersistent_workspaces = 10\n")
+    t.equal(all.bar.persistentWorkspaces, 10, "10 keeps every workspace on the bar")
+
+    let bad = try Config.parse("[bar]\npersistent_workspaces = 99\n")
+    t.equal(bad.bar.persistentWorkspaces, 5, "an out-of-range value keeps the default")
+    t.equal(bad.warnings.contains { $0.contains("bar.persistent_workspaces") }, true,
+            "and says so in the menu bar")
 }
 
 h.test("a negative radius survives the TOML parser") { t in
@@ -630,21 +645,47 @@ h.test("a workspace knows which monitor is showing it") { t in
 }
 
 h.test("the strip shows occupied and visible workspaces") { t in
+    // persistent: 0 is the strip with nothing kept back — every slot has to be earned.
     let items = WorkspaceStrip.items(for: [
         WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
         WorkspaceStrip.State(index: 3, isFocused: false, isVisible: false, isEmpty: true),
         WorkspaceStrip.State(index: 7, isFocused: false, isVisible: false, isEmpty: false),
-    ])
+    ], persistent: 0)
     t.equal(items.map(\.index), [1, 7], "an empty off-screen workspace gets no slot")
     t.equal(items.map(\.dim), [false, false], "occupied workspaces are full contrast")
 
     // The one you are on is always there, even with nothing on it — dimmed, the way waybar's
     // `#workspaces button.empty { opacity: 0.5 }` dims it.
     let onEmpty = WorkspaceStrip.items(for: [
-        WorkspaceStrip.State(index: 5, isFocused: true, isVisible: true, isEmpty: true)])
+        WorkspaceStrip.State(index: 5, isFocused: true, isVisible: true, isEmpty: true)],
+        persistent: 0)
     t.equal(onEmpty.map(\.index), [5], "the focused workspace keeps its slot when empty")
     t.equal(onEmpty.map(\.dim), [true], "and is dimmed")
-    t.equal(WorkspaceStrip.items(for: []).isEmpty, true, "nothing in, nothing out")
+    t.equal(WorkspaceStrip.items(for: [], persistent: 0).isEmpty, true, "nothing in, nothing out")
+}
+
+h.test("the strip keeps Omarchy's persistent workspaces") { t in
+    // Omarchy's waybar declares persistent-workspaces 1-5: they are on the bar whether or
+    // not anything is on them, dimmed while empty.
+    func states(occupied: Set<Int>, focused: Int) -> [WorkspaceStrip.State] {
+        (1...WorkspaceManager.workspaceCount).map {
+            WorkspaceStrip.State(index: $0, isFocused: $0 == focused, isVisible: $0 == focused,
+                                 isEmpty: !occupied.contains($0))
+        }
+    }
+
+    let fresh = WorkspaceStrip.items(for: states(occupied: [1], focused: 1))
+    t.equal(fresh.map(\.index), [1, 2, 3, 4, 5], "five slots with one workspace in use")
+    t.equal(fresh.map(\.marker), [.focused, .digit, .digit, .digit, .digit],
+            "a square where you are, digits for the rest")
+    t.equal(fresh.map(\.dim), [false, true, true, true, true], "the empty four are dimmed")
+
+    let beyond = WorkspaceStrip.items(for: states(occupied: [1, 8], focused: 1))
+    t.equal(beyond.map(\.index), [1, 2, 3, 4, 5, 8],
+            "a workspace past the persistent five appears once it has windows")
+
+    t.equal(WorkspaceStrip.items(for: states(occupied: [1], focused: 1), persistent: 10)
+                .map(\.index), Array(1...10), "persistent 10 shows all ten")
 }
 
 h.test("workspace ten is labelled zero") { t in
