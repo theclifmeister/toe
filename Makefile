@@ -2,7 +2,7 @@ APP      := build/Toe.app
 BUNDLEID := com.clifmeister.toe
 AGENT    := $(HOME)/Library/LaunchAgents/$(BUNDLEID).plist
 
-.PHONY: all build test bundle run install uninstall dev-cert reset-perms start-at-login stop-at-login example-config clean
+.PHONY: all build test bundle run install uninstall dev-cert reset-perms start-at-login stop-at-login example-config icon clean
 
 all: bundle
 
@@ -63,6 +63,11 @@ start-at-login:
 stop-at-login:
 	@launchctl unload $(AGENT) 2>/dev/null || true
 	@rm -f $(AGENT)
+
+## Redraw Resources/Toe.icns. Deliberately not a dependency of `bundle`: the committed .icns
+## is what ships, and regenerating a binary file on every build would churn the tree.
+icon:
+	@swift scripts/make-icon.swift
 
 ## Regenerate toe.example.toml from the default baked into the binary.
 example-config: build

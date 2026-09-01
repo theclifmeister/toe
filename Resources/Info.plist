@@ -5,11 +5,16 @@
     <key>CFBundleName</key>
     <string>Toe</string>
     <key>CFBundleDisplayName</key>
-    <string>toe</string>
+    <string>Toe</string>
     <key>CFBundleExecutable</key>
     <string>toe</string>
     <key>CFBundleIdentifier</key>
     <string>com.clifmeister.toe</string>
+    <!-- Names Contents/Resources/Toe.icns, drawn by scripts/make-icon.swift. Not
+         CFBundleIconName: that key wants an asset catalog, and toe has no Xcode build to
+         compile one. -->
+    <key>CFBundleIconFile</key>
+    <string>Toe</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

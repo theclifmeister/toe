@@ -6,7 +6,7 @@ cask "toe" do
   sha256 "ea516cb1dc0534cd39ac939584b6acd6a3ea6f62bae21811d878f650a9d25338"
 
   url "https://github.com/theclifmeister/toe/releases/download/v#{version}/toe-#{version}-arm64.zip"
-  name "toe"
+  name "Toe"
   desc "Omarchy-style dwindle window manager"
   homepage "https://github.com/theclifmeister/toe"
 
