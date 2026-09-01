@@ -29,15 +29,17 @@ cask "toe" do
     "~/Library/Saved Application State/com.clifmeister.toe.savedState",
   ]
 
+  # The upgrade paragraph below is for the 0.2.0 → Developer ID switchover only. Drop it a
+  # release or two after 0.3.0, once nobody is upgrading across that boundary any more.
   caveats do
     <<~EOS
       Grant toe Accessibility before it can manage windows:
         System Settings → Privacy & Security → Accessibility
 
-      toe is signed, but with a self-signed certificate rather than an Apple Developer ID, so
-      it is not notarized. Homebrew no longer quarantines cask downloads, so this is usually
-      invisible. If macOS refuses to open the app, clear the quarantine attribute by hand:
-        xattr -dr com.apple.quarantine /Applications/Toe.app
+      Upgrading from 0.2.0 or earlier? toe is now signed with an Apple Developer ID and
+      notarized, where it used to carry a self-signed certificate. macOS keys Accessibility
+      to the signature, so it sees this as a different app: remove the old toe entry from the
+      Accessibility list, then add the new one. One time only — later upgrades keep the grant.
 
       To start toe at login, see "Start at login" at #{cask.homepage}
     EOS
