@@ -333,6 +333,12 @@ final class Coordinator: WindowTrackerDelegate {
         apply(refocus: false)
     }
 
+    /// Nothing about the layout has changed — only what is stacked over the focused window,
+    /// which is what decides whether the border can sit above everything.
+    func windowStackChanged() {
+        updateBorder()
+    }
+
     // MARK: - Applying the layout
 
     private func apply(refocus: Bool) {
@@ -411,10 +417,24 @@ final class Coordinator: WindowTrackerDelegate {
 
         // Prefer the frame we wrote; fall back to asking the window for floating ones.
         if let box = window.element.frame ?? desired[focused] {
-            border.show(around: box)
+            border.show(around: box, depth: borderDepth(around: box, of: focused))
         } else {
             border.hide()
         }
+    }
+
+    /// Where the border belongs in the stack.
+    ///
+    /// Above every ordinary window is right almost always — but a `.floating` panel is
+    /// composited above every ordinary window whatever the real z-order says, so a dialog
+    /// opened over the focused window had the ring drawn straight through it. When something
+    /// really is stacked over the band, the ordinary level puts the border back underneath the
+    /// active application, where it belongs: still above every inactive app, so the ring stays
+    /// visible all the way round, with the window in front covering only what it overlaps.
+    private func borderDepth(around box: Box, of id: WindowID) -> BorderOverlay.Depth {
+        let above = WindowStack.ordinaryWindowsAbove(id)
+        return BorderGeometry.bandIsCovered(window: box, width: config.border.width, by: above)
+            ? .behindFrontmost : .aboveEverything
     }
 
     /// The user has let go. The window has been off its tile for the length of the drag, so

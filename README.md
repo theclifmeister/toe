@@ -158,6 +158,16 @@ with a read-only global event monitor rather than an event tap. For as long as y
 a window toe writes nothing to it, which is what stops it being yanked out from under the cursor;
 its frame is written once, into whatever tile it now owns, when you release.
 
+**The focus border** is a panel above every ordinary window, which is right until something is
+genuinely stacked over the focused one — a settings panel, a dialog — because a floating-level
+panel is composited above every ordinary window whatever the real z-order says, and the ring
+gets drawn straight through it. Accessibility does not expose stacking order at all, so toe asks
+the window server what is above the focused window and drops the border to the ordinary level
+when any of it covers the band. That is a read of `CGWindowListCopyWindowInfo` for geometry
+only — never `kCGWindowName`, which would need Screen Recording, so Accessibility stays the one
+permission toe asks for. The border still sits above every inactive application, so it stays
+visible all the way round the window; only what is really in front of it covers it.
+
 **Floating windows.** `togglefloating` lifts a window out of the tree and centres it, at a
 consistent fraction of the display — 70% wide by 80% tall by default — so every floating window
 is the same shape whichever window it came from. No floating window is ever wider than 1.6 times
