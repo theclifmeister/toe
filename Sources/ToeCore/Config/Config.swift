@@ -106,6 +106,23 @@ public struct Config: Equatable {
 
     public init() {}
 
+    /// The ways out, bound in code so that they exist whether or not the config file mentions
+    /// them. Every other setting already works this way — `gaps`, `border`, `dwindle` and the
+    /// rest all default here and let the file override — and bindings were the one exception,
+    /// living only in the template written on first run. That gap strands anyone who installed
+    /// before a binding was introduced: their config is never rewritten, so the menu bar item
+    /// losing its menu left them with no way to quit toe but `pkill`.
+    ///
+    /// Deliberately only the escape hatches. A fallback that covered every binding would be a
+    /// second config competing with yours; these three exist so that a config which forgot them
+    /// cannot leave you stuck, in the same spirit as keeping the last good config when a new one
+    /// will not parse.
+    public static let fallbackBindings: [(spec: String, command: Command)] = [
+        ("super-comma", .editConfig),
+        ("super-shift-r", .reload),
+        ("super-shift-q", .quit),
+    ]
+
     public static let defaultFloatRules: [FloatRule] = [
         FloatRule(app: "com.apple.systempreferences"),
         FloatRule(app: "com.apple.finder", title: "Copy"),
@@ -230,6 +247,22 @@ public struct Config: Equatable {
                     config.warnings.append("binds.\(spec): \(error)")
                 }
             }
+        }
+
+        // Fill in any escape hatch the config did not bind. Only a command that is bound nowhere
+        // gets one, so rebinding `quit` to something else keeps your key and does not also get
+        // the default — the fallback is for the command being absent, not for the key being free.
+        // A fallback whose own combination you have already used for something else is dropped
+        // rather than registered twice: your binding wins, and the alternative is a duplicate the
+        // system would refuse anyway.
+        for fallback in Config.fallbackBindings
+        where !config.bindings.contains(where: { $0.command == fallback.command }) {
+            guard let (mods, code, keyName) = try? BindingParser.parse(fallback.spec,
+                                                                       superKey: config.superKey),
+                  !config.bindings.contains(where: { $0.modifiers == mods && $0.keyCode == code })
+            else { continue }
+            config.bindings.append(Binding(modifiers: mods, keyCode: code, keyName: keyName,
+                                           command: fallback.command, source: fallback.spec))
         }
 
         if let floats = root["float"]?.arrayValue {

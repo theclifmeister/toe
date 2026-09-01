@@ -20,6 +20,12 @@ bundle: test
 ## Build and launch in place, replacing any running copy.
 run: bundle
 	@pkill -x toe 2>/dev/null || true
+	@# SIGTERM is asynchronous, and toe handles it rather than dying on the spot: it unstashes
+	@# every hidden workspace and takes down the event tap first. Opening the new copy while the
+	@# old one is still on its way out makes LaunchServices refuse the launch with -600, so wait
+	@# for the process to actually be gone. Bounded, so a wedged toe cannot hang the build.
+	@for _ in $$(seq 50); do pgrep -x toe >/dev/null || break; sleep 0.1; done
+	@pgrep -x toe >/dev/null && { echo "a previous toe will not exit — kill -9 it and retry"; exit 1; } || true
 	@open $(APP)
 	@echo "toe running — look for it in the menu bar"
 

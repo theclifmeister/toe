@@ -698,6 +698,39 @@ h.test("the macOS behaviours toe takes over are configurable") { t in
             "and says so in the menu bar")
 }
 
+h.test("the escape hatches are bound even when the config forgets them") { t in
+    func binding(_ c: Config, _ command: Command) -> Binding? {
+        c.bindings.first { $0.command == command }
+    }
+
+    // The case that prompted this: a config written before these bindings existed. It is never
+    // rewritten, so without a fallback there is no way to quit toe but `pkill`.
+    let old = try Config.parse("[binds]\n\"super-w\" = \"killactive\"\n")
+    t.equal(binding(old, .quit)?.source, "super-shift-q", "quit is bound")
+    t.equal(binding(old, .editConfig)?.source, "super-comma", "editconfig is bound")
+    t.equal(binding(old, .reload)?.source, "super-shift-r", "reload is bound")
+    t.equal(old.warnings, [], "silently, with no warnings")
+
+    // Your binding wins, and does not also collect the default.
+    let rebound = try Config.parse("[binds]\n\"super-shift-x\" = \"quit\"\n")
+    t.equal(binding(rebound, .quit)?.source, "super-shift-x", "a rebound quit keeps your key")
+    t.equal(rebound.bindings.filter { $0.command == .quit }.count, 1, "and is not bound twice")
+
+    // A fallback whose combination you already used for something else is dropped, not
+    // registered on top of yours — the system would refuse the duplicate anyway.
+    let clash = try Config.parse("[binds]\n\"super-comma\" = \"killactive\"\n")
+    t.equal(binding(clash, .editConfig), nil, "a taken fallback key is left alone")
+    t.equal(binding(clash, .killActive)?.source, "super-comma", "and stays yours")
+    t.equal(binding(clash, .quit)?.source, "super-shift-q", "the others still land")
+
+    // The shipped config binds all three itself, so nothing should be duplicated.
+    let shipped = try Config.parse(Config.defaultTOML)
+    for command in [Command.quit, .editConfig, .reload] {
+        t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
+                "the shipped config binds \(command) exactly once")
+    }
+}
+
 h.test("a negative radius survives the TOML parser") { t in
     let c = try Config.parse("[border]\nradius = -1\n")
     t.equal(c.border.radius, -1, "radius = -1")
@@ -791,7 +824,11 @@ h.test("a bad binding warns instead of failing the whole config") { t in
     "super-h"    = "notacommand"
     "super-j"    = "movefocus sideways"
     """)
-    t.equal(c.bindings.count, 1, "the one good binding survives")
+    // Asserted by source rather than by count: the escape hatches are bound in code when the
+    // config does not bind them, so this config yields its own one good binding plus those.
+    t.equal(c.bindings.contains { $0.source == "super-left" }, true, "the one good binding survives")
+    t.equal(c.bindings.contains { ["super-nope", "super-h", "super-j"].contains($0.source) }, false,
+            "and the three bad ones do not")
     t.equal(c.warnings.count, 3, "each bad binding produces a warning")
     t.equal(c.warnings.contains { $0.contains("unknown key 'nope'") }, true, "names the bad key")
     t.equal(c.warnings.contains { $0.contains("unknown command 'notacommand'") }, true, "names the bad command")
