@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Toe</string>
+    <key>CFBundleDisplayName</key>
+    <string>toe</string>
+    <key>CFBundleExecutable</key>
+    <string>toe</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.clifmeister.toe</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- Menu bar only: no Dock icon, no main window. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>toe — The Omarchy Experience</string>
+    <!-- Only needed because the default config's SUPER+ENTER bindings drive Ghostty and the
+         browser through AppleScript. toe itself needs nothing but Accessibility. -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>toe opens new terminal and browser windows for your SUPER+ENTER bindings.</string>
+</dict>
+</plist>

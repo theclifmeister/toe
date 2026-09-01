@@ -1,0 +1,111 @@
+# toe — The Omarchy Experience
+#
+# Reloads automatically when you save. If a line does not parse, the running config is kept
+# and the error is shown in the menu bar item, so a typo can never leave you keyboardless.
+
+[general]
+# Omarchy's SUPER maps to Option: same physical key position as SUPER on a PC keyboard, and
+# it leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab alone. Also accepts "cmd" or "ctrl".
+super_key = "alt"
+
+# Omarchy: gaps_in = 5, gaps_out = 10
+gaps_in  = 5
+gaps_out = 10
+
+[dwindle]
+# Both of these are Omarchy's settings, and together they are what makes dwindle feel right:
+#   preserve_split — a split's orientation is decided once, when the window opens, and never
+#                    silently re-derived afterwards.
+#   force_split 2  — a new window always takes the right or bottom half of the focused window.
+preserve_split = true
+force_split    = 2
+
+# SIDEBYSIDE = width > height * split_width_multiplier. Raise it to prefer stacking.
+split_width_multiplier = 1.0
+# 1.0 is an even split. Clamped to 0.1 ... 1.9.
+default_split_ratio    = 1.0
+# 0 = even, 1 = favour the new window, 2 = favour the existing one.
+split_bias             = 0
+
+[border]
+# Highlights the focused window. Omarchy's col.active_border gradient.
+enabled      = true
+width        = 2
+active_start = "#33ccffee"
+active_end   = "#00ff99ee"
+angle        = 45
+radius       = 0
+
+[binds]
+# ── Focus — SUPER + arrows ────────────────────────────────────────────────────
+"super-left"  = "movefocus l"
+"super-right" = "movefocus r"
+"super-up"    = "movefocus u"
+"super-down"  = "movefocus d"
+
+# ── Swap windows — SUPER SHIFT + arrows ───────────────────────────────────────
+# Omarchy binds swapwindow here, not movewindow: the two windows trade places and the
+# layout keeps its shape. Use "movewindow l" instead if you want i3-style reparenting.
+"super-shift-left"  = "swapwindow l"
+"super-shift-right" = "swapwindow r"
+"super-shift-up"    = "swapwindow u"
+"super-shift-down"  = "swapwindow d"
+
+# ── Workspaces — SUPER + 1-9,0 ────────────────────────────────────────────────
+"super-1" = "workspace 1"
+"super-2" = "workspace 2"
+"super-3" = "workspace 3"
+"super-4" = "workspace 4"
+"super-5" = "workspace 5"
+"super-6" = "workspace 6"
+"super-7" = "workspace 7"
+"super-8" = "workspace 8"
+"super-9" = "workspace 9"
+"super-0" = "workspace 10"
+
+# ── Move window to workspace — SUPER SHIFT + 1-9,0 ────────────────────────────
+"super-shift-1" = "movetoworkspace 1"
+"super-shift-2" = "movetoworkspace 2"
+"super-shift-3" = "movetoworkspace 3"
+"super-shift-4" = "movetoworkspace 4"
+"super-shift-5" = "movetoworkspace 5"
+"super-shift-6" = "movetoworkspace 6"
+"super-shift-7" = "movetoworkspace 7"
+"super-shift-8" = "movetoworkspace 8"
+"super-shift-9" = "movetoworkspace 9"
+"super-shift-0" = "movetoworkspace 10"
+# Same, without following the window:  "movetoworkspacesilent 3"
+
+# ── Cycling ───────────────────────────────────────────────────────────────────
+"super-tab"       = "workspace next"
+"super-shift-tab" = "workspace prev"
+"super-ctrl-tab"  = "workspace previous"
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+"super-w"       = "killactive"
+"super-j"       = "togglesplit"
+"super-shift-v" = "togglefloating"
+
+# ── Launch ────────────────────────────────────────────────────────────────────
+# AppleScript's `new window` reuses the running instance, so the window opens on the current
+# workspace without a second app process lingering. `ghostty +new-window` is not supported on
+# macOS, and `open -na Ghostty` leaves a zombie instance behind.
+"super-enter"       = "exec osascript -e 'tell application \"Ghostty\" to new window'"
+"super-shift-enter" = "exec osascript -e 'tell application \"Safari\" to make new document' -e 'tell application \"Safari\" to activate'"
+# Chrome instead:
+# "super-shift-enter" = "exec open -na \"Google Chrome\" --args --new-window"
+
+# ── Windows that should never be tiled ────────────────────────────────────────
+# `app` matches the bundle identifier and accepts *; `title` is a case-insensitive substring.
+[[float]]
+app = "com.apple.systempreferences"
+[[float]]
+app = "com.raycast.macos"
+[[float]]
+app = "com.1password.1password"
+[[float]]
+app = "com.apple.finder"
+title = "Copy"
+[[float]]
+app = "com.apple.ActivityMonitor"
+
