@@ -614,6 +614,9 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(c.floating.width, 0.70, "floating width fraction")
     t.equal(c.floating.height, 0.80, "floating height fraction")
     t.equal(c.floating.maxAspectRatio, 1.6, "floating max aspect ratio")
+    t.equal(c.gestures.swallowDockSwipes, true, "dock swipes are swallowed by default")
+    t.equal(c.misc.disableExposeShortcuts, true, "Ctrl+Up and Ctrl+Down are disabled by default")
+    t.equal(c.misc.preventHiding, true, "hiding is undone by default")
 
     func binding(_ spec: String) -> Binding? { c.bindings.first { $0.source == spec } }
 
@@ -662,6 +665,36 @@ h.test("persistent_workspaces is configurable and range-checked") { t in
     let bad = try Config.parse("[bar]\npersistent_workspaces = 99\n")
     t.equal(bad.bar.persistentWorkspaces, 5, "an out-of-range value keeps the default")
     t.equal(bad.warnings.contains { $0.contains("bar.persistent_workspaces") }, true,
+            "and says so in the menu bar")
+}
+
+h.test("dock swipe swallowing is configurable") { t in
+    let off = try Config.parse("[gestures]\nswallow_dock_swipes = false\n")
+    t.equal(off.gestures.swallowDockSwipes, false, "false hands the gestures back to macOS")
+    t.equal(off.warnings, [], "no warnings")
+
+    let absent = try Config.parse("[general]\ngaps_in = 5\n")
+    t.equal(absent.gestures.swallowDockSwipes, true, "omitting the table keeps the default")
+
+    let bad = try Config.parse("[gestures]\nswallow_dock_swipes = \"yes\"\n")
+    t.equal(bad.gestures.swallowDockSwipes, true, "a non-boolean keeps the default")
+    t.equal(bad.warnings.contains { $0.contains("gestures.swallow_dock_swipes") }, true,
+            "and says so in the menu bar")
+}
+
+h.test("the macOS behaviours toe takes over are configurable") { t in
+    let off = try Config.parse("[misc]\ndisable_expose_shortcuts = false\nprevent_hiding = false\n")
+    t.equal(off.misc.disableExposeShortcuts, false, "the Exposé shortcuts can be handed back")
+    t.equal(off.misc.preventHiding, false, "hiding can be allowed")
+    t.equal(off.warnings, [], "no warnings")
+
+    let absent = try Config.parse("[general]\ngaps_in = 5\n")
+    t.equal(absent.misc.disableExposeShortcuts, true, "omitting the table keeps the defaults")
+    t.equal(absent.misc.preventHiding, true, "omitting the table keeps the defaults")
+
+    let bad = try Config.parse("[misc]\nprevent_hiding = 1\n")
+    t.equal(bad.misc.preventHiding, true, "a non-boolean keeps the default")
+    t.equal(bad.warnings.contains { $0.contains("misc.prevent_hiding") }, true,
             "and says so in the menu bar")
 }
 

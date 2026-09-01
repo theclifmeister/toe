@@ -33,6 +33,26 @@ public struct FloatingSize: Equatable {
     public init() {}
 }
 
+/// Trackpad gestures toe takes off macOS's hands.
+public struct GestureConfig: Equatable {
+    /// Swallow the Dock's swipe gestures — Mission Control, App Exposé and the sideways Spaces
+    /// switch — before the window server acts on them. Keyed off the gesture's event type rather
+    /// than a finger count, so it covers the three-finger setting as well as the four-finger one.
+    public var swallowDockSwipes: Bool = true
+    public init() {}
+}
+
+/// macOS behaviours that pull windows out from under the layout. Hyprland's catch-all table.
+public struct MiscConfig: Equatable {
+    /// `Ctrl`+`↑` and `Ctrl`+`↓` open the same Mission Control and App Exposé the vertical swipe
+    /// does, and a symbolic hotkey is resolved inside the window server, so the tap cannot reach
+    /// them.
+    public var disableExposeShortcuts: Bool = true
+    /// `⌘H` takes an application's windows out of the layout with no way to reach them again.
+    public var preventHiding: Bool = true
+    public init() {}
+}
+
 /// A window that should float instead of joining the dwindle tree.
 public struct FloatRule: Equatable {
     /// Bundle identifier. `*` matches any run of characters.
@@ -76,6 +96,8 @@ public struct Config: Equatable {
     public var border: BorderConfig = BorderConfig()
     public var bar: BarConfig = BarConfig()
     public var floating: FloatingSize = FloatingSize()
+    public var gestures: GestureConfig = GestureConfig()
+    public var misc: MiscConfig = MiscConfig()
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
     /// Non-fatal problems (a binding that would not parse, an unknown key). Surfaced in the
@@ -161,6 +183,33 @@ public struct Config: Equatable {
             if let v = f["max_aspect_ratio"]?.doubleValue {
                 if v > 0 { config.floating.maxAspectRatio = v } else {
                     config.warnings.append("floating.max_aspect_ratio: must be over 0, using \(config.floating.maxAspectRatio)")
+                }
+            }
+        }
+
+        if let g = root["gestures"]?.tableValue, let raw = g["swallow_dock_swipes"] {
+            // Warned about rather than silently ignored: a mistyped boolean here quietly hands
+            // Mission Control back the gesture that puts the off-screen stash on display.
+            if let v = raw.boolValue {
+                config.gestures.swallowDockSwipes = v
+            } else {
+                config.warnings.append("gestures.swallow_dock_swipes: must be true or false, using \(config.gestures.swallowDockSwipes)")
+            }
+        }
+
+        if let m = root["misc"]?.tableValue {
+            if let raw = m["disable_expose_shortcuts"] {
+                if let v = raw.boolValue {
+                    config.misc.disableExposeShortcuts = v
+                } else {
+                    config.warnings.append("misc.disable_expose_shortcuts: must be true or false, using \(config.misc.disableExposeShortcuts)")
+                }
+            }
+            if let raw = m["prevent_hiding"] {
+                if let v = raw.boolValue {
+                    config.misc.preventHiding = v
+                } else {
+                    config.warnings.append("misc.prevent_hiding: must be true or false, using \(config.misc.preventHiding)")
                 }
             }
         }

@@ -54,6 +54,26 @@ height = 0.80
 # 32:9 ultrawide a plain 70% would be a letterbox; on a laptop this never comes into play.
 max_aspect_ratio = 1.6
 
+[gestures]
+# Swallow the Dock's swipe gestures before macOS acts on them. A swipe up would open Mission
+# Control, which puts the windows on hidden workspaces — parked off-screen, since macOS has no
+# public API for virtual desktops — back on display; a sideways swipe would change the macOS
+# Space out from under toe. Ctrl+←/→ still switches Spaces, which is also the way out of a
+# fullscreen app now that swiping is not.
+swallow_dock_swipes = true
+
+[misc]
+# Ctrl+↑ and Ctrl+↓ open the same Mission Control and App Exposé the vertical swipe does. These
+# are symbolic hotkeys, resolved inside the window server, so nothing an event tap can do reaches
+# them — toe switches them off while it runs and gives them back when it quits. Ctrl+←/→ is left
+# alone: it is the way out of a fullscreen app now that swiping is not.
+disable_expose_shortcuts = true
+
+# ⌘H and ⌘⌥H take an application's windows out of the layout without closing them — the tree
+# reflows around the gap and SUPER+arrows cannot reach them again, because they are no longer on
+# any workspace. toe puts a hidden application straight back.
+prevent_hiding = true
+
 [bar]
 # waybar's persistent-workspaces: Omarchy keeps slots 1-5 on the bar even when they are
 # empty, dimmed. 0 shows only the workspaces in use; 10 always shows all ten.

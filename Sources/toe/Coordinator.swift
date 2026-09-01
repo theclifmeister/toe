@@ -13,11 +13,19 @@ final class Coordinator: WindowTrackerDelegate {
     private let hotkeys = HotkeyManager()
     private let border = BorderOverlay()
     private let drag = DragMonitor()
+    private let dockSwipes = DockSwipeTap()
+    private let hideBlocker = HideBlocker()
     private let status = StatusItem()
     private var watcher: ConfigWatcher?
 
     private var config = Config.makeDefault()
     private var warnings: [String] = []
+    /// Problems that are not the config's fault and so must survive a reload — a tap that would
+    /// not create, for instance. `warnings` is replaced wholesale on every load.
+    private var runtimeWarnings: [String] = []
+    /// False until Accessibility has landed and `beginManaging()` has run. A config reload before
+    /// that must not try to create the event tap: it would be refused and never retried.
+    private var isManaging = false
     /// The frame each window is supposed to occupy, so a re-render does not churn every window.
     private var desired: [WindowID: Box] = [:]
     /// How many times we have re-asserted a frame an app pushed back on. Bounded, so a window
@@ -41,6 +49,10 @@ final class Coordinator: WindowTrackerDelegate {
         status.onOpenAccessibility = { Self.openAccessibilitySettings() }
 
         installSignalHandlers()
+        // Symbolic hotkey state outlives the process, so a previous toe that was killed rather
+        // than quit may have left Mission Control's shortcut switched off. Give it back before
+        // anything else, so the config below decides from a known-good baseline.
+        SymbolicHotkeys.repairAfterUncleanExit()
         writeDefaultConfigIfMissing()
         loadConfig()
 
@@ -56,6 +68,7 @@ final class Coordinator: WindowTrackerDelegate {
             self.apply(refocus: false)
         }
         drag.onEnd = { [weak self] id in self?.endDrag(id) }
+        hideBlocker.onRestored = { [weak self] pid in self?.relayoutAfterUnhide(pid) }
 
         guard waitForAccessibility() else {
             Log.error("no Accessibility permission — hotkeys are live but windows cannot be moved. "
@@ -75,7 +88,7 @@ final class Coordinator: WindowTrackerDelegate {
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
             source.setEventHandler { [weak self] in
-                self?.unstashEverything()
+                self?.shutDown()
                 exit(0)
             }
             source.resume()
@@ -102,10 +115,17 @@ final class Coordinator: WindowTrackerDelegate {
     private func beginManaging() {
         // Before the first AX call: caps how long any single one can block the main thread.
         AX.setGlobalMessagingTimeout()
+        isManaging = true
         tracker.delegate = self
         tracker.floatRules = config.floatRules
         refreshMonitors()
         tracker.start()
+        // Deliberately here and not in `start()`: a filtering event tap needs the Accessibility
+        // grant, and it is refused outright — never retried — without one. This is the first
+        // point at which the grant is known to exist, whether it was already there or has just
+        // been given, so a first run picks the tap up without a relaunch.
+        applyDockSwipeSetting()
+        applyMiscSettings()
         refreshStatus()
         apply(refocus: false)
         Log.info("managing \(tracker.windows.count) window(s) across \(workspaces.monitors.count) monitor(s)")
@@ -151,6 +171,8 @@ final class Coordinator: WindowTrackerDelegate {
         tracker.floatRules = newConfig.floatRules
         border.apply(newConfig.border)
         status.persistentWorkspaces = newConfig.bar.persistentWorkspaces
+        applyDockSwipeSetting()
+        applyMiscSettings()
 
         refreshStatus()
         Log.info("config loaded: \(newConfig.bindings.count) binding(s), \(warnings.count) warning(s)")
@@ -160,9 +182,68 @@ final class Coordinator: WindowTrackerDelegate {
         apply(refocus: false)
     }
 
+    /// Starts and stops the dock swipe tap as the config flips, on every reload as well as at
+    /// startup. A no-op until Accessibility has landed; `beginManaging()` calls it again then.
+    private func applyDockSwipeSetting() {
+        guard isManaging else { return }
+        runtimeWarnings.removeAll()
+
+        guard config.gestures.swallowDockSwipes else {
+            dockSwipes.stop()
+            return
+        }
+        if !dockSwipes.isRunning, !dockSwipes.start() {
+            runtimeWarnings = ["dock swipe tap could not be created — swipes are not swallowed"]
+        }
+    }
+
+    /// The two macOS behaviours toe takes over, applied at startup and on every reload. Neither
+    /// needs Accessibility, but both are gated on `isManaging` so they arrive together with the
+    /// tap rather than flickering on before toe can actually manage anything.
+    private func applyMiscSettings() {
+        guard isManaging else { return }
+
+        if config.misc.disableExposeShortcuts {
+            SymbolicHotkeys.disable(SymbolicHotkeys.expose)
+        } else {
+            SymbolicHotkeys.restoreAll()
+        }
+
+        if config.misc.preventHiding {
+            hideBlocker.start()
+        } else {
+            hideBlocker.stop()
+        }
+    }
+
+    /// Puts the layout and the focus back after an application toe unhid has returned.
+    ///
+    /// A hidden window keeps the frame it had, so `desired` still matches it and `apply` would
+    /// write nothing — which is what leaves the windows looking wrong once they are back. Dropping
+    /// this application's bookkeeping forces its tiles to be written again, and the correction
+    /// budget goes with it, because coming back from a hide is not an app fighting for its own
+    /// geometry.
+    private func relayoutAfterUnhide(_ pid: pid_t) {
+        for (id, window) in tracker.windows where window.pid == pid {
+            desired.removeValue(forKey: id)
+            corrections.removeValue(forKey: id)
+        }
+        apply(refocus: false)
+
+        // `activate()` gave the application back the foreground; this gives the focus back to the
+        // window that had it. Deliberately not `focusApplied`: hiding an application makes macOS
+        // activate whichever one is behind it, and that activation reaches toe as an ordinary
+        // focus change — often before the hide notification does — so by now `focusApplied` names
+        // a window belonging to some other app. `focusHistory` is most-recent-first and survives
+        // that, so asking it for this application's own last-focused window is race-free.
+        if let id = workspaces.focusHistory.first(where: { tracker.window($0)?.pid == pid }) {
+            focus(id)
+        }
+    }
+
     private func refreshStatus() {
         status.update(workspaces: workspaceStates(),
-                      warnings: warnings,
+                      warnings: warnings + runtimeWarnings,
                       accessibilityGranted: AXIsProcessTrusted())
     }
 
@@ -399,6 +480,21 @@ final class Coordinator: WindowTrackerDelegate {
         apply(refocus: false)
     }
 
+    /// Everything that must happen before toe goes away, whichever way it is going: the Quit menu
+    /// item, or SIGTERM, which is how `make run` replaces a running copy. There is no
+    /// `applicationWillTerminate` — `NSApp.terminate` and `exit(0)` are both reached from here, so
+    /// this is the one teardown path.
+    private func shutDown() {
+        unstashEverything()
+        // A filtering tap left registered against a callback that is about to go away spins
+        // WindowServer, so it is taken down deliberately rather than left to process death.
+        dockSwipes.stop()
+        hideBlocker.stop()
+        // The only one of the three that would otherwise outlive toe: the window server keeps a
+        // symbolic hotkey switched off until something switches it back on.
+        SymbolicHotkeys.restoreAll()
+    }
+
     private func unstashEverything() {
         for window in tracker.windows.values where window.isStashed {
             window.isStashed = false
@@ -485,7 +581,7 @@ final class Coordinator: WindowTrackerDelegate {
             openConfigInTerminal()
 
         case .quit:
-            unstashEverything()
+            shutDown()
             NSApp.terminate(nil)
         }
     }
