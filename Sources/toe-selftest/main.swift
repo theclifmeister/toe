@@ -363,17 +363,35 @@ h.test("a floating frame is left alone unless it is stranded") { t in
                "dragged half off an edge: not undone on the next render")
 
     wm.floatingFrames[1] = box(2000, 1400, 800, 600)   // remembered on a display since unplugged
-    t.equalBox(wm.render().floating[1], box(712, 382, 800, 600), "pulled back into the usable area")
+    t.equalBox(wm.render().floating[1], box(356, 191, 800, 600), "centred, at the size it remembers")
 
     // Hiding a workspace parks a window one pixel inside the monitor's corner. Adopting a
     // window that was left parked — toe killed rather than quit — captures that as its
     // floating frame, and handing it straight back would make the window vanish.
     wm.floatingFrames[1] = box(1511, 981, 800, 600)
-    t.equalBox(wm.render().floating[1], box(712, 382, 800, 600),
+    t.equalBox(wm.render().floating[1], box(356, 191, 800, 600),
                "a 1pt sliver on screen is not enough to take a frame at face value")
 
     wm.floatingFrames.removeValue(forKey: 1)
-    t.equalBox(wm.render().floating[1], box(378, 246, 756, 491), "nothing remembered: centred, half size")
+    t.equalBox(wm.render().floating[1], box(378, 246, 756, 491), "nothing remembered: centred, half the screen")
+}
+
+h.test("a floating window is centred when its display is disconnected") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    wm.addWindow(1, floating: true)                   // workspace 1, on the left display
+    wm.floatingFrames[1] = box(300, 200, 800, 600)
+    t.equalBox(wm.render().floating[1], box(300, 200, 800, 600), "left exactly where it was put")
+
+    // The left display is unplugged. Workspace 1 re-homes to what is left of the desk.
+    wm.setMonitors([Monitor(id: 2, frame: right, usable: right)])
+    wm.switchTo(workspace: 1)
+    t.equalBox(wm.render().floating[1], box(2072, 240, 800, 600),
+               "centred on the remaining display, keeping the size it remembers")
 }
 
 h.test("movefocus reaches a floating window") { t in

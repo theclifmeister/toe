@@ -139,9 +139,11 @@ drag it out of its tile.
 geometry it had before toe first tiled it — Hyprland's `m_vLastFloatingSize` and
 `m_vLastFloatingPosition` — and after that, wherever you last dragged it. toe writes a floating
 frame only when it actually changes and never re-asserts it, so dragging a floating window is
-never fought the way a tile is. It is raised when you float it and again whenever it is focused,
-but the Accessibility API offers no persistent always-on-top: activate a tiled window afterwards
-and it can cover the floating one. Floating windows stay reachable with `SUPER`+arrows.
+never fought the way a tile is. If the display it was last on has been unplugged, the window is
+centred on the display that remains rather than clamped against an edge. It is raised when you
+float it and again whenever it is focused, but the Accessibility API offers no persistent
+always-on-top: activate a tiled window afterwards and it can cover the floating one. Floating
+windows stay reachable with `SUPER`+arrows.
 
 **Windows toe leaves alone**: dialogs, sheets, palettes, minimized and natively-fullscreen
 windows, and anything that refuses a position or size. Add your own exceptions with `[[float]]`

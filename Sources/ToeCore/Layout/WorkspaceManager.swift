@@ -372,23 +372,25 @@ public final class WorkspaceManager {
     /// window vanish.
     private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
         let usable = monitor.usable
-        guard let remembered = floatingFrames[id] else {
-            let w = usable.w / 2.0, h = usable.h / 2.0
-            return Box(x: usable.minX + (usable.w - w) / 2.0,
-                       y: usable.minY + (usable.h - h) / 2.0,
-                       w: w, h: h).rounded()
+        let remembered = floatingFrames[id]
+
+        if let remembered {
+            let onScreen = remembered.intersection(usable)
+            if onScreen.w >= min(Self.minimumOnScreen, remembered.w),
+               onScreen.h >= min(Self.minimumOnScreen, remembered.h) {
+                return remembered
+            }
         }
 
-        let onScreen = remembered.intersection(usable)
-        if onScreen.w >= min(Self.minimumOnScreen, remembered.w),
-           onScreen.h >= min(Self.minimumOnScreen, remembered.h) {
-            return remembered
-        }
-
-        let w = min(remembered.w, usable.w)
-        let h = min(remembered.h, usable.h)
-        return Box(x: clampf(remembered.x, usable.minX, max(usable.minX, usable.maxX - w)),
-                   y: clampf(remembered.y, usable.minY, max(usable.minY, usable.maxY - h)),
+        // Nowhere useful to put it back: a frame remembered on a display that has since been
+        // unplugged, a window left parked in the stash corner, or one that has never floated.
+        // Centre it on the monitor, keeping the size it remembers if it has one. Centring
+        // rather than clamping matters when a display goes away — an edge-clamped window
+        // lands wherever the old geometry happened to point, which is rarely where you left it.
+        let w = min(remembered?.w ?? usable.w / 2.0, usable.w)
+        let h = min(remembered?.h ?? usable.h / 2.0, usable.h)
+        return Box(x: usable.minX + (usable.w - w) / 2.0,
+                   y: usable.minY + (usable.h - h) / 2.0,
                    w: w, h: h).rounded()
     }
 
