@@ -12,6 +12,7 @@ final class Coordinator: WindowTrackerDelegate {
     private let tracker = WindowTracker()
     private let hotkeys = HotkeyManager()
     private let border = BorderOverlay()
+    private let drag = DragMonitor()
     private let status = StatusItem()
     private var watcher: ConfigWatcher?
 
@@ -58,6 +59,7 @@ final class Coordinator: WindowTrackerDelegate {
         watcher?.start()
 
         hotkeys.onTrigger = { [weak self] binding in self?.dispatch(binding.command) }
+        drag.onEnd = { [weak self] in self?.updateBorder() }
 
         guard waitForAccessibility() else {
             Log.error("no Accessibility permission — hotkeys are live but windows cannot be moved. "
@@ -239,6 +241,8 @@ final class Coordinator: WindowTrackerDelegate {
     /// snap-back when a window is dragged out of its tile.
     func windowFrameChangedExternally(_ id: WindowID) {
         guard let window = tracker.window(id), !window.isStashed else { return }
+        // A move the user is making by hand hides the border until they let go; see DragMonitor.
+        if id == workspaces.focusedWindow { drag.noteExternalFrameChange() }
 
         if workspaces.isFloating(id) {
             workspaces.floatingFrames[id] = window.element.frame
@@ -312,6 +316,7 @@ final class Coordinator: WindowTrackerDelegate {
 
     private func updateBorder() {
         guard config.border.enabled,
+              !drag.isDragging,
               let focused = workspaces.focusedWindow,
               let window = tracker.window(focused),
               !window.isStashed
