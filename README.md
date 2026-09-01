@@ -223,6 +223,15 @@ menu bar item's tooltip — a typo can never leave you without a keyboard. See
 Binding specs parse in both spellings, so you can paste from an AeroSpace config or an Omarchy
 one: `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
+`editconfig`, `reload` and `quit` are bound in code as well as in the file — `SUPER`+`,`,
+`SUPER`+`SHIFT`+`R` and `SUPER`+`SHIFT`+`Q` — so the ways out exist whether or not your config
+mentions them. Your config is never rewritten once it is there, so a binding introduced after you
+first ran toe would otherwise never reach you: that is how the menu bar item losing its menu left
+anyone upgrading with no way to quit but `pkill`. A fallback applies only when the command is
+bound nowhere, so rebinding `quit` keeps your key and does not also collect the default, and a
+fallback whose own combination you have already used for something else is dropped rather than
+registered on top of yours.
+
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
 `reload`, `editconfig`, `quit`.
