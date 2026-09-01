@@ -717,6 +717,26 @@ h.test("TOML errors carry a line number") { t in
     }
 }
 
+h.test("deeply nested values are capped instead of overflowing the stack") { t in
+    let deep = 60
+    let nested = try TOML.parse("a = " + String(repeating: "[", count: deep) + String(repeating: "]", count: deep))
+    t.equal(nested["a"] != nil, true, "\(deep) levels still parse")
+
+    do {
+        _ = try TOML.parse("a = " + String(repeating: "[", count: 100_000))
+        t.expect(false, "should have thrown")
+    } catch let e as TOMLError {
+        t.equal(e.message.contains("nested more than"), true, "arrays report the depth limit")
+    }
+
+    do {
+        _ = try TOML.parse("a = " + String(repeating: "{ b = ", count: 100_000))
+        t.expect(false, "should have thrown")
+    } catch let e as TOMLError {
+        t.equal(e.message.contains("nested more than"), true, "inline tables report it too")
+    }
+}
+
 h.test("float rules match by bundle id and title") { t in
     t.equal(FloatRule(app: "com.apple.systempreferences").matches(bundleID: "com.apple.systempreferences", title: "General"), true, "exact bundle id")
     t.equal(FloatRule(app: "com.apple.*").matches(bundleID: "com.apple.finder", title: nil), true, "wildcard suffix")
