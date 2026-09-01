@@ -15,7 +15,7 @@ cask "toe" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
   depends_on arch: :arm64
 
   app "Toe.app"
@@ -39,7 +39,7 @@ cask "toe" do
       invisible. If macOS refuses to open the app, clear the quarantine attribute by hand:
         xattr -dr com.apple.quarantine /Applications/Toe.app
 
-      To start toe at login, see "Start at login" at #{homepage}
+      To start toe at login, see "Start at login" at #{cask.homepage}
     EOS
   end
 end
