@@ -29,14 +29,14 @@ cask "toe" do
     "~/Library/Saved Application State/com.clifmeister.toe.savedState",
   ]
 
-  # The upgrade paragraph below is for the 0.2.0 → Developer ID switchover only. Drop it a
-  # release or two after 0.3.0, once nobody is upgrading across that boundary any more.
+  # The upgrade paragraph below is for the 0.3.0 → Developer ID switchover only. Drop it a
+  # release or two after 0.4.0, once nobody is upgrading across that boundary any more.
   caveats do
     <<~EOS
       Grant toe Accessibility before it can manage windows:
         System Settings → Privacy & Security → Accessibility
 
-      Upgrading from 0.2.0 or earlier? toe is now signed with an Apple Developer ID and
+      Upgrading from 0.3.0 or earlier? toe is now signed with an Apple Developer ID and
       notarized, where it used to carry a self-signed certificate. macOS keys Accessibility
       to the signature, so it sees this as a different app: remove the old toe entry from the
       Accessibility list, then add the new one. One time only — later upgrades keep the grant.
