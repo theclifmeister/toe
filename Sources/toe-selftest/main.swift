@@ -864,4 +864,18 @@ h.test("clicking the strip picks the workspace under the pointer") { t in
     t.equal(WorkspaceStrip.hit(x: 30, widths: [], gap: 7, buttonWidth: 60), nil, "no items, no hit")
 }
 
+// MARK: - The quick menu
+h.test("RGBA parses the spellings Hyprland writes") { t in
+    t.equal(RGBA.parse(hex: "#33ccffee"), .some(RGBA(r: 0x33 / 255, g: 0xcc / 255,
+                                                     b: 0xff / 255, a: 0xee / 255)),
+            "#RRGGBBAA, Hyprland's rgba() ordering")
+    t.equal(RGBA.parse(hex: "#33ccff")?.a, .some(1.0), "#RRGGBB is opaque")
+    t.equal(RGBA.parse(hex: "0x33ccff"), RGBA.parse(hex: "#33ccff"), "0x is accepted too")
+    t.equal(RGBA.parse(hex: "  #33CCFF  "), RGBA.parse(hex: "#33ccff"),
+            "as is whitespace and upper case")
+    t.expect(RGBA.parse(hex: "#33cc") == nil, "a wrong-length value is nil, not a guess")
+    t.expect(RGBA.parse(hex: "#zzzzzz") == nil, "and so is a non-hex one")
+    t.equal(RGBA.parse(hex: "#33ccffee")?.withAlpha(0.18).a, .some(0.18), "alpha can be replaced")
+}
+
 exit(h.report())

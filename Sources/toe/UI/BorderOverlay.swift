@@ -7,11 +7,7 @@ import ToeCore
 final class BorderOverlay {
 
     private let panel: NSPanel
-    private let gradient = CAGradientLayer()
-    /// The gradient's mask. A plain CALayer, not a CAShapeLayer: only CALayer draws macOS's
-    /// continuous-curvature corners, and a mask masks by whatever alpha it renders — so a layer
-    /// with no background and a white border is exactly the band we want.
-    private let band = CALayer()
+    private let band = GradientBand()
     private var config = BorderConfig()
 
     /// Where the border sits in the window stack.
@@ -28,6 +24,10 @@ final class BorderOverlay {
         /// window level decides the order regardless — but the ordinary level arrives at the
         /// same place anyway: toe is a background app, so a normal-level panel lands directly
         /// beneath the frontmost application's window, which is the one in the user's hand.
+        ///
+        /// That reasoning holds only while toe is not itself the frontmost app. The quick menu
+        /// activates toe, which would break it — so the border is hidden outright for as long as
+        /// that panel is open, and a drag cannot be in flight while it is.
         case behindFrontmost
 
         var level: NSWindow.Level { self == .aboveEverything ? .floating : .normal }
@@ -48,11 +48,7 @@ final class BorderOverlay {
 
         let view = NSView(frame: .zero)
         view.wantsLayer = true
-        view.layer?.addSublayer(gradient)
-        gradient.mask = band
-        band.backgroundColor = nil                  // the middle stays transparent
-        band.borderColor = NSColor.white.cgColor    // mask alpha only; the colour is the gradient's
-        band.cornerCurve = .continuous              // macOS's squircle, not a circular arc
+        view.layer?.addSublayer(band.layer)
         panel.contentView = view
 
         // Resolves the system corner radius here, on the main thread, and records it once.
@@ -61,12 +57,7 @@ final class BorderOverlay {
 
     func apply(_ newConfig: BorderConfig) {
         config = newConfig
-        gradient.colors = [Self.color(newConfig.activeStart), Self.color(newConfig.activeEnd)]
-        // Hyprland measures the gradient angle counter-clockwise from "left to right".
-        let radians = newConfig.angle * .pi / 180
-        let dx = cos(radians) / 2, dy = sin(radians) / 2
-        gradient.startPoint = CGPoint(x: 0.5 - dx, y: 0.5 - dy)
-        gradient.endPoint = CGPoint(x: 0.5 + dx, y: 0.5 + dy)
+        band.apply(newConfig)
         if !newConfig.enabled { hide() }
         // The band's width and radius move together and depend on the window, so both are set
         // in show() rather than here.
@@ -90,18 +81,12 @@ final class BorderOverlay {
         panel.setFrame(rect, display: false)
         let bounds = CGRect(origin: .zero, size: rect.size)
         panel.contentView?.frame = bounds
-        gradient.frame = bounds
-        // CALayer.borderWidth draws inside the bounds, unlike a CAShapeLayer stroke, so the band
-        // fills the whole outset with no half-line-width inset. Clearing the window's radius by
-        // the band width is what lands the band's inner edge on the window's own corner.
-        band.frame = bounds
-        band.borderWidth = w
-        band.cornerRadius = BorderGeometry.outerRadius(inner: windowRadius, width: w)
-        // A mask rasterises at its own contentsScale, which defaults to 1 — without this the
-        // border is soft on Retina. Re-read every time: the panel can change display.
-        let scale = panel.backingScaleFactor
-        if gradient.contentsScale != scale { gradient.contentsScale = scale }
-        if band.contentsScale != scale { band.contentsScale = scale }
+        // Clearing the window's radius by the band width is what lands the band's inner edge on
+        // the window's own corner.
+        band.layout(in: bounds,
+                    width: w,
+                    radius: BorderGeometry.outerRadius(inner: windowRadius, width: w),
+                    scale: panel.backingScaleFactor)
         CATransaction.commit()
 
         // Re-ordered on every show, not just when the depth changes: `behindFrontmost` is a
@@ -113,21 +98,5 @@ final class BorderOverlay {
 
     func hide() {
         panel.orderOut(nil)
-    }
-
-    /// Parses `#RRGGBB` and `#RRGGBBAA` (Hyprland's `rgba()` ordering).
-    private static func color(_ hex: String) -> CGColor {
-        var text = hex.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("#") { text.removeFirst() }
-        if text.hasPrefix("0x") { text.removeFirst(2) }
-        guard text.count == 6 || text.count == 8, let value = UInt64(text, radix: 16) else {
-            return NSColor.systemBlue.cgColor
-        }
-        let hasAlpha = text.count == 8
-        let r = Double((value >> (hasAlpha ? 24 : 16)) & 0xFF) / 255
-        let g = Double((value >> (hasAlpha ? 16 : 8)) & 0xFF) / 255
-        let b = Double((value >> (hasAlpha ? 8 : 0)) & 0xFF) / 255
-        let a = hasAlpha ? Double(value & 0xFF) / 255 : 1
-        return CGColor(red: r, green: g, blue: b, alpha: a)
     }
 }
