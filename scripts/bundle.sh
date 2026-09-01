@@ -17,6 +17,9 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/toe"
 cp "$root/Resources/Info.plist" "$app/Contents/Info.plist"
+# Info.plist's CFBundleIconFile names this. Copied before codesign below, so the signature
+# covers it — otherwise `codesign --verify --deep --strict` in the release workflow fails.
+cp "$root/Resources/Toe.icns" "$app/Contents/Resources/Toe.icns"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 
 # Releases stamp the tag's version into the bundle. Left alone, the committed Info.plist
