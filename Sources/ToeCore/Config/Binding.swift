@@ -6,7 +6,7 @@ public struct Binding: Equatable {
     public let keyCode: UInt32
     public let keyName: String
     public let command: Command
-    /// The binding string exactly as written in the config, for error messages and the menu.
+    /// The binding string exactly as written in the config, for error messages.
     public let source: String
 
     public var describedShortcut: String {
