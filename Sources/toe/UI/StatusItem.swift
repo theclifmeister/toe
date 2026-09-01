@@ -20,10 +20,6 @@ struct WorkspaceSummary {
     let apps: [AppSummary]
 
     var isEmpty: Bool { apps.isEmpty }
-
-    var stripState: WorkspaceStrip.State {
-        .init(index: index, isFocused: isFocused, isVisible: isVisible, isEmpty: isEmpty)
-    }
 }
 
 /// The menu bar item. toe is an `LSUIElement`, so this is its only visible surface.
@@ -87,9 +83,10 @@ final class StatusItem: NSObject, NSMenuDelegate {
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
-    /// Cheap: only the title strip is recomputed. The menu rebuilds itself when opened.
-    func update(workspaces: [WorkspaceSummary], warnings: [String], accessibilityGranted: Bool,
-                showMonitorNames: Bool) {
+    /// Cheap: only the title strip is recomputed, from the little the strip reads. The menu
+    /// rebuilds itself from `workspaceProvider` when opened.
+    func update(workspaces: [WorkspaceStrip.State], warnings: [String],
+                accessibilityGranted: Bool, showMonitorNames: Bool) {
         self.warnings = warnings
         self.accessibilityGranted = accessibilityGranted
         self.showMonitorNames = showMonitorNames
@@ -106,7 +103,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
 
     // MARK: - The workspace strip
 
-    private func title(for workspaces: [WorkspaceSummary]) -> NSAttributedString {
+    private func title(for workspaces: [WorkspaceStrip.State]) -> NSAttributedString {
         stripItems = []
         stripWidths = []
 
@@ -116,8 +113,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
             ])
         }
 
-        let items = WorkspaceStrip.items(for: workspaces.map(\.stripState),
-                                         persistent: persistentWorkspaces)
+        let items = WorkspaceStrip.items(for: workspaces, persistent: persistentWorkspaces)
         guard !items.isEmpty else {
             return NSAttributedString(string: "toe", attributes: [.font: font])
         }

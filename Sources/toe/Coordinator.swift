@@ -175,14 +175,29 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func refreshStatus() {
-        status.update(workspaces: workspaceSummaries(),
+        status.update(workspaces: workspaceStates(),
                       warnings: warnings,
                       accessibilityGranted: AXIsProcessTrusted(),
                       showMonitorNames: workspaces.monitors.count > 1)
     }
 
-    /// What the menu bar shows: every workspace, the applications on it, and which display
-    /// (if any) is currently showing it.
+    /// What the strip in the menu bar title draws. This runs on every focus change and every
+    /// adopted window, so it stays to what the strip actually reads — no window lists, no app
+    /// names, and above all no icons. Those belong to `workspaceSummaries()`, which the menu
+    /// asks for only when it opens.
+    private func workspaceStates() -> [WorkspaceStrip.State] {
+        let focusedIndex = workspaces.focusedWorkspaceIndex
+
+        return (1...WorkspaceManager.workspaceCount).map { index in
+            WorkspaceStrip.State(index: index,
+                                 isFocused: index == focusedIndex,
+                                 isVisible: workspaces.monitorShowing(workspace: index) != nil,
+                                 isEmpty: workspaces.isEmpty(workspace: index))
+        }
+    }
+
+    /// What the menu shows: every workspace, the applications on it, and which display
+    /// (if any) is currently showing it. Only built while the menu is opening.
     private func workspaceSummaries() -> [WorkspaceSummary] {
         let focusedIndex = workspaces.focusedWorkspaceIndex
 
