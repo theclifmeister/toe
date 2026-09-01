@@ -24,6 +24,34 @@ final class QuickMenuView: NSView {
     private let matchFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
     private let detailFont = NSFont.systemFont(ofSize: 12, weight: .regular)
 
+    // MARK: - Palette
+    //
+    // Spelled out rather than taken from `NSColor.labelColor` and friends, because this view is a
+    // subview of an `NSVisualEffectView` and that imposes a *vibrant* appearance on everything
+    // inside it. The semantic colours mean different things there: under `darkAqua` they are white
+    // with alpha, but under `vibrantDark` they are opaque greys — `separatorColor` resolves to
+    // #232323 and `tertiaryLabelColor` to #404040. Drawn over a dark HUD blur that separator is a
+    // hard black rule and that text is invisible, which is exactly what they looked like.
+    //
+    // `bestMatch` is asked of the *effective* appearance rather than the system one on purpose: the
+    // vibrant appearance the effect view hands down already encodes which way the material itself
+    // went, so this stays right if the material ever renders light.
+
+    private var onDarkMaterial: Bool {
+        effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    /// The one ink this surface has, at a given strength. The ladder is `darkAqua`'s own.
+    private func ink(_ alpha: CGFloat) -> NSColor {
+        (onDarkMaterial ? NSColor.white : NSColor.black).withAlphaComponent(alpha)
+    }
+
+    private var primaryInk: CGFloat { 0.92 }      // a row you are meant to read
+    private var secondaryInk: CGFloat { 0.50 }    // its trailing hint, and a row you cannot pick
+    private var placeholderInk: CGFloat { 0.45 }
+    private var hintInk: CGFloat { 0.35 }         // the scroll dots
+    private var separatorInk: CGFloat { 0.12 }
+
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }        // top-down, so row 0 is the first one drawn
 
@@ -56,10 +84,11 @@ final class QuickMenuView: NSView {
                                      width: bounds.width - 2 * pad,
                                      height: QuickMenuGeometry.promptHeight))
 
-        // The hairline between the prompt and the list.
-        NSColor.separatorColor.withAlphaComponent(0.6).setFill()
-        NSRect(x: 0, y: QuickMenuGeometry.promptHeight,
-               width: bounds.width, height: QuickMenuGeometry.separatorHeight).fill()
+        // The hairline between the prompt and the list, inset to the rows so it lines up with the
+        // selection highlight instead of running edge to edge into the gradient band.
+        ink(separatorInk).setFill()
+        NSRect(x: pad, y: QuickMenuGeometry.promptHeight,
+               width: bounds.width - 2 * pad, height: QuickMenuGeometry.separatorHeight).fill()
 
         let rows = state.rows
         var y = QuickMenuGeometry.promptHeight + QuickMenuGeometry.separatorHeight + pad
@@ -82,17 +111,21 @@ final class QuickMenuView: NSView {
     private func drawPrompt(_ state: MenuState, in rect: NSRect) {
         // Where you are, as a trail — "Go › Style › Theme" — because a filtered list gives no other
         // clue how deep you have gone.
-        let trail = state.breadcrumb.dropFirst().joined(separator: " › ")
+        // A level whose own title already trails off — "Move window to…" — would otherwise read
+        // "Move window to……" once this adds its own.
+        let trail = state.breadcrumb.dropFirst()
+            .map { $0.hasSuffix("…") ? String($0.dropLast()) : $0 }
+            .joined(separator: " › ")
         let placeholder = trail.isEmpty ? state.prompt : "\(state.breadcrumb[0]) › \(trail)…"
 
         let text: NSAttributedString
         if state.query.isEmpty {
             text = NSAttributedString(string: placeholder, attributes: [
-                .font: promptFont, .foregroundColor: NSColor.placeholderTextColor,
+                .font: promptFont, .foregroundColor: ink(placeholderInk),
             ])
         } else {
             text = NSAttributedString(string: state.query, attributes: [
-                .font: promptFont, .foregroundColor: NSColor.labelColor,
+                .font: promptFont, .foregroundColor: ink(primaryInk),
             ])
         }
         let size = text.size()
@@ -108,7 +141,7 @@ final class QuickMenuView: NSView {
 
     private func drawNoMatches(at y: CGFloat) {
         let text = NSAttributedString(string: "No matches", attributes: [
-            .font: titleFont, .foregroundColor: NSColor.tertiaryLabelColor,
+            .font: titleFont, .foregroundColor: ink(secondaryInk),
         ])
         text.draw(at: NSPoint(x: QuickMenuGeometry.padding + 4,
                               y: y + (QuickMenuGeometry.rowHeight - text.size().height) / 2))
@@ -158,7 +191,7 @@ final class QuickMenuView: NSView {
             rightEdge -= side
             drawTemplate(chevron,
                          in: NSRect(x: rightEdge, y: rect.midY - side / 2, width: side, height: side),
-                         tint: NSColor.tertiaryLabelColor)
+                         tint: ink(secondaryInk))
             rightEdge -= 6
         }
 
@@ -220,7 +253,7 @@ final class QuickMenuView: NSView {
         paragraph.alignment = .right
         return NSAttributedString(string: detail, attributes: [
             .font: detailFont,
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .foregroundColor: ink(secondaryInk),
             .paragraphStyle: paragraph,
         ])
     }
@@ -228,7 +261,7 @@ final class QuickMenuView: NSView {
     /// `selected` is not consulted: the highlight is a tinted fill behind unchanged text rather
     /// than an inverted row, which is what keeps a themed accent legible in both appearances.
     private func colour(for entry: MenuEntry, selected: Bool) -> NSColor {
-        entry.isSelectable ? .labelColor : .tertiaryLabelColor
+        entry.isSelectable ? ink(primaryInk) : ink(secondaryInk)
     }
 
     /// A template image drawn in a colour, which `NSImage` will not do on its own.
@@ -243,7 +276,7 @@ final class QuickMenuView: NSView {
 
     /// Faint arrows when the list runs past the window, since there is no scroll bar to say so.
     private func drawScrollHint(rows: Int, first: Int, last: Int) {
-        NSColor.tertiaryLabelColor.setFill()
+        ink(hintInk).setFill()
         let x = bounds.width - QuickMenuGeometry.padding - 3
         if first > 0 {
             NSRect(x: x, y: QuickMenuGeometry.promptHeight + 6, width: 3, height: 3).fill()
