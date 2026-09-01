@@ -50,6 +50,10 @@ public struct MiscConfig: Equatable {
     public var disableExposeShortcuts: Bool = true
     /// `⌘H` takes an application's windows out of the layout with no way to reach them again.
     public var preventHiding: Bool = true
+    /// Whether the layout is written to disk and put back on the next launch. See
+    /// `SessionSnapshot`; off means toe starts from an empty first workspace every time and
+    /// leaves nothing behind in `~/.local/state/toe`.
+    public var restoreSession: Bool = true
     public init() {}
 }
 
@@ -227,6 +231,13 @@ public struct Config: Equatable {
                     config.misc.preventHiding = v
                 } else {
                     config.warnings.append("misc.prevent_hiding: must be true or false, using \(config.misc.preventHiding)")
+                }
+            }
+            if let raw = m["restore_session"] {
+                if let v = raw.boolValue {
+                    config.misc.restoreSession = v
+                } else {
+                    config.warnings.append("misc.restore_session: must be true or false, using \(config.misc.restoreSession)")
                 }
             }
         }

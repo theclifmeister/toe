@@ -67,6 +67,13 @@ disable_expose_shortcuts = true
 # any workspace. toe puts a hidden application straight back.
 prevent_hiding = true
 
+# Where every window was — its workspace, its place in the tree, every split — is written to
+# ~/.local/state/toe/session.json and put back when toe starts again, so restarting it costs you
+# nothing. Windows are matched on the id the window server gave them, so this is exact rather
+# than a guess; a reboot voids those ids and the file is discarded unread. Set false to start
+# from an empty workspace every time and keep toe off disk.
+restore_session = true
+
 [bar]
 # waybar's persistent-workspaces: Omarchy keeps slots 1-5 on the bar even when they are
 # empty, dimmed. 0 shows only the workspaces in use; 10 always shows all ten.

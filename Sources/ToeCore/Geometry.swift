@@ -11,7 +11,7 @@ public struct Point: Equatable, Hashable, Sendable {
 
 /// An axis-aligned rectangle in Accessibility coordinates: origin top-left of the
 /// primary display, y growing downward. Port of Hyprland's `CBox`.
-public struct Box: Equatable, Hashable, Sendable {
+public struct Box: Equatable, Hashable, Sendable, Codable {
     public var x: Double
     public var y: Double
     public var w: Double

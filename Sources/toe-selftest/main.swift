@@ -698,6 +698,20 @@ h.test("the macOS behaviours toe takes over are configurable") { t in
             "and says so in the menu bar")
 }
 
+h.test("restoring the layout across a restart is configurable") { t in
+    let absent = try Config.parse("[general]\ngaps_in = 5\n")
+    t.equal(absent.misc.restoreSession, true, "on by default: a restart should cost you nothing")
+
+    let off = try Config.parse("[misc]\nrestore_session = false\n")
+    t.equal(off.misc.restoreSession, false, "and can be turned off to keep toe off disk")
+    t.equal(off.warnings, [], "no warnings")
+
+    let bad = try Config.parse("[misc]\nrestore_session = \"yes\"\n")
+    t.equal(bad.misc.restoreSession, true, "a non-boolean keeps the default")
+    t.equal(bad.warnings.contains { $0.contains("misc.restore_session") }, true,
+            "and says so in the menu bar")
+}
+
 h.test("the escape hatches are bound even when the config forgets them") { t in
     func binding(_ c: Config, _ command: Command) -> Binding? {
         c.bindings.first { $0.command == command }
@@ -907,6 +921,159 @@ h.test("hidden windows park on the monitor's bottom corner") { t in
     // The right-hand monitor itself still hides to its own bottom-right.
     let r = Stash.origin(windowSize: Point(x: 800, y: 600), on: right, monitors: [single, right])
     t.equal(r, Point(x: 3431, y: 1079), "no neighbour further right")
+}
+
+// MARK: - Session
+
+/// Round-trips a snapshot through JSON, so the tests below exercise what actually lands on
+/// disk rather than an in-memory copy of the structs.
+func reencode(_ snapshot: SessionSnapshot) throws -> SessionSnapshot {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try decoder.decode(SessionSnapshot.self, from: encoder.encode(snapshot))
+}
+
+h.test("a restart puts every window back in its own tile") { t in
+    let wm = WorkspaceManager()
+    wm.options = omarchyLayout().options
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.switchTo(workspace: 1)
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3); wm.addWindow(4)
+    // Not the shape a plain re-insertion would rebuild: a flipped split and an uneven ratio.
+    wm.workspaces[1]?.layout.toggleSplit(4)
+    wm.workspaces[1]?.layout.alterSplitRatio(3, by: 0.4)
+    let before = wm.render().frames
+
+    let snapshot = try reencode(wm.snapshot(boot: "b", monitorKey: { "monitor-\($0)" }))
+
+    let restored = WorkspaceManager()
+    restored.options = wm.options
+    restored.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    restored.restore(snapshot, monitorID: { $0 == "monitor-1" ? 1 : nil })
+
+    t.equal(restored.render().frames, before, "every tile is where it was, splits and ratios included")
+    t.equal(restored.focusedWindow, wm.focusedWindow, "and the same window still has focus")
+}
+
+h.test("a restart keeps windows on their own workspaces and monitors") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let monitors = [Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)]
+    let wm = WorkspaceManager()
+    wm.setMonitors(monitors)
+
+    wm.switchTo(workspace: 3)
+    wm.addWindow(1); wm.addWindow(2)
+    wm.switchTo(workspace: 7)              // hidden once we leave it
+    wm.addWindow(3)
+    wm.switchTo(workspace: 3)
+    wm.toggleFloating(2)
+    wm.floatingFrames[2] = box(100, 100, 400, 300)
+
+    let keys = { (id: UInt32) -> String? in "monitor-\(id)" }
+    let snapshot = try reencode(wm.snapshot(boot: "b", monitorKey: keys))
+
+    let restored = WorkspaceManager()
+    restored.setMonitors(monitors)
+    restored.restore(snapshot, monitorID: { UInt32($0.dropFirst("monitor-".count)) })
+
+    t.equal(restored.workspaceIndex(of: 1), 3, "w1 is back on workspace 3")
+    t.equal(restored.workspaceIndex(of: 3), 7, "w3 is back on the workspace nothing is showing")
+    t.equal(restored.isFloating(2), true, "w2 is still floating")
+    t.equalBox(restored.render().floating[2], box(100, 100, 400, 300), "at the frame it was left at")
+    t.equal(restored.render().stashed, [3], "and the hidden workspace is still hidden")
+    t.equal(restored.activeWorkspace, wm.activeWorkspace, "each monitor shows what it showed")
+    t.equal(restored.focusedMonitorID, wm.focusedMonitorID, "on the monitor that had focus")
+}
+
+h.test("windows that never came back are dropped, and the tree closes over them") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
+
+    let snapshot = try reencode(wm.snapshot(boot: "b", monitorKey: { "m\($0)" }))
+    let restored = WorkspaceManager()
+    restored.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    restored.restore(snapshot, monitorID: { _ in 1 })
+
+    // w2's application was quit while toe was down; w1 and w3 are still running.
+    t.equal(restored.reap(keeping: [1, 3]), true, "something was dropped")
+    t.equal(restored.workspaceIndex(of: 2), nil, "w2 is gone")
+    t.equal(restored.focusHistory.contains(2), false, "and out of the focus history")
+
+    // Exactly the layout you would have had if w2 had closed while toe was watching.
+    let live = WorkspaceManager()
+    live.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    live.addWindow(1); live.addWindow(2); live.addWindow(3)
+    live.removeWindow(2)
+    t.equal(restored.render().frames, live.render().frames, "the tree closed over the gap the usual way")
+
+    t.equal(restored.reap(keeping: [1, 3]), false, "nothing left to drop the second time")
+}
+
+h.test("a snapshot restored onto a different display reflows into it") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    let snapshot = try reencode(wm.snapshot(boot: "b", monitorKey: { "m\($0)" }))
+
+    // The laptop is now on an external display, and the one the snapshot names is gone.
+    let wide = box(0, 0, 3440, 1400)
+    let restored = WorkspaceManager()
+    restored.setMonitors([Monitor(id: 9, frame: wide, usable: wide)])
+    restored.restore(snapshot, monitorID: { _ in nil })
+
+    t.equal(restored.workspaceIndex(of: 1), restored.focusedWorkspaceIndex, "the workspace came home to the focused monitor")
+    t.equalBox(restored.render().frames[1], box(10, 10, 1705, 1380), "w1 fills half the new display")
+    t.equalBox(restored.render().frames[2], box(1725, 10, 1705, 1380), "w2 the other half")
+}
+
+h.test("a damaged snapshot is repaired rather than trusted") { t in
+    // A leaf naming a window that already has one, a split that has lost a side, and a
+    // nesting depth no real tree reaches. None of it may produce a layout toe cannot walk.
+    var deep = NodeSnapshot(window: 5)
+    for _ in 0..<200 {
+        deep = NodeSnapshot(splitTop: false, splitRatio: 1.0, children: [deep, NodeSnapshot(window: 6)])
+    }
+    let root = NodeSnapshot(children: [
+        NodeSnapshot(children: [NodeSnapshot(window: 1), NodeSnapshot(window: 1)]),  // repeated
+        NodeSnapshot(children: [NodeSnapshot(window: 2)]),                           // one side
+    ])
+
+    let layout = omarchyLayout()
+    layout.restore(LayoutSnapshot(root: root, order: [1, 1, 2, 99]))
+    t.equal(Set(layout.windowIDs), [1, 2], "the repeat is dropped, the half split collapses")
+    t.equal(layout.windowIDs.count, 2, "and no window is in the tree twice")
+    t.equalBox(layout.idealBox(of: 1), box(0, 0, 756, 982), "w1 keeps the left half")
+    t.equalBox(layout.idealBox(of: 2), box(756, 0, 756, 982), "w2 takes what is left of the right")
+
+    let deepLayout = omarchyLayout()
+    deepLayout.restore(LayoutSnapshot(root: deep, order: []))
+    t.equal(deepLayout.windowIDs.isEmpty, false, "a too-deep tree still restores what it can")
+    t.equal(deepLayout.windowIDs.count <= NodeSnapshot.maxDepth + 1, true, "and stops descending at the cap")
+
+    // The salvaged tree behaves like any other: a new window splits it, and removal collapses it.
+    layout.insert(3, anchor: 1)
+    t.equalBox(layout.idealBox(of: 3), box(0, 491, 756, 491), "an insert lands where it should")
+    layout.remove(3)
+    t.equalBox(layout.idealBox(of: 1), box(0, 0, 756, 982), "and removing it gives the space back")
+}
+
+h.test("a snapshot names no monitor it cannot name durably") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1)
+
+    // Whatever the app layer uses to name a display can fail — a monitor pulled between the
+    // render and the write. A workspace with no durable home is left out rather than saved
+    // against a display id that means nothing next time.
+    let snapshot = wm.snapshot(boot: "b", monitorKey: { _ in nil })
+    t.equal(snapshot.workspaces.isEmpty, true, "no workspaces written")
+    t.equal(snapshot.active.isEmpty, true, "and no monitor claims one")
+    t.equal(snapshot.focusedMonitor, nil, "nor is there a focused monitor to point at")
 }
 
 // MARK: - Menu bar
