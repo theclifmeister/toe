@@ -1,4 +1,4 @@
-# toe — The Omarchy Experience
+# Toe — The Omarchy Experience
 
 A small native macOS window manager that reproduces [Omarchy](https://omarchy.org)'s
 window management: Hyprland's **dwindle** layout, Omarchy's key bindings, ten workspaces,
