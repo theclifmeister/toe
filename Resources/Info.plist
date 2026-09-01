@@ -22,7 +22,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>toe — The Omarchy Experience</string>
+    <string>Copyright © 2026 Clifford van Slimming. MIT licensed.</string>
     <!-- Only needed because the default config's SUPER+ENTER bindings drive Ghostty and the
          browser through AppleScript. toe itself needs nothing but Accessibility. -->
     <key>NSAppleEventsUsageDescription</key>
