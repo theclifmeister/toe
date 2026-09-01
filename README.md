@@ -31,6 +31,32 @@ leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab untouched. Configurable.
 The focused window gets a gradient border, and everything is driven by a hot-reloaded config
 at `~/.config/toe/toe.toml`.
 
+## The menu bar
+
+The status item is the workspace strip, in the style of waybar: occupied workspaces only, with
+the focused one picked out in bold. Workspaces showing on another display are bold but dimmed,
+and an empty workspace appears only while you are on it.
+
+```
+1 3 7
+```
+
+Opening it breaks each workspace down into the applications living there:
+
+```
+Workspace 1  ✓
+    Ghostty  ×2
+    Safari  ×2
+Workspace 4
+    Google Chrome
+────────────────
+Config loaded
+```
+
+Rows are live: click a workspace to switch to it, or an application to focus its window —
+including one on a hidden workspace, which brings that workspace forward first. The list is
+built when the menu opens, so nothing is maintained while it is closed.
+
 ## Install
 
 ```sh

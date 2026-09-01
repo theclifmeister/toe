@@ -28,6 +28,19 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - Start-up
 
     func start() {
+        status.workspaceProvider = { [weak self] in self?.workspaceSummaries() ?? [] }
+        status.onSelectWorkspace = { [weak self] index in
+            self?.dispatch(.workspace(.index(index)))
+        }
+        status.onSelectWindow = { [weak self] id in
+            guard let self else { return }
+            // Focusing a window on a hidden workspace should bring that workspace forward.
+            if let index = self.workspaces.workspaceIndex(of: id),
+               index != self.workspaces.focusedWorkspaceIndex {
+                self.dispatch(.workspace(.index(index)))
+            }
+            self.focus(id)
+        }
         status.onReload = { [weak self] in self?.loadConfig() }
         status.onOpenConfig = { NSWorkspace.shared.open(Coordinator.configURL) }
         status.onOpenAccessibility = { Self.openAccessibilitySettings() }
@@ -128,9 +141,42 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func refreshStatus() {
-        status.update(workspace: workspaces.focusedWorkspaceIndex,
+        status.update(workspaces: workspaceSummaries(),
                       warnings: warnings,
-                      accessibilityGranted: AXIsProcessTrusted())
+                      accessibilityGranted: AXIsProcessTrusted(),
+                      showMonitorNames: workspaces.monitors.count > 1)
+    }
+
+    /// What the menu bar shows: every workspace, the applications on it, and which display
+    /// (if any) is currently showing it.
+    private func workspaceSummaries() -> [WorkspaceSummary] {
+        let focusedIndex = workspaces.focusedWorkspaceIndex
+
+        return (1...WorkspaceManager.workspaceCount).map { index in
+            let ordered = workspaces.orderedWindows(inWorkspace: index)
+            let groups = AppGrouping.group(ordered) { [weak self] id in
+                self?.tracker.window(id)?.appName
+            }
+            let apps = groups.compactMap { group -> AppSummary? in
+                guard let first = group.windows.first else { return nil }
+                let icon = tracker.window(first)
+                    .flatMap { NSRunningApplication(processIdentifier: $0.pid) }?.icon
+                return AppSummary(name: group.name, windowCount: group.count,
+                                  icon: icon, representativeWindow: first)
+            }
+
+            let showingOn = workspaces.monitorShowing(workspace: index)
+            return WorkspaceSummary(
+                index: index,
+                isFocused: index == focusedIndex,
+                isVisible: showingOn != nil,
+                monitorName: showingOn.map { Self.monitorName(for: $0) },
+                apps: apps)
+        }
+    }
+
+    private static func monitorName(for displayID: UInt32) -> String {
+        NSScreen.screens.first { $0.displayID == displayID }?.localizedName ?? "Display \(displayID)"
     }
 
     // MARK: - Monitors

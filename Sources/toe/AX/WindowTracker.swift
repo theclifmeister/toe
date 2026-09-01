@@ -7,17 +7,20 @@ final class ManagedWindow {
     let element: AXUIElement
     let pid: pid_t
     let bundleID: String?
+    let appName: String?
     var title: String?
     /// Where the window sat before it was stashed off-screen, so floating windows come back
     /// to exactly where they were.
     var frameBeforeStash: Box?
     var isStashed = false
 
-    init(id: CGWindowID, element: AXUIElement, pid: pid_t, bundleID: String?, title: String?) {
+    init(id: CGWindowID, element: AXUIElement, pid: pid_t,
+         bundleID: String?, appName: String?, title: String?) {
         self.id = id
         self.element = element
         self.pid = pid
         self.bundleID = bundleID
+        self.appName = appName
         self.title = title
     }
 }
@@ -135,7 +138,8 @@ final class WindowTracker {
 
         let app = NSRunningApplication(processIdentifier: pid)
         let window = ManagedWindow(id: id, element: element, pid: pid,
-                                   bundleID: app?.bundleIdentifier, title: element.title)
+                                   bundleID: app?.bundleIdentifier,
+                                   appName: app?.localizedName, title: element.title)
         windows[id] = window
 
         if let observer = observers[pid] {

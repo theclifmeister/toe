@@ -371,4 +371,46 @@ h.test("hidden windows park on the monitor's bottom corner") { t in
     t.equal(r, Point(x: 3431, y: 1079), "no neighbour further right")
 }
 
+// MARK: - Menu bar summaries
+
+h.test("windows are listed in tree order, floating last") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
+    wm.addWindow(9, floating: true)
+    wm.addWindow(7, floating: true)
+
+    t.equal(wm.orderedWindows(inWorkspace: 1), [1, 2, 3, 7, 9],
+            "tiled left-to-right depth-first, then floating")
+    t.equal(wm.orderedWindows(inWorkspace: 4), [], "an untouched workspace is empty")
+}
+
+h.test("windows group by application in first-appearance order") { t in
+    let names: [WindowID: String] = [1: "Ghostty", 2: "Google Chrome", 3: "Ghostty",
+                                     4: "Safari", 5: "Google Chrome"]
+    let groups = AppGrouping.group([1, 2, 3, 4, 5]) { names[$0] }
+
+    t.equal(groups.map(\.name), ["Ghostty", "Google Chrome", "Safari"],
+            "ordered by where each app first appears, not alphabetically")
+    t.equal(groups.map(\.count), [2, 2, 1], "windows per app")
+    t.equal(groups.first?.windows, [1, 3], "selecting the row focuses the first window")
+
+    // A window whose application cannot be named is dropped rather than shown blank.
+    t.equal(AppGrouping.group([1, 99]) { names[$0] }.map(\.name), ["Ghostty"], "unnamed windows skipped")
+    t.equal(AppGrouping.group([]) { names[$0] }.isEmpty, true, "no windows, no groups")
+}
+
+h.test("a workspace knows which monitor is showing it") { t in
+    let left = box(0, 0, 1512, 982), right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+    wm.switchTo(workspace: 4)
+    let home = wm.focusedMonitorID
+
+    t.equal(wm.monitorShowing(workspace: 4), home, "workspace 4 is on the focused monitor")
+    t.equal(wm.monitorShowing(workspace: 9), nil, "workspace 9 is not on screen")
+    t.equal(wm.visibleWorkspaceIndices.count, 2, "one visible workspace per monitor")
+}
+
 exit(h.report())

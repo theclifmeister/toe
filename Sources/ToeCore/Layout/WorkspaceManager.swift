@@ -359,3 +359,41 @@ public final class WorkspaceManager {
         return plan
     }
 }
+
+public extension WorkspaceManager {
+
+    /// The windows on a workspace in a stable, meaningful order: tiled windows in tree order
+    /// (left to right, top to bottom), then floating ones.
+    func orderedWindows(inWorkspace index: Int) -> [WindowID] {
+        guard let ws = workspaces[index] else { return [] }
+        return ws.layout.windowIDs + ws.floating.sorted()
+    }
+
+    /// Which monitor, if any, is currently showing this workspace.
+    func monitorShowing(workspace index: Int) -> UInt32? {
+        activeWorkspace.first { $0.value == index }?.key
+    }
+}
+
+/// Collapses a window list into one entry per application, preserving the order the
+/// applications first appear in.
+public enum AppGrouping {
+
+    public struct Group: Equatable {
+        public let name: String
+        public let windows: [WindowID]
+        public var count: Int { windows.count }
+    }
+
+    public static func group(_ windows: [WindowID], name: (WindowID) -> String?) -> [Group] {
+        var order: [String] = []
+        var byName: [String: [WindowID]] = [:]
+
+        for window in windows {
+            guard let appName = name(window) else { continue }
+            if byName[appName] == nil { order.append(appName) }
+            byName[appName, default: []].append(window)
+        }
+        return order.map { Group(name: $0, windows: byName[$0] ?? []) }
+    }
+}
