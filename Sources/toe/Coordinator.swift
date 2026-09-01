@@ -33,6 +33,13 @@ final class Coordinator: WindowTrackerDelegate {
     /// than fought with forever.
     private var corrections: [WindowID: Int] = [:]
     private var focusApplied: WindowID?
+    /// True from the moment a snapshot is restored until the windows it named have had their
+    /// chance to turn up. Saving is suspended meanwhile: a snapshot taken halfway through
+    /// adoption would record a layout missing most of its windows, over the top of the good
+    /// one.
+    private var isSettlingSession = false
+    /// Pending debounced write. See `scheduleSessionSave`.
+    private var sessionSave: DispatchWorkItem?
     /// The window the user has hold of. Its frame is theirs until they let go: toe neither
     /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
     /// to a floating window.
@@ -119,13 +126,16 @@ final class Coordinator: WindowTrackerDelegate {
         tracker.delegate = self
         tracker.floatRules = config.floatRules
         refreshMonitors()
+        restoreSession()
         tracker.start()
+        settleSession()
         // Deliberately here and not in `start()`: a filtering event tap needs the Accessibility
         // grant, and it is refused outright — never retried — without one. This is the first
         // point at which the grant is known to exist, whether it was already there or has just
         // been given, so a first run picks the tap up without a relaunch.
         applyDockSwipeSetting()
         applyMiscSettings()
+        applySessionSetting()
         refreshStatus()
         apply(refocus: false)
         Log.info("managing \(tracker.windows.count) window(s) across \(workspaces.monitors.count) monitor(s)")
@@ -173,6 +183,7 @@ final class Coordinator: WindowTrackerDelegate {
         status.persistentWorkspaces = newConfig.bar.persistentWorkspaces
         applyDockSwipeSetting()
         applyMiscSettings()
+        applySessionSetting()
 
         refreshStatus()
         Log.info("config loaded: \(newConfig.bindings.count) binding(s), \(warnings.count) warning(s)")
@@ -288,11 +299,17 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - WindowTrackerDelegate
 
     func windowAppeared(_ window: ManagedWindow, shouldFloat: Bool) {
-        // Adopt time is the only moment a window's own geometry is known — the first tile
-        // write clobbers it. This is Hyprland's `m_vLastFloatingSize` / `..Position`, and it
-        // is what a window returns to the first time you float it.
-        workspaces.floatingFrames[window.id] = window.element.frame
-        workspaces.addWindow(window.id, floating: shouldFloat)
+        // A window a restored session already placed is left exactly as the snapshot has it:
+        // its workspace, its slot in the tree, and the floating frame it was remembered with,
+        // which is better than the frame it happens to be wearing now — that one is the tile
+        // toe gave it before the restart.
+        if workspaces.workspaceIndex(of: window.id) == nil {
+            // Adopt time is the only moment a window's own geometry is known — the first tile
+            // write clobbers it. This is Hyprland's `m_vLastFloatingSize` / `..Position`, and it
+            // is what a window returns to the first time you float it.
+            workspaces.floatingFrames[window.id] = window.element.frame
+            workspaces.addWindow(window.id, floating: shouldFloat)
+        }
         apply(refocus: false)
         refreshStatus()
     }
@@ -312,6 +329,7 @@ final class Coordinator: WindowTrackerDelegate {
         focusApplied = id
         updateBorder()
         refreshStatus()
+        scheduleSessionSave()
     }
 
     /// Chromium, Electron and the JetBrains IDEs restore their own remembered geometry a beat
@@ -419,6 +437,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         updateBorder()
         refreshStatus()
+        scheduleSessionSave()
     }
 
     private func updateBorder() {
@@ -485,6 +504,9 @@ final class Coordinator: WindowTrackerDelegate {
     /// `applicationWillTerminate` — `NSApp.terminate` and `exit(0)` are both reached from here, so
     /// this is the one teardown path.
     private func shutDown() {
+        // First, and before `unstashEverything` starts moving windows around: this is the one
+        // write that matters, since it is the one a deliberate restart depends on.
+        saveSession()
         unstashEverything()
         // A filtering tap left registered against a callback that is about to go away spins
         // WindowServer, so it is taken down deliberately rather than left to process death.
@@ -502,6 +524,92 @@ final class Coordinator: WindowTrackerDelegate {
                 WindowMover.setFrame(frame, element: window.element, pid: window.pid)
             }
         }
+    }
+
+    // MARK: - Session
+
+    /// Puts back the layout the last run left behind.
+    ///
+    /// Before `tracker.start()`, deliberately: the applications are still running, so their
+    /// windows come back through Accessibility over the second that follows, and the tree has
+    /// to be waiting for them rather than built around them as they arrive. A window the
+    /// snapshot placed is recognised in `windowAppeared` and left exactly where it was.
+    private func restoreSession() {
+        // Held until `settleSession`, whether or not there was anything to restore, so the
+        // first snapshot of a fresh run is not taken mid-adoption either.
+        isSettlingSession = true
+        guard config.misc.restoreSession, let snapshot = SessionStore.load() else { return }
+
+        let byKey = Dictionary(monitorKeys().map { ($0.value, $0.key) },
+                               uniquingKeysWith: { first, _ in first })
+        workspaces.restore(snapshot, monitorID: { byKey[$0] })
+
+        let restored = workspaces.workspaces.values.reduce(0) { $0 + $1.windows.count }
+        Log.info("session restored: \(restored) window(s) across "
+                 + "\(workspaces.workspaces.values.filter { !$0.isEmpty }.count) workspace(s)")
+    }
+
+    /// Clears out whatever the snapshot named that has not turned up.
+    ///
+    /// The tracker sweeps each application at 0.15, 0.4, 0.8 and 1.5 seconds, because apps are
+    /// frequently not AX-ready the instant they launch. Past the last of those, a window still
+    /// missing is one that no longer exists — an application quit while toe was down — and
+    /// dropping it collapses the tree around the gap the way losing it live would have. Until
+    /// then a tile with nothing behind it costs nothing: `apply` skips every id the tracker
+    /// does not know.
+    private func settleSession() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self else { return }
+            self.isSettlingSession = false
+            if self.workspaces.reap(keeping: Set(self.tracker.windows.keys)) {
+                self.apply(refocus: false)
+            }
+            self.saveSession()
+        }
+    }
+
+    /// Debounced, because `apply` runs on every layout change and a focus change is a layout
+    /// change as far as the snapshot is concerned. The write that actually matters is the one
+    /// in `shutDown`; this is the one that covers the ways toe can go away without reaching it
+    /// — a crash, or `kill -9`.
+    private func scheduleSessionSave() {
+        guard isManaging, !isSettlingSession, config.misc.restoreSession else { return }
+        sessionSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.saveSession() }
+        sessionSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+    }
+
+    private func saveSession() {
+        sessionSave?.cancel()
+        sessionSave = nil
+        // Quitting while the session is still settling deliberately writes nothing: the file
+        // already on disk is the good one, and what is in memory right now is half of it.
+        guard isManaging, !isSettlingSession, config.misc.restoreSession else { return }
+
+        let keys = monitorKeys()
+        SessionStore.save(workspaces.snapshot(boot: SessionStore.bootToken,
+                                              monitorKey: { keys[$0] }))
+    }
+
+    /// Turning the session off should not leave a stale layout on disk that toe will never
+    /// read again.
+    private func applySessionSetting() {
+        guard !config.misc.restoreSession else { return }
+        sessionSave?.cancel()
+        sessionSave = nil
+        SessionStore.clear()
+    }
+
+    /// A durable name for each live display, asked again every time rather than cached:
+    /// `CGDirectDisplayID` is handed out per connection, so the mapping changes under us
+    /// whenever a monitor is plugged or unplugged.
+    private func monitorKeys() -> [UInt32: String] {
+        var out: [UInt32: String] = [:]
+        for monitor in workspaces.monitors {
+            if let key = SessionStore.monitorKey(monitor.id) { out[monitor.id] = key }
+        }
+        return out
     }
 
     // MARK: - Dispatch

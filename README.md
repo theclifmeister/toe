@@ -149,6 +149,34 @@ app hiding itself, and `⌘⌥H` hiding everything else at once. The window is g
 the notification arrives after the fact rather than instead of it.
 `misc.prevent_hiding = false` turns it off.
 
+**Restarting.** Quitting toe used to cost you the whole layout — every workspace flattened, every
+window back on one screen. It no longer does: where each window was, the workspace it was on, its
+slot in the dwindle tree, every split orientation and ratio, and the frames floating windows
+return to are written to `~/.local/state/toe/session.json` and put back on the next launch. So
+`make run`, a crash, an upgrade and `SUPER+SHIFT+Q` followed by a relaunch all leave the screen
+exactly as they found it.
+
+Windows are matched on their `CGWindowID`, which the window server issues when a window opens and
+keeps for as long as it exists, whatever happens to toe — so this is exact, with no guessing from
+app names or window titles. A reboot renumbers everything, and a stale snapshot would then scatter
+windows into workspaces belonging to whatever now holds those numbers, so the file records
+`kern.boottime` and is discarded unread when it no longer matches. That is a fact rather than an
+expiry guess, which is why there is no age limit: a Mac left running for a fortnight has the same
+window ids it started with, and its snapshot is as good on day fourteen as on day one.
+
+Restoring happens *before* the window tracker starts, because the applications are still running
+and their windows arrive through Accessibility over the second that follows — the tree has to be
+waiting for them rather than built around them as they turn up. Anything the snapshot named that
+has not appeared 2.5 seconds in is an application that was quit while toe was down; those windows
+are dropped and the trees collapse over the gaps exactly as they would have at the time. Displays
+are recorded by UUID rather than by `CGDirectDisplayID`, which is handed out per connection, so a
+monitor that comes back as a different number still gets its own workspaces; a display that is
+gone hands them to the focused one, the same thing unplugging it while toe runs does.
+
+The snapshot is written on the way out — the one path both `SUPER+SHIFT+Q` and `make run`'s
+`SIGTERM` reach — and again, debounced, on every layout change, which is what covers a `kill -9`.
+`misc.restore_session = false` turns it off and removes the file.
+
 **Hotkeys** use Carbon's `RegisterEventHotKey`, deliberately not a keyboard `CGEventTap`. A tap
 masked to key events would receive every keystroke you type; Carbon hotkeys only ever deliver the
 exact combinations toe registers. The one tap toe does run — see **Dock swipes** — has a mask

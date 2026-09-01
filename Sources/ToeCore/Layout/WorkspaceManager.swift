@@ -468,6 +468,143 @@ public final class WorkspaceManager {
         plan.focus = focusedWindow
         return plan
     }
+
+    // MARK: - Session
+
+    /// Everything a restart needs to put the layout back. See `SessionSnapshot`.
+    ///
+    /// - Parameters:
+    ///   - boot: token identifying the boot the window ids belong to.
+    ///   - monitorKey: durable name for a display. A monitor it cannot name is skipped, and
+    ///     the workspaces on it come back on the focused display instead — the same thing
+    ///     `setMonitors` does when a display is unplugged.
+    public func snapshot(boot: String, monitorKey: (UInt32) -> String?) -> SessionSnapshot {
+        var out = SessionSnapshot(boot: boot)
+
+        for index in workspaces.keys.sorted() {
+            guard let ws = workspaces[index], let key = monitorKey(ws.monitorID) else { continue }
+            out.workspaces.append(WorkspaceSnapshot(index: index,
+                                                    monitor: key,
+                                                    layout: ws.layout.snapshot(),
+                                                    floating: ws.floating.sorted()))
+        }
+
+        for (id, index) in activeWorkspace {
+            if let key = monitorKey(id) { out.active[key] = index }
+        }
+        for (id, index) in previousWorkspace {
+            if let key = monitorKey(id) { out.previous[key] = index }
+        }
+        out.focusedMonitor = monitorKey(focusedMonitorID)
+        out.focusHistory = focusHistory
+        out.floatingFrames = floatingFrames.keys.sorted().map {
+            FloatingFrame(window: $0, frame: floatingFrames[$0]!)
+        }
+        return out
+    }
+
+    /// Put a snapshot back. `setMonitors` must have run first — the displays that exist now
+    /// are what a restored workspace is homed against.
+    ///
+    /// Windows named here need not exist yet: on a restart the applications are still running
+    /// but their windows arrive through Accessibility over the following second or so, and the
+    /// tree has to be waiting for them rather than built around them. Anything that never
+    /// turns up is cleared by `reap(keeping:)`.
+    ///
+    /// - Parameter monitorID: the inverse of `snapshot`'s `monitorKey`.
+    public func restore(_ snapshot: SessionSnapshot, monitorID resolve: (String) -> UInt32?) {
+        guard !monitors.isEmpty else { return }
+
+        let live = Set(monitors.map(\.id))
+        if let key = snapshot.focusedMonitor, let id = resolve(key), live.contains(id) {
+            focusedMonitorID = id
+        }
+
+        /// A display that has since been unplugged hands its workspaces to the focused one.
+        func home(_ key: String) -> UInt32 {
+            guard let id = resolve(key), live.contains(id) else { return focusedMonitorID }
+            return id
+        }
+
+        workspaces.removeAll()
+        for saved in snapshot.workspaces {
+            guard (1...Self.workspaceCount).contains(saved.index) else { continue }
+            let ws = workspace(saved.index, onMonitor: home(saved.monitor))
+            ws.monitorID = home(saved.monitor)
+            ws.layout.restore(saved.layout)
+            ws.floating = Set(saved.floating)
+        }
+
+        // A window belongs to exactly one workspace. A file claiming otherwise is resolved in
+        // favour of the lowest index, which is the order the workspaces were just built in.
+        var seen: Set<WindowID> = []
+        for index in workspaces.keys.sorted() {
+            guard let ws = workspaces[index] else { continue }
+            for id in ws.windows.sorted() where seen.contains(id) {
+                ws.layout.remove(id)
+                ws.floating.remove(id)
+            }
+            seen.formUnion(ws.windows)
+        }
+
+        // Each monitor shows one workspace and no workspace is shown twice — the invariant
+        // `setMonitors` maintains, re-established here against whatever the file says.
+        activeWorkspace.removeAll()
+        var claimed: Set<Int> = []
+        for (key, index) in snapshot.active.sorted(by: { $0.key < $1.key }) {
+            guard (1...Self.workspaceCount).contains(index), !claimed.contains(index),
+                  let id = resolve(key), live.contains(id), activeWorkspace[id] == nil
+            else { continue }
+            activeWorkspace[id] = index
+            claimed.insert(index)
+            workspace(index, onMonitor: id).monitorID = id
+        }
+        for monitor in monitors where activeWorkspace[monitor.id] == nil {
+            let index = firstFreeWorkspaceIndex()
+            activeWorkspace[monitor.id] = index
+            workspace(index, onMonitor: monitor.id).monitorID = monitor.id
+        }
+
+        previousWorkspace.removeAll()
+        for (key, index) in snapshot.previous {
+            guard (1...Self.workspaceCount).contains(index),
+                  let id = resolve(key), live.contains(id) else { continue }
+            previousWorkspace[id] = index
+        }
+
+        // Only for windows that were actually placed: a frame belonging to nothing would sit
+        // in the dictionary for the life of the process, since `reap` only knows about
+        // windows it can find on a workspace.
+        let placed = seen
+        floatingFrames = Dictionary(
+            snapshot.floatingFrames.filter { placed.contains($0.window) }.map { ($0.window, $0.frame) },
+            uniquingKeysWith: { first, _ in first })
+        focusHistory = snapshot.focusHistory.filter { placed.contains($0) }
+
+        for ws in workspaces.values {
+            guard let m = monitor(id: ws.monitorID) else { continue }
+            ws.layout.area = m.usable
+            ws.layout.recalculate()
+        }
+    }
+
+    /// Drop every window a restored snapshot named that has not turned up — applications
+    /// that were quit while toe was down, and windows closed in the meantime. Removal goes
+    /// through `removeWindow`, so the trees collapse exactly as they would have at the time.
+    ///
+    /// - Returns: whether anything was dropped, so the caller can skip a re-render.
+    @discardableResult
+    public func reap(keeping alive: Set<WindowID>) -> Bool {
+        var stale: Set<WindowID> = []
+        for ws in workspaces.values { stale.formUnion(ws.windows.subtracting(alive)) }
+        guard !stale.isEmpty else { return false }
+
+        for id in stale {
+            removeWindow(id)
+            floatingFrames.removeValue(forKey: id)
+        }
+        return true
+    }
 }
 
 public extension WorkspaceManager {

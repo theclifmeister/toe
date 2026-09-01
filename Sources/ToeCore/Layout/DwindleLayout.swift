@@ -309,4 +309,59 @@ public final class DwindleLayout {
             leaf.window.map { (id: $0, box: leaf.box) }
         }
     }
+
+    // MARK: - Session
+
+    /// The tree, for `SessionSnapshot`. Boxes are left out: `restore` derives them.
+    public func snapshot() -> LayoutSnapshot {
+        LayoutSnapshot(root: root.map(NodeSnapshot.init), order: order)
+    }
+
+    /// Rebuild the tree from a snapshot, discarding whatever this layout held.
+    ///
+    /// The file is decoded before it is trusted, so this is written to survive a damaged one:
+    /// a leaf that repeats a window already placed is dropped, a split that has lost one side
+    /// collapses into the side it kept — exactly what `remove` would have done had the window
+    /// gone while toe was running — and a split that has lost both disappears with it. Nothing
+    /// here can produce a tree that `recalculate` will not walk.
+    public func restore(_ snapshot: LayoutSnapshot) {
+        nodes.removeAll()
+        order.removeAll()
+        root = snapshot.root.flatMap { rebuild($0, depth: 0) }
+        root?.parent = nil
+
+        // Keep the recorded creation order, minus anything that did not make it into the
+        // tree, plus anything the order forgot — `order` is what the insertion fail-safe
+        // reads, so every live window has to be in it.
+        let placed = Set(nodes.keys)
+        order = snapshot.order.filter { placed.contains($0) }
+        let known = Set(order)
+        for id in windowIDs where !known.contains(id) { order.append(id) }
+
+        recalculate()
+    }
+
+    private func rebuild(_ snapshot: NodeSnapshot, depth: Int) -> DwindleNode? {
+        guard depth < NodeSnapshot.maxDepth else { return nil }
+
+        if let window = snapshot.window {
+            guard nodes[window] == nil else { return nil }
+            let leaf = DwindleNode(window: window)
+            nodes[window] = leaf
+            return leaf
+        }
+
+        // `prefix(2)` rather than a count check: a third child is never built, so it can
+        // never end up registered in `nodes` with nothing pointing at it.
+        let children = snapshot.children.prefix(2).compactMap { rebuild($0, depth: depth + 1) }
+        guard children.count == 2 else { return children.first }
+
+        let node = DwindleNode()
+        node.splitTop = snapshot.splitTop
+        node.splitRatio = clampf(snapshot.splitRatio, 0.1, 1.9)
+        node.children = children
+        children[0].parent = node
+        children[1].parent = node
+        return node
+    }
 }
