@@ -49,6 +49,15 @@ public struct Box: Equatable, Hashable, Sendable {
         return dx * dx + dy * dy
     }
 
+    /// The overlapping region of two boxes, empty when they do not overlap. How much of a
+    /// floating window is actually on its monitor is measured with this.
+    public func intersection(_ other: Box) -> Box {
+        Box(x: max(minX, other.minX),
+            y: max(minY, other.minY),
+            w: min(maxX, other.maxX) - max(minX, other.minX),
+            h: min(maxY, other.maxY) - max(minY, other.minY)).noNegativeSize()
+    }
+
     /// Shrink by per-edge insets. Used to apply gaps.
     public func inset(top: Double, left: Double, bottom: Double, right: Double) -> Box {
         Box(x: x + left, y: y + top, w: w - left - right, h: h - top - bottom).noNegativeSize()

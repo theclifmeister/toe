@@ -331,6 +331,120 @@ h.test("a floating focus falls back to the window under the pointer") { t in
     t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "w3 untouched")
 }
 
+// MARK: - Floating
+
+h.test("toggling a window out of the tree and back") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.floatingFrames[2] = box(200, 150, 640, 400)   // seeded at adopt time by the app layer
+
+    wm.noteFocus(2)
+    wm.toggleFloating(2)
+    t.equal(wm.isFloating(2), true, "w2 floats")
+    t.equal(wm.workspaces[1]?.layout.contains(2), false, "and has left the tree")
+    t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), AREA, "w1 absorbs the whole area")
+    t.equalBox(wm.render().floating[2], box(227, 98, 1058, 786),
+               "centred, 70% wide by 80% tall — the same box whichever window it came from")
+
+    wm.floatingFrames[2] = box(40, 40, 640, 400)   // dragged into the corner by hand
+    t.equalBox(wm.render().floating[2], box(40, 40, 640, 400),
+               "a drag is not pulled back to the centre on the next render")
+
+    wm.toggleFloating(2)
+    t.equal(wm.isFloating(2), false, "w2 is tiled again")
+    t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), box(0, 0, 756, 982), "w1 back to the left half")
+    t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 2), box(756, 0, 756, 982), "w2 back to the right half")
+    t.equal(wm.render().floating.isEmpty, true, "nothing floats any more")
+}
+
+h.test("a floating frame is left alone unless it is stranded") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1, floating: true)
+
+    wm.floatingFrames[1] = box(-40, 900, 600, 400)
+    t.equalBox(wm.render().floating[1], box(-40, 900, 600, 400),
+               "dragged half off an edge: not undone on the next render")
+
+    wm.floatingFrames[1] = box(2000, 1400, 800, 600)   // remembered on a display since unplugged
+    t.equalBox(wm.render().floating[1], box(227, 98, 1058, 786), "centred at the standard floating size")
+
+    // Hiding a workspace parks a window one pixel inside the monitor's corner. Adopting a
+    // window that was left parked — toe killed rather than quit — captures that as its
+    // floating frame, and handing it straight back would make the window vanish.
+    wm.floatingFrames[1] = box(1511, 981, 800, 600)
+    t.equalBox(wm.render().floating[1], box(227, 98, 1058, 786),
+               "a 1pt sliver on screen is not enough to take a frame at face value")
+
+    wm.floatingFrames.removeValue(forKey: 1)
+    t.equalBox(wm.render().floating[1], box(227, 98, 1058, 786), "nothing remembered: the same centred box")
+}
+
+h.test("a floating window is centred when its display is disconnected") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    wm.addWindow(1, floating: true)                   // workspace 1, on the left display
+    wm.floatingFrames[1] = box(300, 200, 800, 600)
+    t.equalBox(wm.render().floating[1], box(300, 200, 800, 600), "left exactly where it was put")
+
+    // The left display is unplugged. Workspace 1 re-homes to what is left of the desk.
+    wm.setMonitors([Monitor(id: 2, frame: right, usable: right)])
+    wm.switchTo(workspace: 1)
+    t.equalBox(wm.render().floating[1], box(1800, 108, 1344, 864),
+               "centred on the remaining display, sized to it")
+}
+
+h.test("a floating window is not a letterbox on an ultrawide") { t in
+    let wide = box(0, 0, 5120, 1410)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: wide, usable: wide)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.noteFocus(2)
+    wm.toggleFloating(2)
+
+    // 80% of 1410 is 1128 tall. A plain 70% of 5120 would be 3584 wide — instead the window
+    // stops at 1.6 times its own height.
+    t.equalBox(wm.render().floating[2], box(1658, 141, 1805, 1128),
+               "width capped by max_aspect_ratio, still centred")
+
+    wm.floatingSize.maxAspectRatio = 100                 // effectively uncapped
+    wm.noteFocus(2)
+    wm.toggleFloating(2); wm.toggleFloating(2)           // re-float to re-centre
+    t.equalBox(wm.render().floating[2], box(768, 141, 3584, 1128), "uncapped, it is the full 70%")
+}
+
+h.test("movefocus reaches a floating window") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)                 // left half / right half
+    wm.addWindow(3, floating: true)
+    wm.floatingFrames[3] = box(756, 0, 400, 300)     // over w2, sharing w1's right edge
+    wm.noteFocus(1)
+
+    t.equal(wm.windowInDirection(.right), 3,
+            "w2 and the floating w3 both abut w1; the more recently focused w3 wins")
+    t.equal(wm.windowInDirection(.left, from: 3), 1, "and it hands focus back")
+}
+
+h.test("a floating window keeps its frame across a workspace round trip") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1, floating: true)
+    wm.floatingFrames[1] = box(300, 200, 500, 400)
+
+    wm.switchTo(workspace: 2)
+    t.equal(wm.render().stashed, [1], "hidden workspace: w1 is stashed")
+    t.equal(wm.render().floating.isEmpty, true, "and not rendered as floating")
+
+    wm.switchTo(workspace: 1)
+    t.equalBox(wm.render().floating[1], box(300, 200, 500, 400), "comes back exactly where it was")
+}
+
 h.test("swapwindow across monitors trades slots, keeping both layouts") { t in
     let left = box(0, 0, 1512, 982)
     let right = box(1512, 0, 1920, 1080)
@@ -397,6 +511,9 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(c.border.activeStart, "#33ccffee", "Omarchy active border gradient start")
     t.equal(c.border.radius, -1, "radius follows the system window corner radius")
     t.equal(c.floatRules.count, 5, "float rules")
+    t.equal(c.floating.width, 0.70, "floating width fraction")
+    t.equal(c.floating.height, 0.80, "floating height fraction")
+    t.equal(c.floating.maxAspectRatio, 1.6, "floating max aspect ratio")
 
     func binding(_ spec: String) -> Binding? { c.bindings.first { $0.source == spec } }
 
@@ -409,6 +526,14 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-shift-0")?.command, .moveToWorkspace(10, follow: true), "SUPER+SHIFT+0")
     t.equal(binding("super-w")?.command, .killActive, "SUPER+W closes")
     t.equal(binding("super-tab")?.command, .workspace(.next), "SUPER+TAB")
+
+    // SUPER+T is not a shipped default — it is a local-config binding, so assert the parser
+    // rather than the default table.
+    let (mods, code, key) = try BindingParser.parse("super-t", superKey: .option)
+    t.equal(mods, Modifiers.option, "super-t: SUPER resolves to Option")
+    t.equal(code, 0x11, "super-t: T key code")
+    t.equal(key, "t", "super-t: key name")
+    t.equal(try CommandParser.parse("togglefloating"), .toggleFloating, "togglefloating dispatcher")
 
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
     t.equal(arrows.allSatisfy { binding($0) != nil }, true, "all four focus arrows bound")

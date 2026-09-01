@@ -135,6 +135,19 @@ whose minimum size exceeds its tile (Safari will not go narrower than ~574px) is
 then left alone rather than fought with forever. The same mechanism snaps a window back when you
 drag it out of its tile.
 
+**Floating windows.** `togglefloating` lifts a window out of the tree and centres it, at a
+consistent fraction of the display — 70% wide by 80% tall by default — so every floating window
+is the same shape whichever window it came from. No floating window is ever wider than 1.6 times
+its own height, which is what stops 70% of a 32:9 ultrawide from being a letterbox; on a laptop
+that cap never comes into play. All three are `[floating]` keys in the config. Sizing happens
+when you float the window, not on every frame, so dragging it afterwards sticks: toe writes a
+floating frame only when it actually changes and never re-asserts it, so a floating window is
+never fought the way a tile is. If the display it was last on has been unplugged, it is centred
+on the display that remains rather than clamped against an edge. It is raised when you float it
+and again whenever it is focused, but the Accessibility API offers no persistent always-on-top:
+activate a tiled window afterwards and it can cover the floating one. Floating windows stay
+reachable with `SUPER`+arrows.
+
 **Windows toe leaves alone**: dialogs, sheets, palettes, minimized and natively-fullscreen
 windows, and anything that refuses a position or size. Add your own exceptions with `[[float]]`
 rules.

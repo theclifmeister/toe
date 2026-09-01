@@ -24,6 +24,7 @@ final class Coordinator: WindowTrackerDelegate {
     /// than fought with forever.
     private var corrections: [WindowID: Int] = [:]
     private var focusApplied: WindowID?
+    private var signalSources: [any DispatchSourceSignal] = []
 
     // MARK: - Start-up
 
@@ -50,6 +51,7 @@ final class Coordinator: WindowTrackerDelegate {
             NSApp.terminate(nil)
         }
 
+        installSignalHandlers()
         writeDefaultConfigIfMissing()
         loadConfig()
 
@@ -66,6 +68,23 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
         beginManaging()
+    }
+
+    /// `make run` restarts toe with `pkill`, and SIGTERM's default action would leave a hidden
+    /// workspace's windows parked in the stash corner. The next launch then adopts them there
+    /// and records that corner as the frame to float them back to — so a window you floated
+    /// would disappear. Unstash before going away, exactly as the Quit menu item does.
+    private func installSignalHandlers() {
+        for number in [SIGTERM, SIGINT] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { [weak self] in
+                self?.unstashEverything()
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
     }
 
     /// toe is useless without Accessibility, but it should not die either — it keeps its menu
@@ -130,6 +149,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         workspaces.options = newConfig.dwindle
         workspaces.gaps = newConfig.gaps
+        workspaces.floatingSize = newConfig.floating
         tracker.floatRules = newConfig.floatRules
         border.apply(newConfig.border)
         status.persistentWorkspaces = newConfig.bar.persistentWorkspaces
@@ -208,9 +228,10 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - WindowTrackerDelegate
 
     func windowAppeared(_ window: ManagedWindow, shouldFloat: Bool) {
-        if shouldFloat {
-            workspaces.floatingFrames[window.id] = window.element.frame
-        }
+        // Adopt time is the only moment a window's own geometry is known — the first tile
+        // write clobbers it. This is Hyprland's `m_vLastFloatingSize` / `..Position`, and it
+        // is what a window returns to the first time you float it.
+        workspaces.floatingFrames[window.id] = window.element.frame
         workspaces.addWindow(window.id, floating: shouldFloat)
         apply(refocus: false)
         refreshStatus()
@@ -247,9 +268,7 @@ final class Coordinator: WindowTrackerDelegate {
         }
 
         guard let want = desired[id], let have = window.element.frame else { return }
-        let settled = abs(have.x - want.x) < 2 && abs(have.y - want.y) < 2
-            && abs(have.w - want.w) < 2 && abs(have.h - want.h) < 2
-        if settled {
+        if Self.settled(have, want) {
             corrections[id] = 0
             if id == workspaces.focusedWindow { updateBorder() }
             return
@@ -260,6 +279,12 @@ final class Coordinator: WindowTrackerDelegate {
         corrections[id] = attempts + 1
         WindowMover.setFrame(want, element: window.element, pid: window.pid)
         if id == workspaces.focusedWindow { updateBorder() }
+    }
+
+    /// Apps round and clamp the frames they are given; two frames within 2pt of each other are
+    /// the same frame as far as toe is concerned.
+    private static func settled(_ a: Box, _ b: Box) -> Bool {
+        abs(a.x - b.x) < 2 && abs(a.y - b.y) < 2 && abs(a.w - b.w) < 2 && abs(a.h - b.h) < 2
     }
 
     func screensChanged() {
@@ -279,16 +304,20 @@ final class Coordinator: WindowTrackerDelegate {
             window.frameBeforeStash = window.element.frame
             window.isStashed = true
             desired.removeValue(forKey: id)
-        corrections.removeValue(forKey: id)
+            corrections.removeValue(forKey: id)
             WindowMover.setPosition(stashPoint(for: window), element: window.element, pid: window.pid)
         }
 
-        for id in plan.restored {
-            guard let window = tracker.window(id), window.isStashed else { continue }
+        // Floating frames deliberately bypass `desired` / `corrections`: that machinery exists
+        // to re-assert a tile against an app that fights it, and pointing it at a floating
+        // window would fight the user's own drags instead. Writing only on a real difference
+        // makes this a no-op on every render but the one that changed something — floating a
+        // window, bringing its workspace back, or losing the display it was remembered on.
+        for (id, box) in plan.floating {
+            guard let window = tracker.window(id) else { continue }
             window.isStashed = false
-            if let frame = window.frameBeforeStash {
-                WindowMover.setFrame(frame, element: window.element, pid: window.pid)
-            }
+            if let have = window.element.frame, Self.settled(have, box) { continue }
+            WindowMover.setFrame(box, element: window.element, pid: window.pid)
         }
 
         for (id, box) in plan.frames {
@@ -377,13 +406,16 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .toggleFloating:
             guard let id = workspaces.focusedWindow else { return }
-            if !workspaces.isFloating(id), let window = tracker.window(id) {
-                workspaces.floatingFrames[id] = window.frameBeforeStash ?? window.element.frame
-            }
             workspaces.toggleFloating(id)
             desired.removeValue(forKey: id)
-        corrections.removeValue(forKey: id)
+            corrections.removeValue(forKey: id)
             apply(refocus: false)
+            // A floating window belongs above the tiles. AX has no persistent always-on-top,
+            // so raise it now; focusing it later raises it again.
+            if workspaces.isFloating(id), let window = tracker.window(id) {
+                WindowMover.focus(window)
+                focusApplied = id
+            }
 
         case .toggleSplit:
             guard let id = workspaces.focusedWindow,

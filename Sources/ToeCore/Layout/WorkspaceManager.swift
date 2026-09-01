@@ -4,9 +4,10 @@ import Foundation
 public struct RenderPlan: Equatable {
     /// Tiled windows on a visible workspace and the frame each should occupy (gaps applied).
     public var frames: [WindowID: Box] = [:]
-    /// Windows belonging to a visible workspace that we do not tile (floating). The app layer
-    /// restores their remembered frame.
-    public var restored: Set<WindowID> = []
+    /// Floating windows on a visible workspace and the frame each should occupy. Unlike
+    /// `frames`, the app layer writes these once when they change and never re-asserts them —
+    /// a floating window belongs to whoever is dragging it.
+    public var floating: [WindowID: Box] = [:]
     /// Windows on a hidden workspace. The app layer parks these off-screen.
     public var stashed: Set<WindowID> = []
     /// The window that should hold focus, if it changed.
@@ -63,6 +64,8 @@ public final class WorkspaceManager {
         didSet { workspaces.values.forEach { $0.layout.options = options; $0.layout.recalculate() } }
     }
     public var gaps: Gaps
+    /// How big a window is when it leaves the tree. See `centredFloatingBox`.
+    public var floatingSize = FloatingSize()
 
     public init(options: DwindleOptions = DwindleOptions(), gaps: Gaps = Gaps()) {
         self.options = options
@@ -195,6 +198,13 @@ public final class WorkspaceManager {
         } else {
             ws.layout.remove(id)
             ws.floating.insert(id)
+            // A window leaving the tree is centred, at the size it remembers. This is set here
+            // rather than derived in `floatingBox` so that it happens once, when you float the
+            // window — deriving it every render would drag the window back to the middle of
+            // the screen the moment you tried to move it.
+            if let m = monitor(id: ws.monitorID) {
+                floatingFrames[id] = centredFloatingBox(on: m)
+            }
         }
     }
 
@@ -220,14 +230,17 @@ public final class WorkspaceManager {
               let ws = workspaces[index],
               let origin = ws.layout.idealBox(of: source) ?? floatingFrames[source]
         else { return nil }
-        _ = ws
 
-        // Candidates: every tiled window on a *visible* workspace. Hyprland's
+        // Candidates: every window on a *visible* workspace, floating ones included — a
+        // floated window you cannot focus again is a window you have lost. Hyprland's
         // `window_direction_monitor_fallback` defaults to true, so focus crosses monitors.
         var candidates: [(id: WindowID, box: Box)] = []
         for wsIndex in visibleWorkspaceIndices {
             guard let w = workspaces[wsIndex] else { continue }
             candidates.append(contentsOf: w.layout.idealBoxes())
+            for id in w.floating {
+                if let box = floatingFrames[id] { candidates.append((id: id, box: box)) }
+            }
         }
 
         return DirectionalSearch.windowInDirection(
@@ -351,6 +364,51 @@ public final class WorkspaceManager {
 
     // MARK: - Rendering
 
+    /// How much of a floating window has to be on its monitor for its remembered frame to be
+    /// taken at face value. Matches the 60pt floor the tracker uses to decide a window is a
+    /// real window at all.
+    private static let minimumOnScreen = 60.0
+
+    /// Where a floating window belongs. Hyprland restores `m_vLastFloatingSize` and
+    /// `m_vLastFloatingPosition`; `floatingFrames` is that, kept current by the app layer as
+    /// the window is dragged.
+    ///
+    /// A frame is taken as-is only while a usable amount of the window is still on the
+    /// monitor, so dragging one half off an edge is never undone on the next render. Anything
+    /// less is pulled back. Hyprland never has to think about this; toe does, because hiding a
+    /// workspace parks its windows with a single pixel inside the monitor's corner — a frame
+    /// captured from a parked window overlaps by 1×1pt, and handing that back would make the
+    /// window vanish.
+    private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
+        guard let remembered = floatingFrames[id] else {
+            return centredFloatingBox(on: monitor)
+        }
+
+        let onScreen = remembered.intersection(monitor.usable)
+        if onScreen.w >= min(Self.minimumOnScreen, remembered.w),
+           onScreen.h >= min(Self.minimumOnScreen, remembered.h) {
+            return remembered
+        }
+
+        // Nowhere useful to put it back: a frame remembered on a display that has since been
+        // unplugged, or a window left parked in the stash corner. Centring rather than
+        // clamping matters here — an edge-clamped window lands wherever the old geometry
+        // happened to point, which on a display that is gone is arbitrary.
+        return centredFloatingBox(on: monitor)
+    }
+
+    /// Centred on the monitor at a consistent fraction of it, so a floating window is the
+    /// same shape whichever window it came from. The aspect cap is what keeps that honest on
+    /// a wide display, where a plain width fraction would produce a letterbox.
+    private func centredFloatingBox(on monitor: Monitor) -> Box {
+        let usable = monitor.usable
+        let h = min(usable.h * floatingSize.height, usable.h)
+        let w = min(usable.w * floatingSize.width, usable.w, h * floatingSize.maxAspectRatio)
+        return Box(x: usable.minX + (usable.w - w) / 2.0,
+                   y: usable.minY + (usable.h - h) / 2.0,
+                   w: w, h: h).rounded()
+    }
+
     public func render() -> RenderPlan {
         var plan = RenderPlan()
         let visibleIndices = visibleWorkspaceIndices
@@ -362,7 +420,9 @@ public final class WorkspaceManager {
                     ws.layout.recalculate()
                 }
                 for (id, box) in ws.layout.frames(gaps: gaps) { plan.frames[id] = box }
-                plan.restored.formUnion(ws.floating)
+                if let m = monitor(id: ws.monitorID) {
+                    for id in ws.floating { plan.floating[id] = floatingBox(for: id, on: m) }
+                }
             } else {
                 plan.stashed.formUnion(ws.windows)
             }

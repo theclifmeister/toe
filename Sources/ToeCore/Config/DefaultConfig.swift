@@ -44,6 +44,15 @@ angle        = 45
 # -1 follows the system window corner radius, 0 is square, or set an explicit value.
 radius       = -1
 
+[floating]
+# The size a window gets when SUPER+T lifts it out of the tree — it is always centred, at
+# this fraction of the display, so every floating window is the same shape.
+width  = 0.70
+height = 0.80
+# ...except that no floating window is ever wider than this many times its own height. On a
+# 32:9 ultrawide a plain 70% would be a letterbox; on a laptop this never comes into play.
+max_aspect_ratio = 1.6
+
 [bar]
 # waybar's persistent-workspaces: Omarchy keeps slots 1-5 on the bar even when they are
 # empty, dimmed. 0 shows only the workspaces in use; 10 always shows all ten.
