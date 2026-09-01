@@ -38,8 +38,9 @@ final class DragMonitor {
         isDragging = true
         window = id
         // toe never sees the drag itself: the events all belong to the window's own application.
-        // Global monitors are read-only and consume nothing, so this stays clear of the event
-        // tap toe deliberately does without.
+        // Global monitors are read-only and consume nothing, which keeps the pointer readable
+        // without widening the one tap toe does run — `DockSwipeTap`, whose mask admits gesture
+        // events only and could not carry a mouse event if it wanted to.
         add([.leftMouseUp, .rightMouseUp, .otherMouseUp]) { [weak self] _ in self?.end() }
         add([.leftMouseDragged, .rightMouseDragged, .otherMouseDragged]) { [weak self] _ in
             guard let self, let window = self.window else { return }

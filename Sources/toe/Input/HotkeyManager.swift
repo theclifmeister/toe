@@ -4,10 +4,14 @@ import ToeCore
 
 /// Global hotkeys via Carbon's `RegisterEventHotKey`.
 ///
-/// Deliberately not a `CGEventTap`: a tap would receive every keystroke you type, which is
-/// far more access than a window manager needs. Carbon hotkeys only ever deliver the exact
-/// combinations toe registers, and they need no permission beyond the Accessibility grant
-/// that moving windows already requires.
+/// Deliberately not a keyboard `CGEventTap`: a tap masked to key events would receive every
+/// keystroke you type, which is far more access than a window manager needs. Carbon hotkeys only
+/// ever deliver the exact combinations toe registers, and they need no permission beyond the
+/// Accessibility grant that moving windows already requires.
+///
+/// toe does run one event tap — `DockSwipeTap` — but its mask covers two gesture event types and
+/// nothing else, so no keystroke can reach it even in principle. The objection above is to the
+/// mask a hotkey tap would need, not to taps as a mechanism.
 final class HotkeyManager {
 
     var onTrigger: ((Binding) -> Void)?

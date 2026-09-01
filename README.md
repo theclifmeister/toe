@@ -113,9 +113,46 @@ frames on return — the same approach AeroSpace takes. The trade-off is that st
 remain visible to Cmd-Tab and Mission Control, and Cmd-Tabbing to one can pull it back onto the
 current workspace.
 
-**Hotkeys** use Carbon's `RegisterEventHotKey`, deliberately not a `CGEventTap`. A tap would
-receive every keystroke you type; Carbon hotkeys only ever deliver the exact combinations toe
-registers.
+**Dock swipes.** A four-finger swipe up opens Mission Control, which puts that off-screen stash on
+display; a sideways swipe changes the macOS Space out from under toe, leaving its model of the
+screen describing windows that are no longer on it. So toe swallows the Dock's swipe gestures —
+up, down, left and right — with a session-level `CGEventTap` inserted ahead of the Dock. It keys
+off the gesture's event type rather than a finger count, so it covers the three-finger setting
+too. `CGEvent.tapCreate` is public API and this needs no entitlement and no private symbol, but
+the mask — two gesture event types — and the fields the callback reads are undocumented, so
+anything that does not positively identify itself as a dock swipe is passed straight through. The
+worst a wrong guess there can do is drop a gesture: no keystroke, click or scroll can reach a tap
+masked this way. `gestures.swallow_dock_swipes = false` turns it off.
+
+The cost is that swiping between Spaces is gone, including swiping out of a natively-fullscreen
+app's Space — and natively-fullscreen windows are one of the things toe leaves alone. `Ctrl`+`←`/`→`
+still switches Spaces and `⌃⌘F` still leaves fullscreen; the config key is there for anyone who
+would rather have the swipe.
+
+The swipe is not the only way in: `Ctrl`+`↑` and `Ctrl`+`↓` open the same two views. Those are
+*symbolic hotkeys*, resolved inside the window server well before any event tap sees a key, so the
+tap cannot help — toe switches them off with `CGSSetSymbolicHotKeyEnabled` while it runs. Unlike
+the tap, that state outlives the process: the window server keeps it, so a toe that died without
+restoring would leave `Ctrl`+`↑` dead with nothing to say why. Every change is journalled to
+`~/.local/state/toe/symbolic-hotkeys` *before* it is made, and a journal found at startup is
+replayed in reverse, which is what repairs a crash, a `kill -9` or a logout. Show Desktop is left
+alone, because its gesture is a thumb-and-three-finger spread rather than a dock swipe — the key
+and the gesture stay consistent. `misc.disable_expose_shortcuts = false` leaves all of them alone.
+
+**Hiding.** `⌘H` and `⌘⌥H` take an application's windows out of the layout without closing them:
+the tree reflows around the gap, and `SUPER`+arrows cannot reach them again because they are no
+longer on any workspace. Omarchy has no equivalent, so toe puts a hidden application straight
+back. Deliberately done by watching `NSWorkspace.didHideApplicationNotification` rather than by
+swallowing the keystroke — hiding is observable, so it can be undone without a keyboard tap, and
+the notification also catches the routes a shortcut tap would miss: the Dock's Hide menu item, an
+app hiding itself, and `⌘⌥H` hiding everything else at once. The window is gone for a frame, since
+the notification arrives after the fact rather than instead of it.
+`misc.prevent_hiding = false` turns it off.
+
+**Hotkeys** use Carbon's `RegisterEventHotKey`, deliberately not a keyboard `CGEventTap`. A tap
+masked to key events would receive every keystroke you type; Carbon hotkeys only ever deliver the
+exact combinations toe registers. The one tap toe does run — see **Dock swipes** — has a mask
+covering two gesture event types and nothing else, so it cannot see a keystroke even in principle.
 
 **Electron and Chromium apps** (Chrome, VS Code, Slack) and the JetBrains IDEs ignore or
 animate programmatic resizes while `AXEnhancedUserInterface` is set. toe clears it around each
@@ -170,7 +207,8 @@ and again whenever it is focused, but the Accessibility API offers no persistent
 activate a tiled window afterwards and it can cover the floating one. Floating windows stay
 reachable with `SUPER`+arrows.
 
-**Windows toe leaves alone**: dialogs, sheets, palettes, minimized and natively-fullscreen
+**Windows toe leaves alone**: dialogs, sheets, palettes, minimized and natively-fullscreen (see
+**Dock swipes** for the one thing that changes about living in one)
 windows, and anything that refuses a position or size. Add your own exceptions with `[[float]]`
 rules.
 
