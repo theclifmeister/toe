@@ -37,6 +37,11 @@ angle        = 45
 # -1 follows the system window corner radius, 0 is square, or set an explicit value.
 radius       = -1
 
+[bar]
+# waybar's persistent-workspaces: Omarchy keeps slots 1-5 on the bar even when they are
+# empty, dimmed. 0 shows only the workspaces in use; 10 always shows all ten.
+persistent_workspaces = 5
+
 [binds]
 # ── Focus — SUPER + arrows ────────────────────────────────────────────────────
 "super-left"  = "movefocus l"

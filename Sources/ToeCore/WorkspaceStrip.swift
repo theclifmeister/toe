@@ -9,6 +9,10 @@ import Foundation
 /// lands on one. `StatusItem` draws the result.
 public enum WorkspaceStrip {
 
+    /// Omarchy's waybar declares `persistent-workspaces` 1-5, so those five keep a slot on
+    /// the bar whether or not anything is on them.
+    public static let defaultPersistent = 5
+
     /// What the strip needs to know about one workspace.
     public struct State: Equatable {
         public let index: Int
@@ -47,10 +51,13 @@ public enum WorkspaceStrip {
         public let dim: Bool
     }
 
-    /// A workspace earns a slot by having windows on it, or by being on screen right now —
-    /// so the strip stays as short as what you are actually using.
-    public static func items(for states: [State]) -> [Item] {
-        states.filter { !$0.isEmpty || $0.isVisible }.map { state in
+    /// A workspace earns a slot by being one of the first `persistent` — Omarchy's
+    /// `persistent-workspaces` — or by having windows on it, or by being on screen right
+    /// now. So the first five are always there, and past those the strip stays as short as
+    /// what you are actually using.
+    public static func items(for states: [State],
+                             persistent: Int = defaultPersistent) -> [Item] {
+        states.filter { $0.index <= persistent || !$0.isEmpty || $0.isVisible }.map { state in
             Item(index: state.index,
                  label: state.index == 10 ? "0" : "\(state.index)",
                  marker: state.isFocused ? .focused : (state.isVisible ? .visible : .digit),

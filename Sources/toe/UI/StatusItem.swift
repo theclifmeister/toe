@@ -51,6 +51,9 @@ final class StatusItem: NSObject, NSMenuDelegate {
     private var accessibilityGranted = false
     private var showMonitorNames = false
 
+    /// waybar's `persistent-workspaces` — how many workspaces keep a slot when empty.
+    var persistentWorkspaces = WorkspaceStrip.defaultPersistent
+
     /// What the strip currently draws, and how wide each item came out — together they turn
     /// a click position back into a workspace.
     private var stripItems: [WorkspaceStrip.Item] = []
@@ -62,6 +65,18 @@ final class StatusItem: NSObject, NSMenuDelegate {
     private let gap: CGFloat = 7
     private let markerSide: CGFloat = 8
     private let markerRadius: CGFloat = 2.5
+
+    /// Omarchy dims empty workspaces with `opacity: 0.5`. The menu bar is translucent over
+    /// whatever wallpaper is behind it, and half opacity there is too faint to read, so toe
+    /// dims less far.
+    ///
+    /// Built from a dynamic provider rather than `secondaryLabelColor` so it resolves when it
+    /// is drawn, against the menu bar's own appearance — which is not always the app's, since
+    /// macOS darkens the menu bar to suit the desktop picture.
+    private static let dimLabelColor = NSColor(name: "toeDimLabel") { appearance in
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.7)
+    }
 
     override init() {
         super.init()
@@ -101,7 +116,8 @@ final class StatusItem: NSObject, NSMenuDelegate {
             ])
         }
 
-        let items = WorkspaceStrip.items(for: workspaces.map(\.stripState))
+        let items = WorkspaceStrip.items(for: workspaces.map(\.stripState),
+                                         persistent: persistentWorkspaces)
         guard !items.isEmpty else {
             return NSAttributedString(string: "toe", attributes: [.font: font])
         }
@@ -127,7 +143,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
         case .digit:
             return NSAttributedString(string: item.label, attributes: [
                 .font: font,
-                .foregroundColor: item.dim ? NSColor.secondaryLabelColor : NSColor.labelColor,
+                .foregroundColor: item.dim ? Self.dimLabelColor : NSColor.labelColor,
             ])
         case .focused, .visible:
             let attachment = NSTextAttachment()
@@ -154,7 +170,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
         let box = canvas ?? side
         let radius = markerRadius * (side / markerSide)
         let image = NSImage(size: NSSize(width: box, height: box), flipped: false) { rect in
-            let colour = dim ? NSColor.secondaryLabelColor : NSColor.labelColor
+            let colour = dim ? Self.dimLabelColor : NSColor.labelColor
             let square = NSRect(x: (rect.width - side) / 2, y: (rect.height - side) / 2,
                                 width: side, height: side)
             if filled {

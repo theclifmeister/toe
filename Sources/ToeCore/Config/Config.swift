@@ -13,6 +13,14 @@ public struct BorderConfig: Equatable {
     public init() {}
 }
 
+/// The menu bar's workspace strip.
+public struct BarConfig: Equatable {
+    /// waybar's `persistent-workspaces`: how many workspaces keep a slot whether or not
+    /// anything is on them. 0 shows only the ones in use.
+    public var persistentWorkspaces: Int = WorkspaceStrip.defaultPersistent
+    public init() {}
+}
+
 /// A window that should float instead of joining the dwindle tree.
 public struct FloatRule: Equatable {
     /// Bundle identifier. `*` matches any run of characters.
@@ -54,6 +62,7 @@ public struct Config: Equatable {
     public var gaps: Gaps = Gaps(inner: 5, outer: 10)
     public var dwindle: DwindleOptions = DwindleOptions()
     public var border: BorderConfig = BorderConfig()
+    public var bar: BarConfig = BarConfig()
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
     /// Non-fatal problems (a binding that would not parse, an unknown key). Surfaced in the
@@ -112,6 +121,17 @@ public struct Config: Equatable {
             if let v = b["active_end"]?.stringValue { config.border.activeEnd = v }
             if let v = b["angle"]?.doubleValue { config.border.angle = v }
             if let v = b["radius"]?.doubleValue { config.border.radius = v }
+        }
+
+        if let b = root["bar"]?.tableValue {
+            if let v = b["persistent_workspaces"]?.intValue {
+                let allowed = 0...WorkspaceManager.workspaceCount
+                if allowed.contains(v) {
+                    config.bar.persistentWorkspaces = v
+                } else {
+                    config.warnings.append("bar.persistent_workspaces: must be 0 ... \(WorkspaceManager.workspaceCount), using \(config.bar.persistentWorkspaces)")
+                }
+            }
         }
 
         if let binds = root["binds"]?.tableValue {
