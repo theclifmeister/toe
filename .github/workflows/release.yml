@@ -11,7 +11,7 @@ jobs:
   release:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Not shallow: the cask bump below pushes to main, and git refuses to push
           # from a shallow clone.
