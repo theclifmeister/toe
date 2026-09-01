@@ -170,11 +170,17 @@ final class QuickMenuView: NSView {
         let detail = entry.detail.map { detailText($0) }
         let detailSize = detail?.size() ?? .zero
 
+        // Served first means measured against the whole row, not against what the detail leaves.
+        // Subtracting the detail first collapses this to zero for any detail wider than the row —
+        // and `draw(with:)` treats a zero-width rect as unbounded, so the title would then be laid
+        // out at full length straight over the detail rather than being dropped.
         let available = max(0, rightEdge - x)
-        let titleWidth = min(titleSize.width, max(0, available - detailSize.width - 10))
-        title.draw(with: NSRect(x: x, y: rect.midY - titleSize.height / 2,
-                                width: titleWidth, height: titleSize.height),
-                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        let titleWidth = min(titleSize.width, available)
+        if titleWidth > 0 {
+            title.draw(with: NSRect(x: x, y: rect.midY - titleSize.height / 2,
+                                    width: titleWidth, height: titleSize.height),
+                       options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
 
         // A hint narrower than this is unreadable anyway, so it is left off rather than shown as
         // an ellipsis.
