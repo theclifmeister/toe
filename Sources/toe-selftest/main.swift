@@ -331,6 +331,71 @@ h.test("a floating focus falls back to the window under the pointer") { t in
     t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "w3 untouched")
 }
 
+// MARK: - Floating
+
+h.test("toggling a window out of the tree and back") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.floatingFrames[2] = box(200, 150, 640, 400)   // seeded at adopt time by the app layer
+
+    wm.noteFocus(2)
+    wm.toggleFloating(2)
+    t.equal(wm.isFloating(2), true, "w2 floats")
+    t.equal(wm.workspaces[1]?.layout.contains(2), false, "and has left the tree")
+    t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), AREA, "w1 absorbs the whole area")
+    t.equalBox(wm.render().floating[2], box(200, 150, 640, 400), "its remembered frame is rendered")
+
+    wm.toggleFloating(2)
+    t.equal(wm.isFloating(2), false, "w2 is tiled again")
+    t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), box(0, 0, 756, 982), "w1 back to the left half")
+    t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 2), box(756, 0, 756, 982), "w2 back to the right half")
+    t.equal(wm.render().floating.isEmpty, true, "nothing floats any more")
+}
+
+h.test("a floating frame is left alone unless it is stranded") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1, floating: true)
+
+    wm.floatingFrames[1] = box(-40, 900, 600, 400)
+    t.equalBox(wm.render().floating[1], box(-40, 900, 600, 400),
+               "dragged half off an edge: not undone on the next render")
+
+    wm.floatingFrames[1] = box(2000, 1400, 800, 600)   // remembered on a display since unplugged
+    t.equalBox(wm.render().floating[1], box(712, 382, 800, 600), "pulled back into the usable area")
+
+    wm.floatingFrames.removeValue(forKey: 1)
+    t.equalBox(wm.render().floating[1], box(378, 246, 756, 491), "nothing remembered: centred, half size")
+}
+
+h.test("movefocus reaches a floating window") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)                 // left half / right half
+    wm.addWindow(3, floating: true)
+    wm.floatingFrames[3] = box(756, 0, 400, 300)     // over w2, sharing w1's right edge
+    wm.noteFocus(1)
+
+    t.equal(wm.windowInDirection(.right), 3,
+            "w2 and the floating w3 both abut w1; the more recently focused w3 wins")
+    t.equal(wm.windowInDirection(.left, from: 3), 1, "and it hands focus back")
+}
+
+h.test("a floating window keeps its frame across a workspace round trip") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1, floating: true)
+    wm.floatingFrames[1] = box(300, 200, 500, 400)
+
+    wm.switchTo(workspace: 2)
+    t.equal(wm.render().stashed, [1], "hidden workspace: w1 is stashed")
+    t.equal(wm.render().floating.isEmpty, true, "and not rendered as floating")
+
+    wm.switchTo(workspace: 1)
+    t.equalBox(wm.render().floating[1], box(300, 200, 500, 400), "comes back exactly where it was")
+}
+
 h.test("swapwindow across monitors trades slots, keeping both layouts") { t in
     let left = box(0, 0, 1512, 982)
     let right = box(1512, 0, 1920, 1080)
@@ -408,6 +473,14 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-shift-0")?.command, .moveToWorkspace(10, follow: true), "SUPER+SHIFT+0")
     t.equal(binding("super-w")?.command, .killActive, "SUPER+W closes")
     t.equal(binding("super-tab")?.command, .workspace(.next), "SUPER+TAB")
+
+    // SUPER+T is not a shipped default — it is a local-config binding, so assert the parser
+    // rather than the default table.
+    let (mods, code, key) = try BindingParser.parse("super-t", superKey: .option)
+    t.equal(mods, Modifiers.option, "super-t: SUPER resolves to Option")
+    t.equal(code, 0x11, "super-t: T key code")
+    t.equal(key, "t", "super-t: key name")
+    t.equal(try CommandParser.parse("togglefloating"), .toggleFloating, "togglefloating dispatcher")
 
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
     t.equal(arrows.allSatisfy { binding($0) != nil }, true, "all four focus arrows bound")

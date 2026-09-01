@@ -4,9 +4,10 @@ import Foundation
 public struct RenderPlan: Equatable {
     /// Tiled windows on a visible workspace and the frame each should occupy (gaps applied).
     public var frames: [WindowID: Box] = [:]
-    /// Windows belonging to a visible workspace that we do not tile (floating). The app layer
-    /// restores their remembered frame.
-    public var restored: Set<WindowID> = []
+    /// Floating windows on a visible workspace and the frame each should occupy. Unlike
+    /// `frames`, the app layer writes these once when they change and never re-asserts them —
+    /// a floating window belongs to whoever is dragging it.
+    public var floating: [WindowID: Box] = [:]
     /// Windows on a hidden workspace. The app layer parks these off-screen.
     public var stashed: Set<WindowID> = []
     /// The window that should hold focus, if it changed.
@@ -220,14 +221,17 @@ public final class WorkspaceManager {
               let ws = workspaces[index],
               let origin = ws.layout.idealBox(of: source) ?? floatingFrames[source]
         else { return nil }
-        _ = ws
 
-        // Candidates: every tiled window on a *visible* workspace. Hyprland's
+        // Candidates: every window on a *visible* workspace, floating ones included — a
+        // floated window you cannot focus again is a window you have lost. Hyprland's
         // `window_direction_monitor_fallback` defaults to true, so focus crosses monitors.
         var candidates: [(id: WindowID, box: Box)] = []
         for wsIndex in visibleWorkspaceIndices {
             guard let w = workspaces[wsIndex] else { continue }
             candidates.append(contentsOf: w.layout.idealBoxes())
+            for id in w.floating {
+                if let box = floatingFrames[id] { candidates.append((id: id, box: box)) }
+            }
         }
 
         return DirectionalSearch.windowInDirection(
@@ -351,6 +355,29 @@ public final class WorkspaceManager {
 
     // MARK: - Rendering
 
+    /// Where a floating window belongs. Hyprland restores `m_vLastFloatingSize` and
+    /// `m_vLastFloatingPosition`; `floatingFrames` is that, kept current by the app layer as
+    /// the window is dragged. A frame that no longer touches the monitor at all — remembered
+    /// from a display that has since been unplugged — is pulled back in rather than leaving
+    /// the window stranded off-screen. Anything that still overlaps is left exactly alone, so
+    /// dragging a window half off an edge is not undone on the next render.
+    private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
+        let usable = monitor.usable
+        guard let remembered = floatingFrames[id] else {
+            let w = usable.w / 2.0, h = usable.h / 2.0
+            return Box(x: usable.minX + (usable.w - w) / 2.0,
+                       y: usable.minY + (usable.h - h) / 2.0,
+                       w: w, h: h).rounded()
+        }
+        if remembered.intersects(usable) { return remembered }
+
+        let w = min(remembered.w, usable.w)
+        let h = min(remembered.h, usable.h)
+        return Box(x: clampf(remembered.x, usable.minX, max(usable.minX, usable.maxX - w)),
+                   y: clampf(remembered.y, usable.minY, max(usable.minY, usable.maxY - h)),
+                   w: w, h: h).rounded()
+    }
+
     public func render() -> RenderPlan {
         var plan = RenderPlan()
         let visibleIndices = visibleWorkspaceIndices
@@ -362,7 +389,9 @@ public final class WorkspaceManager {
                     ws.layout.recalculate()
                 }
                 for (id, box) in ws.layout.frames(gaps: gaps) { plan.frames[id] = box }
-                plan.restored.formUnion(ws.floating)
+                if let m = monitor(id: ws.monitorID) {
+                    for id in ws.floating { plan.floating[id] = floatingBox(for: id, on: m) }
+                }
             } else {
                 plan.stashed.formUnion(ws.windows)
             }
