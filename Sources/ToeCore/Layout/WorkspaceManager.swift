@@ -54,6 +54,10 @@ public final class WorkspaceManager {
     /// Frames of floating windows, supplied by the app layer so directional search has an
     /// origin box for them.
     public var floatingFrames: [WindowID: Box] = [:]
+    /// The pointer, in AX coordinates, supplied by the app layer so ToeCore stays free of
+    /// AppKit. Hyprland splits the window under the cursor when there is no focused tiled
+    /// window to split — see `onWindowCreatedTiling`'s `use_active_for_splits` branch.
+    public var cursorLocation: (() -> Point?)?
 
     public var options: DwindleOptions {
         didSet { workspaces.values.forEach { $0.layout.options = options; $0.layout.recalculate() } }
@@ -141,6 +145,23 @@ public final class WorkspaceManager {
 
     // MARK: - Window lifecycle
 
+    /// Hyprland looks at exactly one window — `m_lastWindow` — and falls to the pointer when
+    /// it is floating, unmapped or on another workspace. `focusHistory.first` is that window.
+    private func anchor(on ws: Workspace, excluding id: WindowID? = nil) -> WindowID? {
+        guard let last = focusHistory.first, last != id, ws.layout.contains(last) else { return nil }
+        return last
+    }
+
+    /// The pointer, but only while it is on the workspace's own monitor — Hyprland's
+    /// `vectorToWindowUnified` / `isPointOnReservedArea` are both scoped to that monitor.
+    private func focalPoint(on ws: Workspace) -> Point? {
+        guard let point = cursorLocation?(),
+              let monitor = monitor(id: ws.monitorID),
+              monitor.frame.contains(point)
+        else { return nil }
+        return point
+    }
+
     /// Add a window to the active workspace of the focused monitor, splitting the focused
     /// window (Hyprland's `use_active_for_splits`, which Omarchy leaves at its default).
     public func addWindow(_ id: WindowID, floating: Bool = false, toWorkspace index: Int? = nil) {
@@ -151,8 +172,7 @@ public final class WorkspaceManager {
         if floating {
             ws.floating.insert(id)
         } else {
-            let anchor = focusHistory.first { ws.layout.contains($0) }
-            ws.layout.insert(id, anchor: anchor)
+            ws.layout.insert(id, anchor: anchor(on: ws, excluding: id), focalPoint: focalPoint(on: ws))
         }
         noteFocus(id)
     }
@@ -171,8 +191,7 @@ public final class WorkspaceManager {
         let ws = workspace(index)
         if ws.floating.contains(id) {
             ws.floating.remove(id)
-            let anchor = focusHistory.first { $0 != id && ws.layout.contains($0) }
-            ws.layout.insert(id, anchor: anchor)
+            ws.layout.insert(id, anchor: anchor(on: ws, excluding: id), focalPoint: focalPoint(on: ws))
         } else {
             ws.layout.remove(id)
             ws.floating.insert(id)
@@ -230,16 +249,10 @@ public final class WorkspaceManager {
               let targetIndex = workspaceIndex(of: target)
         else { return false }
 
-        if sourceIndex == targetIndex {
-            workspaces[sourceIndex]?.layout.swap(source, target)
-        } else {
-            // Across monitors: exchange which workspace each window belongs to.
-            guard let a = workspaces[sourceIndex], let b = workspaces[targetIndex] else { return false }
-            a.layout.remove(source)
-            b.layout.remove(target)
-            a.layout.insert(target, anchor: nil)
-            b.layout.insert(source, anchor: nil)
-        }
+        guard let a = workspaces[sourceIndex], let b = workspaces[targetIndex] else { return false }
+        // Across monitors too, only the payloads move: `switchWindows` swaps the windows'
+        // monitor/workspace pointers rather than re-inserting, so both trees keep their shape.
+        DwindleLayout.swap(source, in: a.layout, with: target, in: b.layout)
         return true
     }
 
@@ -313,8 +326,8 @@ public final class WorkspaceManager {
         if wasFloating {
             target.floating.insert(id)
         } else {
-            let anchor = focusHistory.first { $0 != id && target.layout.contains($0) }
-            target.layout.insert(id, anchor: anchor)
+            target.layout.insert(id, anchor: anchor(on: target, excluding: id),
+                                 focalPoint: focalPoint(on: target))
         }
 
         if follow {
