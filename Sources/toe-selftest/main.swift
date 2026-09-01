@@ -365,6 +365,13 @@ h.test("a floating frame is left alone unless it is stranded") { t in
     wm.floatingFrames[1] = box(2000, 1400, 800, 600)   // remembered on a display since unplugged
     t.equalBox(wm.render().floating[1], box(712, 382, 800, 600), "pulled back into the usable area")
 
+    // Hiding a workspace parks a window one pixel inside the monitor's corner. Adopting a
+    // window that was left parked — toe killed rather than quit — captures that as its
+    // floating frame, and handing it straight back would make the window vanish.
+    wm.floatingFrames[1] = box(1511, 981, 800, 600)
+    t.equalBox(wm.render().floating[1], box(712, 382, 800, 600),
+               "a 1pt sliver on screen is not enough to take a frame at face value")
+
     wm.floatingFrames.removeValue(forKey: 1)
     t.equalBox(wm.render().floating[1], box(378, 246, 756, 491), "nothing remembered: centred, half size")
 }

@@ -24,6 +24,7 @@ final class Coordinator: WindowTrackerDelegate {
     /// than fought with forever.
     private var corrections: [WindowID: Int] = [:]
     private var focusApplied: WindowID?
+    private var signalSources: [any DispatchSourceSignal] = []
 
     // MARK: - Start-up
 
@@ -50,6 +51,7 @@ final class Coordinator: WindowTrackerDelegate {
             NSApp.terminate(nil)
         }
 
+        installSignalHandlers()
         writeDefaultConfigIfMissing()
         loadConfig()
 
@@ -66,6 +68,23 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
         beginManaging()
+    }
+
+    /// `make run` restarts toe with `pkill`, and SIGTERM's default action would leave a hidden
+    /// workspace's windows parked in the stash corner. The next launch then adopts them there
+    /// and records that corner as the frame to float them back to — so a window you floated
+    /// would disappear. Unstash before going away, exactly as the Quit menu item does.
+    private func installSignalHandlers() {
+        for number in [SIGTERM, SIGINT] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { [weak self] in
+                self?.unstashEverything()
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
     }
 
     /// toe is useless without Accessibility, but it should not die either — it keeps its menu

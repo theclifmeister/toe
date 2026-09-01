@@ -355,12 +355,21 @@ public final class WorkspaceManager {
 
     // MARK: - Rendering
 
+    /// How much of a floating window has to be on its monitor for its remembered frame to be
+    /// taken at face value. Matches the 60pt floor the tracker uses to decide a window is a
+    /// real window at all.
+    private static let minimumOnScreen = 60.0
+
     /// Where a floating window belongs. Hyprland restores `m_vLastFloatingSize` and
     /// `m_vLastFloatingPosition`; `floatingFrames` is that, kept current by the app layer as
-    /// the window is dragged. A frame that no longer touches the monitor at all — remembered
-    /// from a display that has since been unplugged — is pulled back in rather than leaving
-    /// the window stranded off-screen. Anything that still overlaps is left exactly alone, so
-    /// dragging a window half off an edge is not undone on the next render.
+    /// the window is dragged.
+    ///
+    /// A frame is taken as-is only while a usable amount of the window is still on the
+    /// monitor, so dragging one half off an edge is never undone on the next render. Anything
+    /// less is pulled back. Hyprland never has to think about this; toe does, because hiding a
+    /// workspace parks its windows with a single pixel inside the monitor's corner — a frame
+    /// captured from a parked window overlaps by 1×1pt, and handing that back would make the
+    /// window vanish.
     private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
         let usable = monitor.usable
         guard let remembered = floatingFrames[id] else {
@@ -369,7 +378,12 @@ public final class WorkspaceManager {
                        y: usable.minY + (usable.h - h) / 2.0,
                        w: w, h: h).rounded()
         }
-        if remembered.intersects(usable) { return remembered }
+
+        let onScreen = remembered.intersection(usable)
+        if onScreen.w >= min(Self.minimumOnScreen, remembered.w),
+           onScreen.h >= min(Self.minimumOnScreen, remembered.h) {
+            return remembered
+        }
 
         let w = min(remembered.w, usable.w)
         let h = min(remembered.h, usable.h)

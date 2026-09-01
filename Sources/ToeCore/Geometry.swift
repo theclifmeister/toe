@@ -49,11 +49,13 @@ public struct Box: Equatable, Hashable, Sendable {
         return dx * dx + dy * dy
     }
 
-    /// Whether any part of the two boxes overlap. Used to tell a floating window that has
-    /// merely been dragged near an edge from one whose remembered frame belongs to a display
-    /// that is no longer attached.
-    public func intersects(_ other: Box) -> Bool {
-        minX < other.maxX && maxX > other.minX && minY < other.maxY && maxY > other.minY
+    /// The overlapping region of two boxes, empty when they do not overlap. How much of a
+    /// floating window is actually on its monitor is measured with this.
+    public func intersection(_ other: Box) -> Box {
+        Box(x: max(minX, other.minX),
+            y: max(minY, other.minY),
+            w: min(maxX, other.maxX) - max(minX, other.minX),
+            h: min(maxY, other.maxY) - max(minY, other.minY)).noNegativeSize()
     }
 
     /// Shrink by per-edge insets. Used to apply gaps.
