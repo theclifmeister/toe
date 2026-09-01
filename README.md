@@ -23,7 +23,7 @@ as the defaults.
 | `SUPER` + `SHIFT` + `ENTER` | New browser window |
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
-| `SUPER` + `SHIFT` + `V` | Toggle floating |
+| `SUPER` + `T` | Toggle floating |
 
 `SUPER` is **Option (⌥)** — the same physical key position as SUPER on a PC keyboard, and it
 leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab untouched. Configurable.

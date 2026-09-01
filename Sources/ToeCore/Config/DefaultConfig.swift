@@ -106,7 +106,7 @@ persistent_workspaces = 5
 # ── Windows ───────────────────────────────────────────────────────────────────
 "super-w"       = "killactive"
 "super-j"       = "togglesplit"
-"super-shift-v" = "togglefloating"
+"super-t"       = "togglefloating"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current
