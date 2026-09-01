@@ -755,6 +755,10 @@ h.test("windows are listed in tree order, floating last") { t in
     t.equal(wm.orderedWindows(inWorkspace: 1), [1, 2, 3, 7, 9],
             "tiled left-to-right depth-first, then floating")
     t.equal(wm.orderedWindows(inWorkspace: 4), [], "an untouched workspace is empty")
+
+    // What the menu bar strip asks on every refresh, and why it does not ask for the list.
+    t.equal(wm.isEmpty(workspace: 1), false, "tiled and floating windows both count")
+    t.equal(wm.isEmpty(workspace: 4), true, "an untouched workspace holds nothing")
 }
 
 h.test("windows group by application in first-appearance order") { t in

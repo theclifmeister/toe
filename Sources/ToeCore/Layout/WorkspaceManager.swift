@@ -479,6 +479,12 @@ public extension WorkspaceManager {
         return ws.layout.windowIDs + ws.floating.sorted()
     }
 
+    /// Whether a workspace holds no windows — without building the window list, so the menu
+    /// bar can ask it on every status refresh.
+    func isEmpty(workspace index: Int) -> Bool {
+        workspaces[index]?.isEmpty ?? true
+    }
+
     /// Which monitor, if any, is currently showing this workspace.
     func monitorShowing(workspace index: Int) -> UInt32? {
         activeWorkspace.first { $0.value == index }?.key
