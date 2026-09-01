@@ -154,9 +154,16 @@ jobs:
       # release published but the cask still pointing at the previous version. Nothing here
       # needs human review: both values are derived from the release built above, and that
       # tree was already tested. So open the PR and merge it, and the release stays a single
-      # step. The ruleset permits no approvals and requires no checks, so this merges as-is;
-      # note it also means CI does not run on the PR, because a GITHUB_TOKEN-created PR does
-      # not trigger pull_request workflows.
+      # step. The ruleset permits no approvals and requires no checks, so this merges as-is.
+      #
+      # The commit is marked [skip ci] because this PR opens and merges within seconds, and
+      # the workflows it would otherwise start cannot survive that: CI and Claude Code Review
+      # both trigger on pull_request, and the branch is deleted out from under them before
+      # they finish, so they fail. GitHub honours the marker on the head commit for push and
+      # pull_request events, so no run is created at all — no failed runs, no wasted minutes,
+      # and no Claude quota spent reviewing two mechanical lines. (A GITHUB_TOKEN-created PR
+      # does still trigger those workflows, whatever the recursion guard implies; v0.4.0 is
+      # where that was observed.) --subject on the merge below keeps the marker out of main.
       - name: Bump cask
         env:
           GH_TOKEN: ${{ github.token }}
@@ -177,7 +184,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Bump toe cask to $VERSION" Casks/toe.rb
+          git commit -m "Bump toe cask to $VERSION [skip ci]" Casks/toe.rb
           # Force: the branch is named per version and owned by this job, so anything already
           # at that name is debris from a failed run of this same release.
           git push --force origin "$branch"
@@ -198,7 +205,7 @@ jobs:
           # Mergeability is computed asynchronously, so a merge straight after create can be
           # refused for a PR that is in fact fine.
           for attempt in 1 2 3 4 5; do
-            if gh pr merge "$branch" --squash; then
+            if gh pr merge "$branch" --squash --subject "Bump toe cask to $VERSION"; then
               git push origin --delete "$branch" || true
               exit 0
             fi
