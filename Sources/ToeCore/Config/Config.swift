@@ -7,7 +7,9 @@ public struct BorderConfig: Equatable {
     public var activeStart: String = "#33ccffee"
     public var activeEnd: String = "#00ff99ee"
     public var angle: Double = 45
-    public var radius: Double = 0
+    /// Negative follows the system window corner radius, 0 is square, positive is an
+    /// explicit value in points.
+    public var radius: Double = -1
     public init() {}
 }
 

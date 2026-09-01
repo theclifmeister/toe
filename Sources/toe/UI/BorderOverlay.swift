@@ -8,7 +8,10 @@ final class BorderOverlay {
 
     private let panel: NSPanel
     private let gradient = CAGradientLayer()
-    private let shape = CAShapeLayer()
+    /// The gradient's mask. A plain CALayer, not a CAShapeLayer: only CALayer draws macOS's
+    /// continuous-curvature corners, and a mask masks by whatever alpha it renders — so a layer
+    /// with no background and a white border is exactly the band we want.
+    private let band = CALayer()
     private var config = BorderConfig()
 
     init() {
@@ -27,10 +30,14 @@ final class BorderOverlay {
         let view = NSView(frame: .zero)
         view.wantsLayer = true
         view.layer?.addSublayer(gradient)
-        gradient.mask = shape
-        shape.fillColor = nil
-        shape.strokeColor = NSColor.white.cgColor
+        gradient.mask = band
+        band.backgroundColor = nil                  // the middle stays transparent
+        band.borderColor = NSColor.white.cgColor    // mask alpha only; the colour is the gradient's
+        band.cornerCurve = .continuous              // macOS's squircle, not a circular arc
         panel.contentView = view
+
+        // Resolves the system corner radius here, on the main thread, and records it once.
+        Log.info("system window corner radius: \(SystemCornerRadius.points) pt (\(SystemCornerRadius.source))")
     }
 
     func apply(_ newConfig: BorderConfig) {
@@ -41,8 +48,9 @@ final class BorderOverlay {
         let dx = cos(radians) / 2, dy = sin(radians) / 2
         gradient.startPoint = CGPoint(x: 0.5 - dx, y: 0.5 - dy)
         gradient.endPoint = CGPoint(x: 0.5 + dx, y: 0.5 + dy)
-        shape.lineWidth = newConfig.width
         if !newConfig.enabled { hide() }
+        // The band's width and radius move together and depend on the window, so both are set
+        // in show() rather than here.
     }
 
     /// `box` is the window's own frame in AX coordinates; the border is drawn just outside it.
@@ -54,17 +62,27 @@ final class BorderOverlay {
         let rect = Coordinates.toCocoa(outer)
         guard rect.width > 0, rect.height > 0 else { hide(); return }
 
+        let windowRadius = BorderGeometry.effectiveRadius(configured: config.radius,
+                                                          system: Double(SystemCornerRadius.points),
+                                                          box: box)
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         panel.setFrame(rect, display: false)
         let bounds = CGRect(origin: .zero, size: rect.size)
         panel.contentView?.frame = bounds
         gradient.frame = bounds
-        shape.frame = bounds
-        // Stroke straddles the path, so inset by half the line width to keep it inside.
-        shape.path = CGPath(roundedRect: bounds.insetBy(dx: w / 2, dy: w / 2),
-                            cornerWidth: config.radius, cornerHeight: config.radius,
-                            transform: nil)
+        // CALayer.borderWidth draws inside the bounds, unlike a CAShapeLayer stroke, so the band
+        // fills the whole outset with no half-line-width inset. Clearing the window's radius by
+        // the band width is what lands the band's inner edge on the window's own corner.
+        band.frame = bounds
+        band.borderWidth = w
+        band.cornerRadius = BorderGeometry.outerRadius(inner: windowRadius, width: w)
+        // A mask rasterises at its own contentsScale, which defaults to 1 — without this the
+        // border is soft on Retina. Re-read every time: the panel can change display.
+        let scale = panel.backingScaleFactor
+        if gradient.contentsScale != scale { gradient.contentsScale = scale }
+        if band.contentsScale != scale { band.contentsScale = scale }
         CATransaction.commit()
 
         panel.orderFront(nil)
