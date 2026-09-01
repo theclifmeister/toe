@@ -280,6 +280,7 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(c.dwindle.preserveSplit, true, "preserve_split")
     t.equal(c.dwindle.forceSplit, 2, "force_split")
     t.equal(c.border.activeStart, "#33ccffee", "Omarchy active border gradient start")
+    t.equal(c.border.radius, -1, "radius follows the system window corner radius")
     t.equal(c.floatRules.count, 5, "float rules")
 
     func binding(_ spec: String) -> Binding? { c.bindings.first { $0.source == spec } }
@@ -307,6 +308,27 @@ h.test("the shipped default config parses cleanly") { t in
     } else {
         t.expect(false, "SUPER+ENTER should be an exec binding")
     }
+}
+
+h.test("a negative radius survives the TOML parser") { t in
+    let c = try Config.parse("[border]\nradius = -1\n")
+    t.equal(c.border.radius, -1, "radius = -1")
+    t.equal(c.warnings, [], "no warnings")
+}
+
+h.test("border corner radius") { t in
+    let big = box(0, 0, 800, 600)
+    t.equal(BorderGeometry.effectiveRadius(configured: 12, system: 26, box: big), 12,
+            "an explicit radius wins over the system value")
+    t.equal(BorderGeometry.effectiveRadius(configured: -1, system: 26, box: big), 26,
+            "a negative radius follows the system")
+    t.equal(BorderGeometry.effectiveRadius(configured: 0, system: 26, box: big), 0,
+            "0 still means square")
+    t.equal(BorderGeometry.effectiveRadius(configured: -1, system: 26, box: box(0, 0, 20, 20)), 10,
+            "clamped to half the shorter side on a tiny window")
+    t.equal(BorderGeometry.outerRadius(inner: 26, width: 2), 28,
+            "the band's outer radius clears the window's by the band width")
+    t.equal(BorderGeometry.outerRadius(inner: 0, width: 2), 2, "square window, offset band")
 }
 
 h.test("binding specs parse in both spellings") { t in

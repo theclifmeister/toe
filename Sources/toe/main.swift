@@ -18,6 +18,13 @@ if CommandLine.arguments.contains("--print-default-config") {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+// `toe --print-corner-radius` reports what macOS rounds windows to, so the border can be
+// checked without granting Accessibility or launching the agent. Needs NSApp to exist.
+if CommandLine.arguments.contains("--print-corner-radius") {
+    print(SystemCornerRadius.points)
+    exit(0)
+}
+
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
