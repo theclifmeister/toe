@@ -34,14 +34,18 @@ at `~/.config/toe/toe.toml`.
 ## The menu bar
 
 The status item is the workspace strip, styled the way Omarchy's waybar styles it: the
-workspace you are on is a filled rounded square rather than a number, every other occupied
-workspace is its own digit, and workspace 10 shows as `0`. An empty workspace appears only
-while you are on it, dimmed. With several displays, a workspace showing on one you are not
-focused on gets the same square, outlined.
+workspace you are on is a filled rounded square rather than a number, every other workspace
+is its own digit, and workspace 10 shows as `0`. Workspaces 1-5 always have a slot — that is
+waybar's `persistent-workspaces` — dimmed while they are empty; past those, a workspace shows
+up only once it has windows on it. With several displays, a workspace showing on one you are
+not focused on gets the same square, outlined.
 
 ```
-▪ 3 7
+▪ 2 3 4 5 7
 ```
+
+`[bar] persistent_workspaces` sets how many keep a slot: `0` shows only the ones in use, `10`
+always shows all ten.
 
 Clicking a workspace switches to it, as Omarchy's `on-click: activate` does. Right-click —
 or left-click the padding at either end — to open the menu, which breaks each workspace down
