@@ -56,6 +56,51 @@ h.test("new window splits the focused window, not the last one") { t in
     t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "w3 untouched")
 }
 
+// MARK: - Insertion fallbacks
+
+// With no focused tiled window to split, Hyprland falls to the leaf under the pointer, then
+// to the closest leaf when the pointer sits on a reserved strip, then to the oldest window.
+
+h.test("with no focused window, the leaf under the pointer splits") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    l.insert(3, anchor: 2)
+    // Pointer inside w2's tile. The fail-safe would have picked w1, the oldest.
+    l.insert(4, anchor: nil, focalPoint: Point(x: 1000, y: 100))
+    t.equalBox(l.idealBox(of: 2), box(756, 0, 378, 491), "w2 shrinks to its left half")
+    t.equalBox(l.idealBox(of: 4), box(1134, 0, 378, 491), "w4 takes w2's right half")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 756, 982), "w1 untouched")
+    t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "w3 untouched")
+}
+
+h.test("a pointer off the tiling area falls to the closest leaf") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    l.insert(3, anchor: 2)
+    // Below the tiling area — the Dock strip, Hyprland's isPointOnReservedArea case.
+    // The fail-safe would have picked w1; the closest leaf is w3.
+    l.insert(4, anchor: nil, focalPoint: Point(x: 1200, y: 1000))
+    t.equalBox(l.idealBox(of: 3), box(756, 491, 378, 491), "w3, the nearest leaf, shrinks to its left half")
+    t.equalBox(l.idealBox(of: 4), box(1134, 491, 378, 491), "w4 takes w3's right half")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 756, 982), "w1 untouched")
+    t.equalBox(l.idealBox(of: 2), box(756, 0, 756, 491), "w2 untouched")
+}
+
+h.test("the fail-safe leaf is the oldest window, not the leftmost") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    l.swapSplit(1)   // w2 is now the leftmost leaf, w1 is still the oldest
+    t.equalBox(l.idealBox(of: 2), box(0, 0, 756, 982), "w2 moved to the left half")
+
+    l.insert(3, anchor: nil)
+    t.equalBox(l.idealBox(of: 1), box(756, 0, 756, 491), "w1 split, the way getFirstNodeOnWorkspace picks it")
+    t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "w3 took w1's bottom half")
+    t.equalBox(l.idealBox(of: 2), box(0, 0, 756, 982), "w2 untouched")
+}
+
 // MARK: - preserve_split
 
 h.test("preserve_split freezes orientation across a resize") { t in
@@ -131,6 +176,34 @@ h.test("swapwindow exchanges windows without reshaping the tree") { t in
     t.equalBox(l.idealBox(of: 3), box(0, 0, 756, 982), "w3 now occupies the left half")
     t.equalBox(l.idealBox(of: 1), box(756, 491, 756, 491), "w1 now occupies the bottom-right quarter")
     t.equalBox(l.idealBox(of: 2), box(756, 0, 756, 491), "w2 untouched")
+}
+
+h.test("swapwindow across monitors reshapes neither tree") { t in
+    let a = omarchyLayout()
+    a.insert(1, anchor: nil)
+    a.insert(2, anchor: 1)
+    a.insert(3, anchor: 2)
+
+    let b = omarchyLayout(area: box(1512, 0, 1920, 1080))
+    b.insert(10, anchor: nil)
+    b.insert(11, anchor: 10)
+
+    let beforeA = a.idealBoxes().map(\.box).sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+    let beforeB = b.idealBoxes().map(\.box).sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+
+    DwindleLayout.swap(3, in: a, with: 11, in: b)
+
+    t.equal(a.idealBoxes().map(\.box).sorted { ($0.x, $0.y) < ($1.x, $1.y) }, beforeA, "tree A keeps its boxes")
+    t.equal(b.idealBoxes().map(\.box).sorted { ($0.x, $0.y) < ($1.x, $1.y) }, beforeB, "tree B keeps its boxes")
+
+    t.equalBox(a.idealBox(of: 11), box(756, 491, 756, 491), "w11 took w3's exact slot on A")
+    t.equalBox(b.idealBox(of: 3), box(2472, 0, 960, 1080), "w3 took w11's exact slot on B")
+    t.equalBox(a.idealBox(of: 1), box(0, 0, 756, 982), "w1 untouched")
+    t.equalBox(a.idealBox(of: 2), box(756, 0, 756, 491), "w2 untouched")
+    t.equalBox(b.idealBox(of: 10), box(1512, 0, 960, 1080), "w10 untouched")
+
+    t.expect(!a.contains(3) && b.contains(3), "w3 moved to tree B")
+    t.expect(!b.contains(11) && a.contains(11), "w11 moved to tree A")
 }
 
 // MARK: - Gaps
@@ -240,6 +313,47 @@ h.test("movetoworkspace follows the window") { t in
     wm.moveFocusedWindow(toWorkspace: 1, follow: false)
     t.equal(wm.focusedWorkspaceIndex, 3, "silent move does not follow")
     t.equal(wm.workspaceIndex(of: 2), 1, "w2 moved anyway")
+}
+
+h.test("a floating focus falls back to the window under the pointer") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)   // the usual staircase
+
+    wm.addWindow(4, floating: true)                     // focus is now on a floating window
+    wm.cursorLocation = { Point(x: 1000, y: 100) }      // pointer sits over w2's tile
+    wm.addWindow(5)
+
+    let l = wm.workspaces[wm.focusedWorkspaceIndex]!.layout
+    t.equalBox(l.idealBox(of: 2), box(756, 0, 378, 491), "w2, under the pointer, shrinks to its left half")
+    t.equalBox(l.idealBox(of: 5), box(1134, 0, 378, 491), "w5 takes w2's right half")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 756, 982), "w1 untouched")
+    t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "w3 untouched")
+}
+
+h.test("swapwindow across monitors trades slots, keeping both layouts") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    let leftWS = wm.activeWorkspace[1]!
+    let rightWS = wm.activeWorkspace[2]!
+    wm.switchTo(workspace: leftWS)
+    wm.addWindow(1); wm.addWindow(2)
+    wm.switchTo(workspace: rightWS)
+    wm.addWindow(10); wm.addWindow(11)
+
+    wm.noteFocus(2)
+    t.equal(wm.swapWindow(.right), true, "w2's right neighbour is w10, on the other monitor")
+
+    t.equal(wm.workspaceIndex(of: 2), rightWS, "w2 now lives on the right monitor's workspace")
+    t.equal(wm.workspaceIndex(of: 10), leftWS, "w10 now lives on the left monitor's workspace")
+    t.equalBox(wm.workspaces[leftWS]?.layout.idealBox(of: 10), box(756, 0, 756, 982), "w10 took w2's exact slot")
+    t.equalBox(wm.workspaces[rightWS]?.layout.idealBox(of: 2), box(1512, 0, 960, 1080), "w2 took w10's exact slot")
+    t.equalBox(wm.workspaces[leftWS]?.layout.idealBox(of: 1), box(0, 0, 756, 982), "w1 untouched")
+    t.equalBox(wm.workspaces[rightWS]?.layout.idealBox(of: 11), box(2472, 0, 960, 1080), "w11 untouched")
 }
 
 h.test("a workspace follows its monitor") { t in

@@ -42,6 +42,13 @@ public struct Box: Equatable, Hashable, Sendable {
         p.x >= x && p.x < maxX && p.y >= y && p.y < maxY
     }
 
+    /// Hyprland's `vecToRectDistanceSquared` — zero when the point is inside the box.
+    public func distanceSquared(to p: Point) -> Double {
+        let dx = max(0.0, minX - p.x, p.x - maxX)
+        let dy = max(0.0, minY - p.y, p.y - maxY)
+        return dx * dx + dy * dy
+    }
+
     /// Shrink by per-edge insets. Used to apply gaps.
     public func inset(top: Double, left: Double, bottom: Double, right: Double) -> Box {
         Box(x: x + left, y: y + top, w: w - left - right, h: h - top - bottom).noNegativeSize()

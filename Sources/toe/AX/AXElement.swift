@@ -110,6 +110,10 @@ enum Coordinates {
     static func toAX(_ rect: NSRect) -> Box {
         Box(x: rect.minX, y: primaryFrame.maxY - rect.maxY, w: rect.width, h: rect.height)
     }
+
+    static func toAX(_ point: NSPoint) -> Point {
+        Point(x: point.x, y: primaryFrame.maxY - point.y)
+    }
 }
 
 extension NSScreen {

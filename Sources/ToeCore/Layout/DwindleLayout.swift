@@ -23,6 +23,9 @@ public final class DwindleLayout {
 
     public private(set) var root: DwindleNode?
     private var nodes: [WindowID: DwindleNode] = [:]
+    /// Creation order, so the insertion fail-safe can pick the oldest window the way
+    /// Hyprland's `getFirstNodeOnWorkspace` scans `m_dwindleNodesData` in list order.
+    private var order: [WindowID] = []
 
     public init(area: Box, options: DwindleOptions = DwindleOptions()) {
         self.area = area
@@ -41,6 +44,12 @@ public final class DwindleLayout {
     /// The leaf whose box contains `point`.
     public func node(at point: Point) -> DwindleNode? {
         root?.leaves().first { $0.box.contains(point) }
+    }
+
+    /// Port of `getClosestNodeOnWorkspace`: the leaf nearest `point`, used when the pointer
+    /// is on the monitor but outside the tiling area (Hyprland's reserved strip).
+    public func closestNode(to point: Point) -> DwindleNode? {
+        root?.leaves().min { $0.box.distanceSquared(to: point) < $1.box.distanceSquared(to: point) }
     }
 
     // MARK: - Insertion
@@ -64,15 +73,21 @@ public final class DwindleLayout {
 
         let node = DwindleNode(window: id)
         nodes[id] = node
+        order.append(id)
 
-        // Resolve what we are splitting. Fall back to any leaf, as Hyprland's fail-safe does.
+        // Resolve what we are splitting, in Hyprland's order: the focused window, else the
+        // leaf under the pointer, else — when the pointer is off the tiling area, its
+        // `isPointOnReservedArea` case — the closest leaf, else the fail-safe oldest leaf.
         var openingOn: DwindleNode?
         if let anchor, let anchorNode = nodes[anchor], anchorNode !== node {
             openingOn = anchorNode
         } else if let focalPoint, let hit = self.node(at: focalPoint), hit !== node {
             openingOn = hit
+        } else if let focalPoint, !area.contains(focalPoint),
+                  let near = closestNode(to: focalPoint), near !== node {
+            openingOn = near
         } else {
-            openingOn = root?.leaves().first { $0 !== node }
+            openingOn = order.first { $0 != id }.flatMap { nodes[$0] }
         }
 
         // First window on the workspace: it takes the whole usable area.
@@ -92,8 +107,9 @@ public final class DwindleLayout {
 
         // Child ordering.
         if options.forceSplit == 0 || !isFirstMap {
-            // Hyprland consults the pointer here. macOS has no cursor-follows-focus, so a
-            // focal point is only present for `movewindow`; otherwise behave as force_split = 2.
+            // Hyprland consults the pointer here, and so do we: the focal point is the
+            // cursor on a fresh map, or the edge probe `movewindow` computes. With no point
+            // at all — a headless insert — behave as force_split = 2.
             let firstHalf: Bool
             if let fp = focalPoint {
                 firstHalf = sideBySide
@@ -138,6 +154,7 @@ public final class DwindleLayout {
     /// Port of `onWindowRemovedTiling`: the sibling absorbs the parent's box and slot.
     public func remove(_ id: WindowID) {
         guard let node = nodes.removeValue(forKey: id) else { return }
+        order.removeAll { $0 == id }
 
         guard let parent = node.parent else {
             // Last window on the workspace.
@@ -183,7 +200,39 @@ public final class DwindleLayout {
         nb.window = a
         nodes[a] = nb
         nodes[b] = na
+        swapOrder(a, b)
         recalculate()
+    }
+
+    /// `switchWindows` across two trees. Hyprland swaps the node payloads and then the
+    /// windows' monitor/workspace pointers — it never re-inserts, so both shapes survive.
+    public static func swap(_ a: WindowID, in la: DwindleLayout, with b: WindowID, in lb: DwindleLayout) {
+        guard a != b else { return }
+        if la === lb {
+            la.swap(a, b)
+            return
+        }
+        guard let na = la.nodes[a], let nb = lb.nodes[b] else { return }
+
+        na.window = b
+        nb.window = a
+
+        la.nodes[a] = nil
+        la.nodes[b] = na
+        lb.nodes[b] = nil
+        lb.nodes[a] = nb
+
+        // The nodes keep their creation order; only the window each one carries moves.
+        if let ia = la.order.firstIndex(of: a) { la.order[ia] = b }
+        if let ib = lb.order.firstIndex(of: b) { lb.order[ib] = a }
+
+        la.recalculate()
+        lb.recalculate()
+    }
+
+    private func swapOrder(_ a: WindowID, _ b: WindowID) {
+        guard let ia = order.firstIndex(of: a), let ib = order.firstIndex(of: b) else { return }
+        order.swapAt(ia, ib)
     }
 
     /// Port of `moveWindowTo` — the `movewindow` dispatcher. Removes the window and

@@ -28,6 +28,7 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - Start-up
 
     func start() {
+        workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
         status.workspaceProvider = { [weak self] in self?.workspaceSummaries() ?? [] }
         status.onSelectWorkspace = { [weak self] index in
             self?.dispatch(.workspace(.index(index)))
