@@ -344,8 +344,8 @@ h.test("toggling a window out of the tree and back") { t in
     t.equal(wm.isFloating(2), true, "w2 floats")
     t.equal(wm.workspaces[1]?.layout.contains(2), false, "and has left the tree")
     t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), AREA, "w1 absorbs the whole area")
-    t.equalBox(wm.render().floating[2], box(436, 291, 640, 400),
-               "centred on the monitor, at the size it remembers")
+    t.equalBox(wm.render().floating[2], box(227, 98, 1058, 786),
+               "centred, 70% wide by 80% tall — the same box whichever window it came from")
 
     wm.floatingFrames[2] = box(40, 40, 640, 400)   // dragged into the corner by hand
     t.equalBox(wm.render().floating[2], box(40, 40, 640, 400),
@@ -368,17 +368,17 @@ h.test("a floating frame is left alone unless it is stranded") { t in
                "dragged half off an edge: not undone on the next render")
 
     wm.floatingFrames[1] = box(2000, 1400, 800, 600)   // remembered on a display since unplugged
-    t.equalBox(wm.render().floating[1], box(356, 191, 800, 600), "centred, at the size it remembers")
+    t.equalBox(wm.render().floating[1], box(227, 98, 1058, 786), "centred at the standard floating size")
 
     // Hiding a workspace parks a window one pixel inside the monitor's corner. Adopting a
     // window that was left parked — toe killed rather than quit — captures that as its
     // floating frame, and handing it straight back would make the window vanish.
     wm.floatingFrames[1] = box(1511, 981, 800, 600)
-    t.equalBox(wm.render().floating[1], box(356, 191, 800, 600),
+    t.equalBox(wm.render().floating[1], box(227, 98, 1058, 786),
                "a 1pt sliver on screen is not enough to take a frame at face value")
 
     wm.floatingFrames.removeValue(forKey: 1)
-    t.equalBox(wm.render().floating[1], box(378, 246, 756, 491), "nothing remembered: centred, half the screen")
+    t.equalBox(wm.render().floating[1], box(227, 98, 1058, 786), "nothing remembered: the same centred box")
 }
 
 h.test("a floating window is centred when its display is disconnected") { t in
@@ -395,8 +395,27 @@ h.test("a floating window is centred when its display is disconnected") { t in
     // The left display is unplugged. Workspace 1 re-homes to what is left of the desk.
     wm.setMonitors([Monitor(id: 2, frame: right, usable: right)])
     wm.switchTo(workspace: 1)
-    t.equalBox(wm.render().floating[1], box(2072, 240, 800, 600),
-               "centred on the remaining display, keeping the size it remembers")
+    t.equalBox(wm.render().floating[1], box(1800, 108, 1344, 864),
+               "centred on the remaining display, sized to it")
+}
+
+h.test("a floating window is not a letterbox on an ultrawide") { t in
+    let wide = box(0, 0, 5120, 1410)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: wide, usable: wide)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.noteFocus(2)
+    wm.toggleFloating(2)
+
+    // 80% of 1410 is 1128 tall. A plain 70% of 5120 would be 3584 wide — instead the window
+    // stops at 1.6 times its own height.
+    t.equalBox(wm.render().floating[2], box(1658, 141, 1805, 1128),
+               "width capped by max_aspect_ratio, still centred")
+
+    wm.floatingSize.maxAspectRatio = 100                 // effectively uncapped
+    wm.noteFocus(2)
+    wm.toggleFloating(2); wm.toggleFloating(2)           // re-float to re-centre
+    t.equalBox(wm.render().floating[2], box(768, 141, 3584, 1128), "uncapped, it is the full 70%")
 }
 
 h.test("movefocus reaches a floating window") { t in
@@ -492,6 +511,9 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(c.border.activeStart, "#33ccffee", "Omarchy active border gradient start")
     t.equal(c.border.radius, -1, "radius follows the system window corner radius")
     t.equal(c.floatRules.count, 5, "float rules")
+    t.equal(c.floating.width, 0.70, "floating width fraction")
+    t.equal(c.floating.height, 0.80, "floating height fraction")
+    t.equal(c.floating.maxAspectRatio, 1.6, "floating max aspect ratio")
 
     func binding(_ spec: String) -> Binding? { c.bindings.first { $0.source == spec } }
 

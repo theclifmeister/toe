@@ -149,6 +149,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         workspaces.options = newConfig.dwindle
         workspaces.gaps = newConfig.gaps
+        workspaces.floatingSize = newConfig.floating
         tracker.floatRules = newConfig.floatRules
         border.apply(newConfig.border)
         status.persistentWorkspaces = newConfig.bar.persistentWorkspaces

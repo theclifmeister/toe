@@ -64,6 +64,8 @@ public final class WorkspaceManager {
         didSet { workspaces.values.forEach { $0.layout.options = options; $0.layout.recalculate() } }
     }
     public var gaps: Gaps
+    /// How big a window is when it leaves the tree. See `centredFloatingBox`.
+    public var floatingSize = FloatingSize()
 
     public init(options: DwindleOptions = DwindleOptions(), gaps: Gaps = Gaps()) {
         self.options = options
@@ -201,7 +203,7 @@ public final class WorkspaceManager {
             // window — deriving it every render would drag the window back to the middle of
             // the screen the moment you tried to move it.
             if let m = monitor(id: ws.monitorID) {
-                floatingFrames[id] = centredFloatingBox(for: id, on: m)
+                floatingFrames[id] = centredFloatingBox(on: m)
             }
         }
     }
@@ -379,7 +381,7 @@ public final class WorkspaceManager {
     /// window vanish.
     private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
         guard let remembered = floatingFrames[id] else {
-            return centredFloatingBox(for: id, on: monitor)
+            return centredFloatingBox(on: monitor)
         }
 
         let onScreen = remembered.intersection(monitor.usable)
@@ -392,15 +394,16 @@ public final class WorkspaceManager {
         // unplugged, or a window left parked in the stash corner. Centring rather than
         // clamping matters here — an edge-clamped window lands wherever the old geometry
         // happened to point, which on a display that is gone is arbitrary.
-        return centredFloatingBox(for: id, on: monitor)
+        return centredFloatingBox(on: monitor)
     }
 
-    /// Centred on the monitor at the size the window remembers — what it was before toe first
-    /// tiled it, or the last size it floated at — or half the screen with nothing to go on.
-    private func centredFloatingBox(for id: WindowID, on monitor: Monitor) -> Box {
+    /// Centred on the monitor at a consistent fraction of it, so a floating window is the
+    /// same shape whichever window it came from. The aspect cap is what keeps that honest on
+    /// a wide display, where a plain width fraction would produce a letterbox.
+    private func centredFloatingBox(on monitor: Monitor) -> Box {
         let usable = monitor.usable
-        let w = min(floatingFrames[id]?.w ?? usable.w / 2.0, usable.w)
-        let h = min(floatingFrames[id]?.h ?? usable.h / 2.0, usable.h)
+        let h = min(usable.h * floatingSize.height, usable.h)
+        let w = min(usable.w * floatingSize.width, usable.w, h * floatingSize.maxAspectRatio)
         return Box(x: usable.minX + (usable.w - w) / 2.0,
                    y: usable.minY + (usable.h - h) / 2.0,
                    w: w, h: h).rounded()

@@ -21,6 +21,18 @@ public struct BarConfig: Equatable {
     public init() {}
 }
 
+/// How big a window is when it leaves the tiling tree.
+public struct FloatingSize: Equatable {
+    /// Fraction of the monitor's usable width and height.
+    public var width: Double = 0.70
+    public var height: Double = 0.80
+    /// Widest the window may be relative to its own height. On an ultrawide, 70% of the
+    /// width is a letterbox; capping the ratio keeps a floating window a shape you would
+    /// have picked by hand, on any display.
+    public var maxAspectRatio: Double = 1.6
+    public init() {}
+}
+
 /// A window that should float instead of joining the dwindle tree.
 public struct FloatRule: Equatable {
     /// Bundle identifier. `*` matches any run of characters.
@@ -63,6 +75,7 @@ public struct Config: Equatable {
     public var dwindle: DwindleOptions = DwindleOptions()
     public var border: BorderConfig = BorderConfig()
     public var bar: BarConfig = BarConfig()
+    public var floating: FloatingSize = FloatingSize()
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
     /// Non-fatal problems (a binding that would not parse, an unknown key). Surfaced in the
@@ -130,6 +143,24 @@ public struct Config: Equatable {
                     config.bar.persistentWorkspaces = v
                 } else {
                     config.warnings.append("bar.persistent_workspaces: must be 0 ... \(WorkspaceManager.workspaceCount), using \(config.bar.persistentWorkspaces)")
+                }
+            }
+        }
+
+        if let f = root["floating"]?.tableValue {
+            if let v = f["width"]?.doubleValue {
+                if v > 0, v <= 1 { config.floating.width = v } else {
+                    config.warnings.append("floating.width: must be over 0 and at most 1, using \(config.floating.width)")
+                }
+            }
+            if let v = f["height"]?.doubleValue {
+                if v > 0, v <= 1 { config.floating.height = v } else {
+                    config.warnings.append("floating.height: must be over 0 and at most 1, using \(config.floating.height)")
+                }
+            }
+            if let v = f["max_aspect_ratio"]?.doubleValue {
+                if v > 0 { config.floating.maxAspectRatio = v } else {
+                    config.warnings.append("floating.max_aspect_ratio: must be over 0, using \(config.floating.maxAspectRatio)")
                 }
             }
         }
