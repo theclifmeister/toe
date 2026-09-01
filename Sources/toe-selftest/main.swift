@@ -681,6 +681,57 @@ h.test("border corner radius") { t in
     t.equal(BorderGeometry.outerRadius(inner: 0, width: 2), 2, "square window, offset band")
 }
 
+// The decision is tested here; the window-list read that feeds it lives in WindowStack and
+// needs a live window server, so it is not. Geometry from the capture that found the bug:
+// Ghostty focused at 15,48 842x1054 with a 4pt band, Raycast's Settings at 364,215 1000x626.
+h.test("the border only gives way to a window that covers the band") { t in
+    let window = box(15, 48, 842, 1054)
+    let width = 4.0
+    func covered(_ others: [Box]) -> Bool {
+        BorderGeometry.bandIsCovered(window: window, width: width, by: others)
+    }
+
+    t.equalBox(BorderGeometry.outset(window, by: width), box(11, 44, 850, 1062),
+               "the band's outer rectangle is the panel toe actually put on screen")
+
+    t.equal(covered([box(364, 215, 1000, 626)]), true,
+            "a dialog running past the window's right edge covers the band")
+    t.equal(covered([box(300, 300, 200, 150)]), false,
+            "a dialog centred on the window covers the hole, not the ring")
+    t.equal(covered([window]), false,
+            "a window the same size and place covers the hole, not the ring")
+    t.equal(covered([box(600, 300, 257, 150)]), false,
+            "flush against the window's right edge from inside is still the hole")
+    t.equal(covered([box(857, 48, 400, 1054)]), true,
+            "starting on that edge covers the whole band width")
+
+    t.equal(covered([box(861, 44, 400, 1062)]), false,
+            "a neighbouring tile that only abuts the outer rectangle does not count")
+    // Measured by how far the overlap reaches *past* the window's edge, so these two differ
+    // by where they end, not where they start.
+    t.equal(covered([box(600, 300, 257.25, 150)]), false,
+            "a quarter-point past the edge is rounding noise between AX and the window server")
+    t.equal(covered([box(600, 300, 259, 150)]), true,
+            "two points past it is real")
+
+    t.equal(covered([box(15, 900, 842, 300)]), true,
+            "poking past the bottom edge covers the band there")
+    t.equal(covered([box(0, 0, 3456, 2234)]), true, "a full-screen window covers everything")
+    t.equal(covered([box(2000, 48, 800, 1000)]), false,
+            "a window on the next display along cannot cover this band")
+    t.equal(covered([box(-900, 48, 800, 1000)]), false,
+            "nor one on the display to the left, at negative coordinates")
+
+    t.equal(covered([]), false, "nothing above means nothing covering")
+    t.equal(BorderGeometry.bandIsCovered(window: window, width: 0, by: [box(0, 0, 3456, 2234)]),
+            false, "no band, nothing to cover")
+
+    t.equal(covered([box(300, 300, 200, 150), box(364, 215, 1000, 626)]), true,
+            "the second of two is enough")
+    t.equal(covered([box(300, 300, 200, 150), box(400, 400, 100, 100)]), false,
+            "neither of two is still nothing")
+}
+
 h.test("binding specs parse in both spellings") { t in
     func parse(_ s: String) -> String? {
         guard let (m, code, name) = try? BindingParser.parse(s, superKey: .option) else { return nil }

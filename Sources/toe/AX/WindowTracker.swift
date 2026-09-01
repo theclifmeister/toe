@@ -33,6 +33,10 @@ protocol WindowTrackerDelegate: AnyObject {
     /// geometry, or the user dragging it.
     func windowFrameChangedExternally(_ id: CGWindowID)
     func screensChanged()
+    /// Something moved in the window stack that toe does not manage: another application came
+    /// forward, or one opened a window toe will never tile. Neither changes the layout, but
+    /// both change what is stacked over the focused window.
+    func windowStackChanged()
 }
 
 /// Discovers windows and keeps them in sync with the running applications.
@@ -93,6 +97,24 @@ final class WindowTracker {
             // swiftlint:disable:next force_cast
             if let id = (focused as! AXUIElement).windowID, windows[id] != nil {
                 delegate?.windowFocused(id)
+            }
+        }
+        // Unconditionally, and after the focus forwarding above rather than inside it: the app
+        // coming forward is very often one toe manages nothing for — Raycast opening its
+        // settings panel over the focused tile is the case that prompted this — and that is
+        // exactly when the border needs to be told what is now stacked above it.
+        noteStackChange()
+    }
+
+    /// Fires now and twice more shortly after. The notification arrives before the window
+    /// server has necessarily finished raising and placing the window, and the border's depth
+    /// is decided from stacking that is only true a beat later — the same reason `observe`
+    /// sweeps for windows more than once, and bounded the same way.
+    private func noteStackChange() {
+        delegate?.windowStackChanged()
+        for delay in [0.15, 0.4] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.delegate?.windowStackChanged()
             }
         }
     }
@@ -182,7 +204,10 @@ final class WindowTracker {
     fileprivate func handle(notification: String, element: AXUIElement) {
         switch notification {
         case kAXWindowCreatedNotification:
-            adopt(element, pid: element.pid)
+            // A window toe will never manage — a dialog, a sheet, a palette — still changes
+            // what is stacked over the focused one. `adopt` returns the existing window when
+            // it already knows it, so this only fires for windows nothing else reports.
+            if adopt(element, pid: element.pid) == nil { noteStackChange() }
 
         case kAXWindowMovedNotification, kAXWindowResizedNotification:
             guard let id = windows.first(where: { CFEqual($0.value.element, element) })?.key else { return }

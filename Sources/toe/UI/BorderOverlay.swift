@@ -14,10 +14,18 @@ final class BorderOverlay {
     private let band = CALayer()
     private var config = BorderConfig()
 
-    /// Where the border sits in the window stack.
+    /// Where the border sits in the window stack. Chosen per update by
+    /// `Coordinator.borderDepth(around:of:)` rather than fixed.
     enum Depth {
-        /// Above every ordinary window — the focused window's own outline, which nothing
-        /// should cover.
+        /// Above every ordinary window. Where the focused window's outline belongs whenever
+        /// nothing is stacked over it — which is nearly always, and is why it is the starting
+        /// point rather than the exception.
+        ///
+        /// It cannot be the only answer, though. `.floating` is CG layer 3, and the window
+        /// server composites by layer before z-order, so this level draws above every ordinary
+        /// window whether or not it is really in front — which had the ring drawn straight
+        /// through any dialog opened over the focused window. `WindowStack` derives its own
+        /// bound from this level; the two are the same fact.
         case aboveEverything
         /// Just behind the frontmost window, above all the rest.
         ///
@@ -28,6 +36,11 @@ final class BorderOverlay {
         /// window level decides the order regardless — but the ordinary level arrives at the
         /// same place anyway: toe is a background app, so a normal-level panel lands directly
         /// beneath the frontmost application's window, which is the one in the user's hand.
+        ///
+        /// It does the same job for a window stacked over the focused one: at the ordinary
+        /// level the ring still draws above every inactive application, so it stays visible
+        /// all the way round the focused window, while the window in front covers the part of
+        /// it that it genuinely overlaps.
         case behindFrontmost
 
         var level: NSWindow.Level { self == .aboveEverything ? .floating : .normal }
@@ -73,11 +86,16 @@ final class BorderOverlay {
     }
 
     /// `box` is the window's own frame in AX coordinates; the border is drawn just outside it.
-    func show(around box: Box, depth: Depth = .aboveEverything) {
+    ///
+    /// `depth` has no default on purpose: both call sites decide it, and a default is how a
+    /// future one would silently go back to drawing over whatever is in front of it.
+    func show(around box: Box, depth: Depth) {
         guard config.enabled, config.width > 0 else { hide(); return }
 
         let w = config.width
-        let outer = Box(x: box.x - w, y: box.y - w, w: box.w + 2 * w, h: box.h + 2 * w)
+        // The same `outset` the depth decision measures against, so what is drawn and what is
+        // tested for coverage cannot drift apart.
+        let outer = BorderGeometry.outset(box, by: w)
         let rect = Coordinates.toCocoa(outer)
         guard rect.width > 0, rect.height > 0 else { hide(); return }
 
