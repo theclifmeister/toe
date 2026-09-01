@@ -94,7 +94,11 @@ enum Design {
     /// toe's own `gaps_in` default is 5pt, which on a real display is about a third of one
     /// percent of the screen — far too fine to survive here. This is the gap read as a graphic
     /// device rather than to scale.
-    static let gutter: CGFloat = 0.020
+    ///
+    /// Tuned down from 0.020 once the shadow compositing was fixed and it became visible at
+    /// large sizes for the first time: at 0.020 it reads as a gap that interrupts the letter,
+    /// where the intent is a seam that hints at tiling without costing legibility.
+    static let gutter: CGFloat = 0.014
 
     /// Pane corners, as a fraction of the bundle shape. In the neighbourhood of a real macOS
     /// window's 24pt rounding relative to a display, then nudged up so it still reads as
@@ -198,24 +202,6 @@ func bundleShapePath(center: CGPoint, side: CGFloat) -> CGPath {
     return path
 }
 
-/// The T as one path: crossbar and stem merged, no gutter. Used at small sizes, and as the
-/// silhouette the shadow is cast from at large ones.
-func solidTPath(box: CGRect, stemWidth: CGFloat, radius: CGFloat) -> CGPath {
-    let crossbarHeight = box.height * Design.crossbarDepth
-    let crossbar = CGRect(
-        x: box.minX, y: box.maxY - crossbarHeight,
-        width: box.width, height: crossbarHeight)
-    let stemW = box.width * stemWidth
-    let stem = CGRect(
-        x: box.midX - stemW / 2, y: box.minY,
-        width: stemW, height: box.height - crossbarHeight)
-
-    let path = CGMutablePath()
-    path.addPath(CGPath(roundedRect: crossbar, cornerWidth: radius, cornerHeight: radius, transform: nil))
-    path.addPath(CGPath(roundedRect: stem, cornerWidth: radius, cornerHeight: radius, transform: nil))
-    return path
-}
-
 // MARK: - Drawing
 
 func drawIcon(into ctx: CGContext, pixelSize px: Int) {
@@ -280,44 +266,67 @@ func drawIcon(into ctx: CGContext, pixelSize px: Int) {
         height: shapeSide * Design.tHeight)
     let radius = shapeSide * Design.paneRadius
     let stemWidth = Detail.stemWidth(forPixelSize: px)
+    let drawsGutter = px >= Detail.gutterFloor
 
+    // Crossbar and stem as separate rects. Without a gutter they meet exactly, which is the
+    // solid T the small sizes want.
+    let gutter = drawsGutter ? shapeSide * Design.gutter : 0
+    let crossbarHeight = box.height * Design.crossbarDepth
+    let crossbar = CGRect(
+        x: box.minX, y: box.maxY - crossbarHeight,
+        width: box.width, height: crossbarHeight)
+    let stemW = box.width * stemWidth
+    let stem = CGRect(
+        x: box.midX - stemW / 2, y: box.minY,
+        width: stemW, height: box.height - crossbarHeight - gutter)
+
+    let crossbarPath = CGPath(roundedRect: crossbar, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    let stemPath = CGPath(roundedRect: stem, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    let silhouette = CGMutablePath()
+    silhouette.addPath(crossbarPath)
+    silhouette.addPath(stemPath)
+
+    // --- Shadow -------------------------------------------------------------------------
+    // Cast from the panes, but clipped to everything *outside* them, so only the spill lands.
+    //
+    // The obvious version of this — set a shadow, fill the shape, move on — silently destroys
+    // both pane details. The fill is opaque, so it paints over the gutter the pane pass is
+    // about to draw around, and it puts an opaque layer of the pane colour under the
+    // translucent crossbar, where `α·C + (1-α)·C == C` flattens `crossbarAlpha` to nothing.
+    // The result renders correctly *only* between gutterFloor and shadowFloor, which is one
+    // representation, and degrades to a solid T at exactly the sizes with room for the detail.
+    //
+    // Clipping to the inverse keeps the shadow and discards the fill that caused both problems.
+    // Shadow does fall into the gutter now, which is right: the panes are two objects over the
+    // ground, and the gap between tiled windows is where you would see that.
     if px >= Detail.shadowFloor {
         ctx.saveGState()
+        let outside = CGMutablePath()
+        outside.addRect(CGRect(x: 0, y: 0, width: size, height: size))
+        outside.addPath(silhouette)
+        ctx.addPath(outside)
+        ctx.clip(using: .evenOdd)
         ctx.setShadow(
             offset: CGSize(width: 0, height: -size * Design.shadowOffset),
             blur: size * Design.shadowBlur,
             color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: Design.shadowAlpha))
-        // Cast from the merged silhouette, so no shadow is thrown into the gutter — the panes
-        // are one object sitting above the ground, not two at different heights.
-        ctx.addPath(solidTPath(box: box, stemWidth: stemWidth, radius: radius))
-        ctx.setFillColor(Design.paneColor.cgColor())
+        ctx.addPath(silhouette)
+        // Colour is irrelevant — the clip discards every pixel of this fill. Only its shadow
+        // survives, outside the panes.
+        ctx.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
         ctx.fillPath()
         ctx.restoreGState()
     }
 
-    if px >= Detail.gutterFloor {
-        let gutter = shapeSide * Design.gutter
-        let crossbarHeight = box.height * Design.crossbarDepth
-        let crossbar = CGRect(
-            x: box.minX, y: box.maxY - crossbarHeight,
-            width: box.width, height: crossbarHeight)
-        let stemW = box.width * stemWidth
-        let stem = CGRect(
-            x: box.midX - stemW / 2, y: box.minY,
-            width: stemW, height: box.height - crossbarHeight - gutter)
+    // --- Panes --------------------------------------------------------------------------
+    // With no gutter the two rects abut, so they must share an alpha or the seam shows.
+    ctx.setFillColor(Design.paneColor.cgColor(alpha: drawsGutter ? Design.crossbarAlpha : Design.stemAlpha))
+    ctx.addPath(crossbarPath)
+    ctx.fillPath()
 
-        ctx.setFillColor(Design.paneColor.cgColor(alpha: Design.crossbarAlpha))
-        ctx.addPath(CGPath(roundedRect: crossbar, cornerWidth: radius, cornerHeight: radius, transform: nil))
-        ctx.fillPath()
-
-        ctx.setFillColor(Design.paneColor.cgColor(alpha: Design.stemAlpha))
-        ctx.addPath(CGPath(roundedRect: stem, cornerWidth: radius, cornerHeight: radius, transform: nil))
-        ctx.fillPath()
-    } else {
-        ctx.setFillColor(Design.paneColor.cgColor(alpha: Design.stemAlpha))
-        ctx.addPath(solidTPath(box: box, stemWidth: stemWidth, radius: radius))
-        ctx.fillPath()
-    }
+    ctx.setFillColor(Design.paneColor.cgColor(alpha: Design.stemAlpha))
+    ctx.addPath(stemPath)
+    ctx.fillPath()
 }
 
 // MARK: - Output
