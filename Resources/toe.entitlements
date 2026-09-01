@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Notarization requires the hardened runtime, and under it Apple Events are refused
+         unless this is present. toe itself never sends one: the default config's SUPER+ENTER
+         bindings shell out to osascript, and TCC holds toe responsible for what its children
+         send. Pairs with NSAppleEventsUsageDescription in Info.plist.
+
+         Nothing else is needed. Accessibility is gated by TCC rather than an entitlement, and
+         the _AXUIElementGetWindow lookup in AX/AXElement.swift resolves a symbol in an
+         already-loaded system library, so library validation can stay on. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

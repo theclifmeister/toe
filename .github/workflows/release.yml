@@ -23,9 +23,13 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # toe is signed with a self-signed certificate rather than a Developer ID: it cannot be
-      # notarized, but it gives the app a stable designated requirement, so Accessibility
-      # grants survive `brew upgrade`. See scripts/release-cert.sh for the full rationale.
+      # toe ships signed with a Developer ID certificate and stapled with an Apple
+      # notarization ticket, so Gatekeeper clears it with no quarantine dance. The certificate
+      # also gives the app a stable designated requirement. That requirement pins Apple's
+      # anchor and certificate leaf[subject.OU] — the team ID, 4689D3AT8J — and nothing that
+      # changes when the certificate is renewed, so the Accessibility grants macOS keys to it
+      # persist across `brew upgrade` and across a renewal. Verify with `codesign -d -r -`,
+      # which the "Verify signature" step below prints for exactly this reason.
       - name: Import signing certificate
         env:
           CERT_P12_BASE64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
@@ -46,20 +50,16 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
 
-          # codesign cannot build a chain to an untrusted self-signed root. Runners have
-          # passwordless sudo, so trust the certificate for code signing only.
-          openssl pkcs12 -in "$RUNNER_TEMP/toe-release.p12" -passin pass:"$CERT_PASSWORD" \
-            -clcerts -nokeys -out "$RUNNER_TEMP/toe-release.pem"
-          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
-            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/toe-release.pem"
-
           rm -f "$RUNNER_TEMP/toe-release.p12"
 
           # find-identity exits 0 even when it finds nothing, so assert instead: without a
-          # *valid* (trusted) identity the build would fail later, inside codesign.
+          # valid identity the build would fail later, inside codesign. A leaf whose issuing
+          # intermediate is missing from the .p12 is the likely cause, since that chain cannot
+          # be built and the identity is then not listed as valid.
           security find-identity -v -p codesigning "$keychain"
-          if ! security find-identity -v -p codesigning "$keychain" | grep -q "toe-release"; then
-            echo "toe-release is not a valid signing identity — is the certificate trusted?" >&2
+          if ! security find-identity -v -p codesigning "$keychain" | grep -q "Developer ID Application"; then
+            echo "no valid Developer ID Application identity — does SIGNING_CERT_P12_BASE64" >&2
+            echo "include the Developer ID Certification Authority intermediate?" >&2
             exit 1
           fi
 
@@ -69,7 +69,7 @@ jobs:
       - name: Build and sign
         env:
           TOE_VERSION: ${{ steps.version.outputs.version }}
-          TOE_SIGN_IDENTITY: toe-release
+          TOE_SIGN_IDENTITY: "Developer ID Application: Clifford van Slimming (${{ secrets.APPLE_TEAM_ID }})"
         run: ./scripts/bundle.sh release
 
       # Echo the designated requirement into the log: if it ever names a cdhash instead of a
@@ -80,6 +80,12 @@ jobs:
           set -euo pipefail
           codesign --verify --deep --strict --verbose=2 build/Toe.app
           codesign -d -r - build/Toe.app
+          # Apple rejects a submission without the hardened runtime. Catching it here names
+          # the problem directly, rather than as a notarization failure minutes later.
+          codesign -d --verbose=2 build/Toe.app 2>&1 | grep -q "flags=.*runtime" || {
+            echo "the bundle is not hardened-runtime signed — did TOE_SIGN_IDENTITY reach bundle.sh?" >&2
+            exit 1
+          }
 
       - name: Smoke test
         run: |
@@ -88,7 +94,45 @@ jobs:
           expected="${{ steps.version.outputs.version }}"
           [ "$actual" = "$expected" ] || { echo "version is $actual, expected $expected"; exit 1; }
 
-      # ditto, not zip: it preserves the bundle's metadata and keeps the signature intact.
+      # Sign → notarize → staple → package, in that order: stapling writes Apple's ticket
+      # into the bundle, so the asset published below has to be zipped after it and not
+      # before. The stapled ticket is what lets Gatekeeper clear toe on a machine that is
+      # offline, or that has never seen this build.
+      - name: Notarize
+        env:
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/notary.p8"
+          trap 'rm -f "$key"' EXIT
+          echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$key"
+
+          ditto -c -k --keepParent build/Toe.app "$RUNNER_TEMP/notarize.zip"
+
+          # --wait blocks until Apple reaches a verdict and exits nonzero on anything but
+          # Accepted; --timeout stops a stuck submission from burning the job's whole budget.
+          if ! xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+              --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+              --wait --timeout 30m 2>&1 | tee "$RUNNER_TEMP/notary.log"; then
+            # A rejection reports only "Invalid" — the per-binary reason lives in the log
+            # Apple keeps against the submission id, so fetch it before failing.
+            id="$(grep -oE '[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}' "$RUNNER_TEMP/notary.log" | head -1)"
+            if [ -n "$id" ]; then
+              xcrun notarytool log "$id" \
+                --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+            fi
+            exit 1
+          fi
+
+          xcrun stapler staple build/Toe.app
+          xcrun stapler validate build/Toe.app
+          # The end-to-end check: exactly the assessment Gatekeeper makes on a user's machine.
+          spctl --assess --type execute --verbose=4 build/Toe.app
+
+      # ditto, not zip: it preserves the bundle's metadata and keeps both the signature and
+      # the stapled notarization ticket intact.
       - name: Package
         id: package
         run: |

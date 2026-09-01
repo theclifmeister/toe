@@ -41,9 +41,19 @@ if [ -n "${TOE_SIGN_IDENTITY:-}" ]; then
 elif security find-identity -v -p codesigning 2>/dev/null | grep -q '"toe-dev"'; then
     identity="toe-dev"
 fi
+# Notarization requires the hardened runtime, and under it the SUPER+ENTER bindings lose
+# their Apple Events access without Resources/toe.entitlements. --timestamp additionally needs
+# the network and Apple's timestamp server — it is what keeps already-shipped builds valid
+# after the certificate expires. Both are limited to the release path, so a local `make run`
+# against toe-dev, and CI's ad-hoc fallback, sign exactly as they always did.
+flags=(--force --sign "$identity" --identifier com.clifmeister.toe)
+if [ -n "${TOE_SIGN_IDENTITY:-}" ]; then
+    flags+=(--options runtime --timestamp --entitlements "$root/Resources/toe.entitlements")
+fi
+
 # Quiet on success — codesign is chatty — but show everything if it fails, so a CI signing
 # problem reports itself instead of failing as a bare exit code.
-if ! out="$(codesign --force --sign "$identity" --identifier com.clifmeister.toe "$app" 2>&1)"; then
+if ! out="$(codesign "${flags[@]}" "$app" 2>&1)"; then
     echo "$out" >&2
     exit 1
 fi
