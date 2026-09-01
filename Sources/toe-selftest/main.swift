@@ -717,6 +717,26 @@ h.test("TOML errors carry a line number") { t in
     }
 }
 
+h.test("a config saved with CRLF line endings parses like any other") { t in
+    let crlf = "[general]\r\ngaps_in = 5\r\nsuper_key = \"cmd\"\r\n\r\n[dwindle]\r\nsmart_split = true\r\n"
+    let root = try TOML.parse(crlf)
+
+    t.equal(root["general"]?.tableValue?["gaps_in"]?.doubleValue, 5, "an integer stops at the CRLF")
+    t.equal(root["general"]?.tableValue?["super_key"]?.stringValue, "cmd", "a string survives")
+    t.equal(root["dwindle"]?.tableValue?["smart_split"]?.boolValue, true, "a later header is still found")
+
+    let c = try Config.parse(crlf)
+    t.equal(c.gaps.inner, 5, "and the whole config loads rather than falling back")
+    t.equal(c.warnings, [], "with no warnings")
+
+    do {
+        _ = try TOML.parse("[general]\r\ngaps_in = 5\r\ngaps_out\r\n")
+        t.expect(false, "should have thrown")
+    } catch let e as TOMLError {
+        t.equal(e.line, 3, "and errors still point at the real line, not line 1")
+    }
+}
+
 h.test("deeply nested values are capped instead of overflowing the stack") { t in
     let deep = 60
     let nested = try TOML.parse("a = " + String(repeating: "[", count: deep) + String(repeating: "]", count: deep))
