@@ -78,7 +78,7 @@ final class WindowTracker {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         else { return }
         let pid = app.processIdentifier
-        observers.removeValue(forKey: pid)
+        stopObserving(pid)
         for (id, window) in windows where window.pid == pid {
             windows.removeValue(forKey: id)
             delegate?.windowDisappeared(id)
@@ -123,6 +123,13 @@ final class WindowTracker {
                 self?.adoptWindows(of: pid)
             }
         }
+    }
+
+    /// The run-loop source has to come off the run loop as well as out of `observers`, or
+    /// every launched-and-quit application leaves one behind for the life of the session.
+    private func stopObserving(_ pid: pid_t) {
+        guard let observer = observers.removeValue(forKey: pid) else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     }
 
     private func adoptWindows(of pid: pid_t) {

@@ -41,6 +41,11 @@ public struct TOMLError: Error, CustomStringConvertible {
 /// Not supported: multi-line strings, dates, and dotted keys on the left of `=`.
 public enum TOML {
 
+    /// Arrays and inline tables nest, and every level costs a stack frame. toe's own config
+    /// never nests more than two deep, so a low cap turns a stack overflow on a pathological
+    /// file into an ordinary parse error.
+    static let maxNestingDepth = 64
+
     public static func parse(_ text: String) throws -> [String: TOMLValue] {
         var parser = Parser(text)
         return try parser.parseDocument()
@@ -63,6 +68,7 @@ public enum TOML {
         let chars: [Character]
         var i = 0
         var line = 1
+        var depth = 0
 
         init(_ text: String) { chars = Array(text) }
 
@@ -204,6 +210,14 @@ public enum TOML {
             }
         }
 
+        mutating func enterNesting() throws {
+            depth += 1
+            guard depth <= TOML.maxNestingDepth else {
+                throw TOMLError(line: line,
+                                message: "nested more than \(TOML.maxNestingDepth) levels deep")
+            }
+        }
+
         mutating func parseValue() throws -> TOMLValue {
             guard let c = peek else { throw TOMLError(line: line, message: "expected a value") }
 
@@ -212,6 +226,8 @@ public enum TOML {
                 return .string(try parseString())
             case "[":
                 i += 1
+                try enterNesting()
+                defer { depth -= 1 }
                 var items: [TOMLValue] = []
                 while true {
                     skipInsignificant()
@@ -227,6 +243,8 @@ public enum TOML {
                 return .array(items)
             case "{":
                 i += 1
+                try enterNesting()
+                defer { depth -= 1 }
                 var table: [String: TOMLValue] = [:]
                 while true {
                     skipInsignificant(stopAtNewline: true)
