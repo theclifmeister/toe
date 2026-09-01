@@ -46,8 +46,13 @@ public enum TOML {
     /// file into an ordinary parse error.
     static let maxNestingDepth = 64
 
+    /// The parser walks `Character`s, and in Unicode `"\r\n"` is a single grapheme cluster that
+    /// equals neither `"\n"` nor `"\r"` — so a file saved with Windows line endings would be read
+    /// as one enormous line and fail wholesale. Normalising on the way in is cheaper than teaching
+    /// every newline check about the pair, and safe because this parser has no multi-line strings:
+    /// a `"\r\n"` can only ever appear between tokens.
     public static func parse(_ text: String) throws -> [String: TOMLValue] {
-        var parser = Parser(text)
+        var parser = Parser(text.replacingOccurrences(of: "\r\n", with: "\n"))
         return try parser.parseDocument()
     }
 
