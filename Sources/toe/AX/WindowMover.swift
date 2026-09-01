@@ -42,8 +42,7 @@ enum WindowMover {
         window.element.set(kAXMainAttribute, kCFBooleanTrue)
         window.element.set(kAXFocusedAttribute, kCFBooleanTrue)
         AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
-        NSRunningApplication(processIdentifier: window.pid)?
-            .activate(options: [.activateIgnoringOtherApps])
+        NSRunningApplication(processIdentifier: window.pid)?.activate()
     }
 
     static func close(_ window: ManagedWindow) {
