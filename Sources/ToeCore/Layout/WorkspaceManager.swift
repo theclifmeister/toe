@@ -269,6 +269,43 @@ public final class WorkspaceManager {
         return true
     }
 
+    /// The workspace currently shown on the monitor holding `point`. Scoped to the monitor's
+    /// whole frame rather than its usable area, the way `focalPoint(on:)` is.
+    private func visibleWorkspace(at point: Point) -> Workspace? {
+        guard let monitor = monitors.first(where: { $0.frame.contains(point) }),
+              let index = activeWorkspace[monitor.id]
+        else { return nil }
+        return workspaces[index]
+    }
+
+    /// The tiled branch of `IHyprLayout::onMouseMove`: a window dragged by hand trades places
+    /// with whichever tile the pointer is over. That is Hyprland's `switchWindows` — the same
+    /// primitive `swapwindow` uses, so the tree shape never changes — and it crosses monitors,
+    /// because a tile on another display is just another leaf under the pointer.
+    ///
+    /// A stream of pointer moves needs no throttling: `swap` exchanges node payloads, so the
+    /// node under the pointer ends up holding the dragged window itself and every further move
+    /// inside it is a no-op. The next swap waits for the pointer to enter a different tile.
+    ///
+    /// Only tiled leaves are targets. Dragging over a floating window swaps with the tile
+    /// underneath it.
+    @discardableResult
+    public func swapWithWindow(at point: Point, dragging source: WindowID) -> Bool {
+        guard let sourceIndex = workspaceIndex(of: source),
+              let sourceWorkspace = workspaces[sourceIndex],
+              sourceWorkspace.layout.contains(source),
+              let targetWorkspace = visibleWorkspace(at: point),
+              let target = targetWorkspace.layout.node(at: point)?.window,
+              target != source
+        else { return false }
+
+        DwindleLayout.swap(source, in: sourceWorkspace.layout,
+                           with: target, in: targetWorkspace.layout)
+        // Dragged onto another display, focus goes with the window.
+        if targetWorkspace !== sourceWorkspace { noteFocus(source) }
+        return true
+    }
+
     /// `movewindow <dir>` — reparent the focused window towards a direction.
     @discardableResult
     public func moveWindow(_ dir: Direction) -> Bool {

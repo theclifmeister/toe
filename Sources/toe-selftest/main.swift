@@ -498,6 +498,106 @@ h.test("a workspace follows its monitor") { t in
     t.equal(wm.focusedMonitorID, home, "workspace 5 pulled focus back to its monitor")
 }
 
+// MARK: - Dragging
+
+/// Four windows opened in order on one monitor, each splitting the one before it:
+///
+///     ┌────────┬────────┐
+///     │        │   w2   │
+///     │   w1   ├───┬────┤
+///     │        │w3 │ w4 │
+///     └────────┴───┴────┘
+func draggingFixture() -> WorkspaceManager {
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3); wm.addWindow(4)
+    return wm
+}
+
+h.test("dragging a window over a tile trades their places") { t in
+    let wm = draggingFixture()
+    let layout = wm.focusedWorkspace.layout
+    t.equalBox(layout.idealBox(of: 1), box(0, 0, 756, 982), "fixture: w1")
+    t.equalBox(layout.idealBox(of: 2), box(756, 0, 756, 491), "fixture: w2")
+    t.equalBox(layout.idealBox(of: 3), box(756, 491, 378, 491), "fixture: w3")
+    t.equalBox(layout.idealBox(of: 4), box(1134, 491, 378, 491), "fixture: w4")
+
+    t.equal(wm.swapWithWindow(at: Point(x: 1000, y: 100), dragging: 1), true, "the pointer is over w2")
+
+    t.equalBox(layout.idealBox(of: 1), box(756, 0, 756, 491), "w1 took w2's slot")
+    t.equalBox(layout.idealBox(of: 2), box(0, 0, 756, 982), "w2 took w1's")
+    t.equalBox(layout.idealBox(of: 3), box(756, 491, 378, 491), "w3 untouched — only the payloads moved")
+    t.equalBox(layout.idealBox(of: 4), box(1134, 491, 378, 491), "and w4")
+}
+
+h.test("a drag settles: the tile under the pointer now holds the dragged window") { t in
+    let wm = draggingFixture()
+    let point = Point(x: 1000, y: 100)
+
+    t.equal(wm.swapWithWindow(at: point, dragging: 1), true, "first move onto w2 swaps")
+    t.equal(wm.swapWithWindow(at: point, dragging: 1), false,
+            "every further move inside that tile is a no-op: it holds w1 now")
+    t.equal(wm.swapWithWindow(at: Point(x: 300, y: 300), dragging: 1), true,
+            "moving on to a different tile swaps again")
+    t.equalBox(wm.focusedWorkspace.layout.idealBox(of: 1), box(0, 0, 756, 982), "w1 ended up where it started")
+}
+
+h.test("dragging is not restricted to neighbours the way swapwindow is") { t in
+    let wm = draggingFixture()
+    wm.noteFocus(4)
+    t.equal(wm.swapWindow(.left), true, "the keyboard can only reach w4's neighbour, w3")
+    t.equalBox(wm.focusedWorkspace.layout.idealBox(of: 4), box(756, 491, 378, 491), "w4 moved one slot left")
+
+    let wm2 = draggingFixture()
+    t.equal(wm2.swapWithWindow(at: Point(x: 300, y: 300), dragging: 4), true, "the pointer reaches w1 directly")
+    t.equalBox(wm2.focusedWorkspace.layout.idealBox(of: 4), box(0, 0, 756, 982), "w4 crossed the tree in one drag")
+    t.equalBox(wm2.focusedWorkspace.layout.idealBox(of: 1), box(1134, 491, 378, 491), "w1 came the other way")
+}
+
+h.test("dragging onto another monitor takes the window and the focus there") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    let leftWS = wm.activeWorkspace[1]!
+    let rightWS = wm.activeWorkspace[2]!
+    wm.switchTo(workspace: leftWS)
+    wm.addWindow(1); wm.addWindow(2)
+    wm.switchTo(workspace: rightWS)
+    wm.addWindow(10); wm.addWindow(11)
+    wm.noteFocus(2)
+    t.equal(wm.focusedMonitorID, 1, "the drag starts on the left monitor")
+
+    t.equal(wm.swapWithWindow(at: Point(x: 3000, y: 500), dragging: 2), true, "the pointer is over w11")
+
+    t.equal(wm.workspaceIndex(of: 2), rightWS, "w2 now lives on the right monitor's workspace")
+    t.equal(wm.workspaceIndex(of: 11), leftWS, "and w11 on the left one's")
+    t.equalBox(wm.workspaces[rightWS]?.layout.idealBox(of: 2), box(2472, 0, 960, 1080), "w2 took w11's exact slot")
+    t.equalBox(wm.workspaces[leftWS]?.layout.idealBox(of: 11), box(756, 0, 756, 982), "w11 took w2's")
+    t.equalBox(wm.workspaces[rightWS]?.layout.idealBox(of: 10), box(1512, 0, 960, 1080), "w10 untouched")
+    t.equal(wm.focusedMonitorID, 2, "focus followed the window across")
+}
+
+h.test("only tiled windows are dragged, and only onto tiles") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.addWindow(3, floating: true)
+    wm.floatingFrames[3] = box(800, 100, 400, 300)          // sitting over w2
+
+    t.equal(wm.swapWithWindow(at: Point(x: 300, y: 300), dragging: 3), false,
+            "a floating window is dragged by its app alone; toe just remembers where it lands")
+
+    t.equal(wm.swapWithWindow(at: Point(x: 900, y: 200), dragging: 1), true,
+            "dragging over the floating w3 swaps with the tile underneath it")
+    t.equalBox(wm.focusedWorkspace.layout.idealBox(of: 1), box(756, 0, 756, 982), "w1 took w2's slot")
+
+    t.equal(wm.swapWithWindow(at: Point(x: -500, y: -500), dragging: 1), false,
+            "a pointer on no monitor at all is not a drop target")
+}
+
 // MARK: - Config
 
 h.test("the shipped default config parses cleanly") { t in

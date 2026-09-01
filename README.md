@@ -24,6 +24,7 @@ as the defaults.
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
 | `SUPER` + `T` | Toggle floating |
+| Drag a tiled window | Swap it with the tile you drag it over |
 
 `SUPER` is **Option (⌥)** — the same physical key position as SUPER on a PC keyboard, and it
 leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab untouched. Configurable.
@@ -108,6 +109,9 @@ by `make test` against hand-computed Hyprland output:
 - `SUPER+SHIFT+arrow` is Omarchy's `swapwindow`: the two windows trade places and the tree
   shape does not change. (`movewindow` — i3-style reparenting — is available in the config if
   you prefer it.)
+- Dragging a tiled window swaps it with whichever tile the pointer crosses, live, and keeps
+  going for as long as you hold it — Hyprland's `switchWindows` under the pointer, the mouse
+  equivalent of `SUPER+SHIFT+arrow`.
 - Directional focus is **edge adjacency**, not nearest-centre: a window qualifies only if its
   opposing edge lines up with yours within 2px, computed on un-gapped node boxes. Ties go to
   the most recently focused window.
@@ -132,8 +136,27 @@ frame write and restores it afterwards, which is what makes those apps tile.
 geometry a beat after a window opens, clobbering the frame toe just wrote, so toe re-asserts the
 layout when a window moves or resizes behind its back. That is bounded at three attempts: an app
 whose minimum size exceeds its tile (Safari will not go narrower than ~574px) is written once and
-then left alone rather than fought with forever. The same mechanism snaps a window back when you
-drag it out of its tile.
+then left alone rather than fought with forever. A tile is re-asserted against an app, never
+against you: a window you have hold of is left alone until you let go — see **Dragging**.
+
+**Dragging.** Pick a tiled window up by its title bar and the tile under the pointer trades
+places with it, the way Hyprland's `IHyprLayout::onMouseMove` does — only the two windows move,
+the tree shape does not change, and crossing onto another display takes the window and the focus
+with it. It keeps swapping as you sweep across tiles, so where you let go is where the window
+lands; let go over the tile you started on and nothing has changed. The focus border stays behind
+on the tile the window will land in, so the target is visible the whole way across — a border
+chasing the window itself would only trail behind it, because toe hears about its movement
+through Accessibility, well after the fact. It sits *under* the window you are dragging, which is
+where Hyprland puts it: a border there is drawn inside its own window's render pass, and the
+focused window is drawn last of all, so a dragged window passes over the tiles it crosses. macOS
+will not slot a panel behind one particular window — `order(_:relativeTo:)` stops at the process
+boundary — but it does not have to, because toe is a background app and its normal-level panel
+lands directly beneath the frontmost window, which is the one being dragged. toe cannot see the drag
+itself — those events belong to the window's own application — so it infers one from an
+Accessibility move notification arriving while a mouse button is down, and follows the pointer
+with a read-only global event monitor rather than an event tap. For as long as you have hold of
+a window toe writes nothing to it, which is what stops it being yanked out from under the cursor;
+its frame is written once, into whatever tile it now owns, when you release.
 
 **Floating windows.** `togglefloating` lifts a window out of the tree and centres it, at a
 consistent fraction of the display — 70% wide by 80% tall by default — so every floating window

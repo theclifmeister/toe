@@ -25,6 +25,10 @@ final class Coordinator: WindowTrackerDelegate {
     /// than fought with forever.
     private var corrections: [WindowID: Int] = [:]
     private var focusApplied: WindowID?
+    /// The window the user has hold of. Its frame is theirs until they let go: toe neither
+    /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
+    /// to a floating window.
+    private var draggedWindow: WindowID? { drag.isDragging ? drag.window : nil }
     private var signalSources: [any DispatchSourceSignal] = []
 
     // MARK: - Start-up
@@ -61,7 +65,13 @@ final class Coordinator: WindowTrackerDelegate {
         watcher?.start()
 
         hotkeys.onTrigger = { [weak self] binding in self?.dispatch(binding.command) }
-        drag.onEnd = { [weak self] in self?.updateBorder() }
+        // Dragging a tiled window over another one trades their places, live, the way
+        // Hyprland's `IHyprLayout::onMouseMove` does.
+        drag.onMove = { [weak self] id, point in
+            guard let self, self.workspaces.swapWithWindow(at: point, dragging: id) else { return }
+            self.apply(refocus: false)
+        }
+        drag.onEnd = { [weak self] id in self?.endDrag(id) }
 
         guard waitForAccessibility() else {
             Log.error("no Accessibility permission — hotkeys are live but windows cannot be moved. "
@@ -263,11 +273,21 @@ final class Coordinator: WindowTrackerDelegate {
     func windowFrameChangedExternally(_ id: WindowID) {
         guard let window = tracker.window(id), !window.isStashed else { return }
         // A move the user is making by hand hides the border until they let go; see DragMonitor.
-        if id == workspaces.focusedWindow { drag.noteExternalFrameChange() }
+        if id == workspaces.focusedWindow { drag.noteExternalFrameChange(id) }
 
         if workspaces.isFloating(id) {
             workspaces.floatingFrames[id] = window.element.frame
             if id == workspaces.focusedWindow { updateBorder() }
+            return
+        }
+
+        // A tile is re-asserted against an app that fights it, never against the user. Where the
+        // window has got to during the drag says nothing about where it belongs — the pointer
+        // decides that, in `swapWithWindow` — so leave it alone until they let go. The border
+        // still gets a look in: this is where it drops behind the window at the start of a drag,
+        // and where it re-takes that place if the app raises itself mid-drag.
+        if id == draggedWindow {
+            updateBorder()
             return
         }
 
@@ -330,6 +350,10 @@ final class Coordinator: WindowTrackerDelegate {
             guard desired[id] != box else { continue }
             desired[id] = box
             corrections[id] = 0
+            // Writing this one would yank it out from under the cursor mid-drag; `endDrag`
+            // puts it in its tile once the drag is over. Its swap partner moves normally,
+            // and that is the feedback the user sees.
+            if id == draggedWindow { continue }
             WindowMover.setFrame(box, element: window.element, pid: window.pid)
         }
 
@@ -345,20 +369,47 @@ final class Coordinator: WindowTrackerDelegate {
 
     private func updateBorder() {
         guard config.border.enabled,
-              !drag.isDragging,
-              let focused = workspaces.focusedWindow,
+              let focused = draggedWindow ?? workspaces.focusedWindow,
               let window = tracker.window(focused),
               !window.isStashed
         else {
             border.hide()
             return
         }
+
+        // While the user has hold of a window the border marks the tile it will land in rather
+        // than the window itself. Two reasons, and they point the same way: toe hears about the
+        // window's own movement through Accessibility, well behind the fact, so a border chasing
+        // it would trail across the screen — and the tile is the useful thing to show anyway,
+        // because the swap has already happened and that is where letting go puts it. A floating
+        // window has no tile, so it keeps the old behaviour of no border until it is dropped.
+        if focused == draggedWindow {
+            // Behind the window being dragged, and above every other one — where Hyprland puts
+            // it, since it draws each border with its own window and the focused window last.
+            if let tile = desired[focused] {
+                border.show(around: tile, depth: .behindFrontmost)
+            } else {
+                border.hide()
+            }
+            return
+        }
+
         // Prefer the frame we wrote; fall back to asking the window for floating ones.
         if let box = window.element.frame ?? desired[focused] {
             border.show(around: box)
         } else {
             border.hide()
         }
+    }
+
+    /// The user has let go. The window has been off its tile for the length of the drag, so
+    /// clearing `desired` is what makes `apply` write it into whichever tile it now owns —
+    /// its own, if the drag never crossed another one. `apply` ends in `updateBorder`, which
+    /// brings the focus border back now that the drag is over.
+    private func endDrag(_ id: WindowID) {
+        desired.removeValue(forKey: id)
+        corrections.removeValue(forKey: id)
+        apply(refocus: false)
     }
 
     private func unstashEverything() {

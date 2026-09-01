@@ -14,6 +14,25 @@ final class BorderOverlay {
     private let band = CALayer()
     private var config = BorderConfig()
 
+    /// Where the border sits in the window stack.
+    enum Depth {
+        /// Above every ordinary window — the focused window's own outline, which nothing
+        /// should cover.
+        case aboveEverything
+        /// Just behind the frontmost window, above all the rest.
+        ///
+        /// Hyprland draws a border inside its own window's render pass, and draws the focused
+        /// window last of all, so a window being dragged passes *over* the borders of the tiles
+        /// it crosses rather than under them. A macOS panel cannot be slotted behind one
+        /// specific window — `order(_:relativeTo:)` does not reach across processes, and the
+        /// window level decides the order regardless — but the ordinary level arrives at the
+        /// same place anyway: toe is a background app, so a normal-level panel lands directly
+        /// beneath the frontmost application's window, which is the one in the user's hand.
+        case behindFrontmost
+
+        var level: NSWindow.Level { self == .aboveEverything ? .floating : .normal }
+    }
+
     init() {
         panel = NSPanel(contentRect: .zero,
                         styleMask: [.borderless, .nonactivatingPanel],
@@ -54,7 +73,7 @@ final class BorderOverlay {
     }
 
     /// `box` is the window's own frame in AX coordinates; the border is drawn just outside it.
-    func show(around box: Box) {
+    func show(around box: Box, depth: Depth = .aboveEverything) {
         guard config.enabled, config.width > 0 else { hide(); return }
 
         let w = config.width
@@ -85,6 +104,10 @@ final class BorderOverlay {
         if band.contentsScale != scale { band.contentsScale = scale }
         CATransaction.commit()
 
+        // Re-ordered on every show, not just when the depth changes: `behindFrontmost` is a
+        // position in the stack rather than a fixed level, so it has to be re-taken whenever
+        // the application in front of it changes.
+        if panel.level != depth.level { panel.level = depth.level }
         panel.orderFront(nil)
     }
 
