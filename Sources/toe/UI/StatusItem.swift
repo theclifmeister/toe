@@ -20,12 +20,18 @@ struct WorkspaceSummary {
     let apps: [AppSummary]
 
     var isEmpty: Bool { apps.isEmpty }
+
+    var stripState: WorkspaceStrip.State {
+        .init(index: index, isFocused: isFocused, isVisible: isVisible, isEmpty: isEmpty)
+    }
 }
 
 /// The menu bar item. toe is an `LSUIElement`, so this is its only visible surface.
 ///
-/// The title is the workspace strip — occupied workspaces, with the focused one picked out —
-/// and the menu breaks each workspace down into the applications living on it.
+/// The title is the workspace strip in Omarchy's waybar styling — the focused workspace is
+/// a filled rounded square, every other one its own digit — and the menu breaks each
+/// workspace down into the applications living on it. Clicking a workspace switches to it,
+/// as Omarchy's `on-click: activate` does; anywhere else opens the menu.
 final class StatusItem: NSObject, NSMenuDelegate {
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -45,14 +51,25 @@ final class StatusItem: NSObject, NSMenuDelegate {
     private var accessibilityGranted = false
     private var showMonitorNames = false
 
-    private let regular = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-    private let emphasised = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+    /// What the strip currently draws, and how wide each item came out — together they turn
+    /// a click position back into a workspace.
+    private var stripItems: [WorkspaceStrip.Item] = []
+    private var stripWidths: [Double] = []
+
+    // Omarchy's bar is JetBrainsMono Nerd Font at 12px with `padding: 0 6px; margin: 0 1.5px`,
+    // i.e. a ~15px slot per workspace. These are its equivalents at menu bar size.
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    private let gap: CGFloat = 7
+    private let markerSide: CGFloat = 8
+    private let markerRadius: CGFloat = 2.5
 
     override init() {
         super.init()
         menu.delegate = self
-        item.menu = menu
         item.button?.title = "toe"
+        item.button?.target = self
+        item.button?.action = #selector(buttonClicked(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     /// Cheap: only the title strip is recomputed. The menu rebuilds itself when opened.
@@ -62,44 +79,125 @@ final class StatusItem: NSObject, NSMenuDelegate {
         self.accessibilityGranted = accessibilityGranted
         self.showMonitorNames = showMonitorNames
         item.button?.attributedTitle = title(for: workspaces)
-        item.button?.toolTip = accessibilityGranted
+
+        // The focused workspace is drawn as a square rather than a digit, so the title on
+        // its own no longer reads as anything — spell it out for VoiceOver.
+        let described = accessibilityGranted
             ? "toe — workspace \(workspaces.first { $0.isFocused }?.index ?? 1)"
             : "toe needs Accessibility permission"
+        item.button?.toolTip = described
+        item.button?.setAccessibilityLabel(described)
     }
 
     // MARK: - The workspace strip
 
     private func title(for workspaces: [WorkspaceSummary]) -> NSAttributedString {
+        stripItems = []
+        stripWidths = []
+
         guard accessibilityGranted else {
             return NSAttributedString(string: "toe !", attributes: [
-                .font: emphasised, .foregroundColor: NSColor.systemOrange,
+                .font: font, .foregroundColor: NSColor.systemOrange,
             ])
         }
 
-        // Empty workspaces are hidden, so the strip stays as short as what you are actually
-        // using — but the focused one is always there, even when it is empty.
-        let shown = workspaces.filter { !$0.isEmpty || $0.isVisible }
-        guard !shown.isEmpty else {
-            return NSAttributedString(string: "toe", attributes: [.font: regular])
+        let items = WorkspaceStrip.items(for: workspaces.map(\.stripState))
+        guard !items.isEmpty else {
+            return NSAttributedString(string: "toe", attributes: [.font: font])
         }
 
         let strip = NSMutableAttributedString()
-        for workspace in shown {
-            if strip.length > 0 {
-                strip.append(NSAttributedString(string: " ", attributes: [.font: regular]))
-            }
-            let attributes: [NSAttributedString.Key: Any]
-            if workspace.isFocused {
-                attributes = [.font: emphasised, .foregroundColor: NSColor.labelColor]
-            } else if workspace.isVisible {
-                // Showing on another display.
-                attributes = [.font: emphasised, .foregroundColor: NSColor.secondaryLabelColor]
-            } else {
-                attributes = [.font: regular, .foregroundColor: NSColor.tertiaryLabelColor]
-            }
-            strip.append(NSAttributedString(string: "\(workspace.index)", attributes: attributes))
+        for item in items {
+            if strip.length > 0 { strip.append(spacer) }
+            strip.append(piece(for: item))
+            stripItems.append(item)
+            stripWidths.append(Double(width(of: item)))
         }
         return strip
+    }
+
+    /// A fixed `gap` of empty space, kerned rather than padded so its width is exactly known.
+    private var spacer: NSAttributedString {
+        let space = NSAttributedString(string: " ", attributes: [.font: font]).size().width
+        return NSAttributedString(string: " ", attributes: [.font: font, .kern: gap - space])
+    }
+
+    private func piece(for item: WorkspaceStrip.Item) -> NSAttributedString {
+        switch item.marker {
+        case .digit:
+            return NSAttributedString(string: item.label, attributes: [
+                .font: font,
+                .foregroundColor: item.dim ? NSColor.secondaryLabelColor : NSColor.labelColor,
+            ])
+        case .focused, .visible:
+            let attachment = NSTextAttachment()
+            attachment.image = marker(filled: item.marker == .focused, dim: item.dim,
+                                      side: markerSide)
+            // Centre the square on the digits' cap height rather than the baseline.
+            attachment.bounds = NSRect(x: 0, y: (font.capHeight - markerSide) / 2,
+                                       width: markerSide, height: markerSide)
+            return NSAttributedString(attachment: attachment)
+        }
+    }
+
+    private func width(of item: WorkspaceStrip.Item) -> CGFloat {
+        item.marker == .digit
+            ? NSAttributedString(string: item.label, attributes: [.font: font]).size().width
+            : markerSide
+    }
+
+    /// `nf-md-square_rounded`, which is what Omarchy marks the active workspace with — drawn
+    /// rather than set, so it needs no Nerd Font installed. The drawing handler runs at draw
+    /// time, so the colour resolves against whichever appearance the menu bar is in.
+    private func marker(filled: Bool, dim: Bool, side: CGFloat,
+                        canvas: CGFloat? = nil) -> NSImage {
+        let box = canvas ?? side
+        let radius = markerRadius * (side / markerSide)
+        let image = NSImage(size: NSSize(width: box, height: box), flipped: false) { rect in
+            let colour = dim ? NSColor.secondaryLabelColor : NSColor.labelColor
+            let square = NSRect(x: (rect.width - side) / 2, y: (rect.height - side) / 2,
+                                width: side, height: side)
+            if filled {
+                colour.setFill()
+                NSBezierPath(roundedRect: square, xRadius: radius, yRadius: radius).fill()
+            } else {
+                colour.setStroke()
+                let path = NSBezierPath(roundedRect: square.insetBy(dx: 0.75, dy: 0.75),
+                                        xRadius: radius - 0.75, yRadius: radius - 0.75)
+                path.lineWidth = 1.5
+                path.stroke()
+            }
+            return true
+        }
+        // Redraw on every use, so a light/dark switch cannot leave a stale square behind.
+        image.cacheMode = .never
+        return image
+    }
+
+    // MARK: - Clicks
+
+    /// The menu is attached only while it is up, so the rest of the time this action runs and
+    /// the strip stays clickable.
+    @objc private func buttonClicked(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent,
+              event.type == .leftMouseUp,
+              !event.modifierFlags.contains(.control)
+        else { return popUpMenu() }
+
+        let x = sender.convert(event.locationInWindow, from: nil).x
+        if let hit = WorkspaceStrip.hit(x: Double(x), widths: stripWidths,
+                                        gap: Double(gap), buttonWidth: Double(sender.bounds.width)) {
+            onSelectWorkspace?(stripItems[hit].index)
+        } else {
+            // The padding at either end, or a strip with no workspaces in it.
+            popUpMenu()
+        }
+    }
+
+    private func popUpMenu() {
+        item.menu = menu                 // menuNeedsUpdate fires here
+        item.button?.performClick(nil)   // blocks until the menu closes
+        item.menu = nil
     }
 
     // MARK: - The menu
@@ -122,7 +220,11 @@ final class StatusItem: NSObject, NSMenuDelegate {
                                      action: #selector(selectWorkspace(_:)), keyEquivalent: "")
             heading.target = self
             heading.tag = workspace.index
-            heading.state = workspace.isFocused ? .on : (workspace.isVisible ? .mixed : .off)
+            // The same square the strip uses, so the two surfaces read as one thing.
+            if workspace.isVisible {
+                heading.image = marker(filled: workspace.isFocused, dim: workspace.isEmpty,
+                                       side: 9, canvas: 12)
+            }
             heading.attributedTitle = NSAttributedString(
                 string: headingTitle(workspace),
                 attributes: [.font: NSFont.menuFont(ofSize: 13).bold])

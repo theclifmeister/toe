@@ -413,4 +413,57 @@ h.test("a workspace knows which monitor is showing it") { t in
     t.equal(wm.visibleWorkspaceIndices.count, 2, "one visible workspace per monitor")
 }
 
+h.test("the strip shows occupied and visible workspaces") { t in
+    let items = WorkspaceStrip.items(for: [
+        WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
+        WorkspaceStrip.State(index: 3, isFocused: false, isVisible: false, isEmpty: true),
+        WorkspaceStrip.State(index: 7, isFocused: false, isVisible: false, isEmpty: false),
+    ])
+    t.equal(items.map(\.index), [1, 7], "an empty off-screen workspace gets no slot")
+    t.equal(items.map(\.dim), [false, false], "occupied workspaces are full contrast")
+
+    // The one you are on is always there, even with nothing on it — dimmed, the way waybar's
+    // `#workspaces button.empty { opacity: 0.5 }` dims it.
+    let onEmpty = WorkspaceStrip.items(for: [
+        WorkspaceStrip.State(index: 5, isFocused: true, isVisible: true, isEmpty: true)])
+    t.equal(onEmpty.map(\.index), [5], "the focused workspace keeps its slot when empty")
+    t.equal(onEmpty.map(\.dim), [true], "and is dimmed")
+    t.equal(WorkspaceStrip.items(for: []).isEmpty, true, "nothing in, nothing out")
+}
+
+h.test("workspace ten is labelled zero") { t in
+    let items = WorkspaceStrip.items(for: (1...10).map {
+        WorkspaceStrip.State(index: $0, isFocused: false, isVisible: false, isEmpty: false) })
+    t.equal(items.map(\.label), ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+            "workspace 10 shows as 0, as Omarchy's format-icons do")
+}
+
+h.test("markers follow focus and visibility") { t in
+    let items = WorkspaceStrip.items(for: [
+        WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
+        WorkspaceStrip.State(index: 2, isFocused: false, isVisible: true, isEmpty: false),
+        WorkspaceStrip.State(index: 4, isFocused: false, isVisible: false, isEmpty: false),
+    ])
+    t.equal(items.map(\.marker), [.focused, .visible, .digit],
+            "a filled square where you are, outlined on another display, a digit off-screen")
+}
+
+h.test("clicking the strip picks the workspace under the pointer") { t in
+    // Three 8pt items, 7pt apart, centred in a 60pt button: they start at 11, 26 and 41.
+    func hit(_ x: Double) -> Int? {
+        WorkspaceStrip.hit(x: x, widths: [8, 8, 8], gap: 7, buttonWidth: 60)
+    }
+    t.equal(hit(15), .some(0), "on the first item")
+    t.equal(hit(30), .some(1), "on the middle item")
+    t.equal(hit(45), .some(2), "on the last item")
+
+    // The gaps are not dead: they belong to whichever neighbour is nearer.
+    t.equal(hit(21), .some(0), "just past the first item")
+    t.equal(hit(24), .some(1), "just before the second")
+
+    t.equal(hit(5), nil, "the padding before the strip opens the menu instead")
+    t.equal(hit(55), nil, "and so does the padding after it")
+    t.equal(WorkspaceStrip.hit(x: 30, widths: [], gap: 7, buttonWidth: 60), nil, "no items, no hit")
+}
+
 exit(h.report())

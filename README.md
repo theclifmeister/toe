@@ -33,23 +33,27 @@ at `~/.config/toe/toe.toml`.
 
 ## The menu bar
 
-The status item is the workspace strip, in the style of waybar: occupied workspaces only, with
-the focused one picked out in bold. Workspaces showing on another display are bold but dimmed,
-and an empty workspace appears only while you are on it.
+The status item is the workspace strip, styled the way Omarchy's waybar styles it: the
+workspace you are on is a filled rounded square rather than a number, every other occupied
+workspace is its own digit, and workspace 10 shows as `0`. An empty workspace appears only
+while you are on it, dimmed. With several displays, a workspace showing on one you are not
+focused on gets the same square, outlined.
 
 ```
-1 3 7
+▪ 3 7
 ```
 
-Opening it breaks each workspace down into the applications living there:
+Clicking a workspace switches to it, as Omarchy's `on-click: activate` does. Right-click —
+or left-click the padding at either end — to open the menu, which breaks each workspace down
+into the applications living there:
 
 ```
-Workspace 1  ✓
-    Ghostty  ×2
-    Safari  ×2
-Workspace 4
-    Google Chrome
-────────────────
+▪ Workspace 1
+      Ghostty  ×2
+      Safari  ×2
+  Workspace 4
+      Google Chrome
+────────────────────
 Config loaded
 ```
 
