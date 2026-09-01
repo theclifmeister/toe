@@ -135,15 +135,15 @@ whose minimum size exceeds its tile (Safari will not go narrower than ~574px) is
 then left alone rather than fought with forever. The same mechanism snaps a window back when you
 drag it out of its tile.
 
-**Floating windows.** `togglefloating` lifts a window out of the tree and gives it back the
-geometry it had before toe first tiled it — Hyprland's `m_vLastFloatingSize` and
-`m_vLastFloatingPosition` — and after that, wherever you last dragged it. toe writes a floating
-frame only when it actually changes and never re-asserts it, so dragging a floating window is
-never fought the way a tile is. If the display it was last on has been unplugged, the window is
-centred on the display that remains rather than clamped against an edge. It is raised when you
-float it and again whenever it is focused, but the Accessibility API offers no persistent
-always-on-top: activate a tiled window afterwards and it can cover the floating one. Floating
-windows stay reachable with `SUPER`+arrows.
+**Floating windows.** `togglefloating` lifts a window out of the tree and centres it on the
+monitor, at the size it remembers — what the window was before toe first tiled it, and after
+that the last size it floated at. Centring happens when you float it, not on every frame, so
+dragging a floating window afterwards sticks: toe writes a floating frame only when it actually
+changes and never re-asserts it, so a floating window is never fought the way a tile is. If the
+display it was last on has been unplugged, it is centred on the display that remains rather than
+clamped against an edge. It is raised when you float it and again whenever it is focused, but the
+Accessibility API offers no persistent always-on-top: activate a tiled window afterwards and it
+can cover the floating one. Floating windows stay reachable with `SUPER`+arrows.
 
 **Windows toe leaves alone**: dialogs, sheets, palettes, minimized and natively-fullscreen
 windows, and anything that refuses a position or size. Add your own exceptions with `[[float]]`

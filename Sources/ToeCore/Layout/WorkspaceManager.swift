@@ -196,6 +196,13 @@ public final class WorkspaceManager {
         } else {
             ws.layout.remove(id)
             ws.floating.insert(id)
+            // A window leaving the tree is centred, at the size it remembers. This is set here
+            // rather than derived in `floatingBox` so that it happens once, when you float the
+            // window — deriving it every render would drag the window back to the middle of
+            // the screen the moment you tried to move it.
+            if let m = monitor(id: ws.monitorID) {
+                floatingFrames[id] = centredFloatingBox(for: id, on: m)
+            }
         }
     }
 
@@ -371,24 +378,29 @@ public final class WorkspaceManager {
     /// captured from a parked window overlaps by 1×1pt, and handing that back would make the
     /// window vanish.
     private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
-        let usable = monitor.usable
-        let remembered = floatingFrames[id]
+        guard let remembered = floatingFrames[id] else {
+            return centredFloatingBox(for: id, on: monitor)
+        }
 
-        if let remembered {
-            let onScreen = remembered.intersection(usable)
-            if onScreen.w >= min(Self.minimumOnScreen, remembered.w),
-               onScreen.h >= min(Self.minimumOnScreen, remembered.h) {
-                return remembered
-            }
+        let onScreen = remembered.intersection(monitor.usable)
+        if onScreen.w >= min(Self.minimumOnScreen, remembered.w),
+           onScreen.h >= min(Self.minimumOnScreen, remembered.h) {
+            return remembered
         }
 
         // Nowhere useful to put it back: a frame remembered on a display that has since been
-        // unplugged, a window left parked in the stash corner, or one that has never floated.
-        // Centre it on the monitor, keeping the size it remembers if it has one. Centring
-        // rather than clamping matters when a display goes away — an edge-clamped window
-        // lands wherever the old geometry happened to point, which is rarely where you left it.
-        let w = min(remembered?.w ?? usable.w / 2.0, usable.w)
-        let h = min(remembered?.h ?? usable.h / 2.0, usable.h)
+        // unplugged, or a window left parked in the stash corner. Centring rather than
+        // clamping matters here — an edge-clamped window lands wherever the old geometry
+        // happened to point, which on a display that is gone is arbitrary.
+        return centredFloatingBox(for: id, on: monitor)
+    }
+
+    /// Centred on the monitor at the size the window remembers — what it was before toe first
+    /// tiled it, or the last size it floated at — or half the screen with nothing to go on.
+    private func centredFloatingBox(for id: WindowID, on monitor: Monitor) -> Box {
+        let usable = monitor.usable
+        let w = min(floatingFrames[id]?.w ?? usable.w / 2.0, usable.w)
+        let h = min(floatingFrames[id]?.h ?? usable.h / 2.0, usable.h)
         return Box(x: usable.minX + (usable.w - w) / 2.0,
                    y: usable.minY + (usable.h - h) / 2.0,
                    w: w, h: h).rounded()

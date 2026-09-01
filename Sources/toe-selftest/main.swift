@@ -344,7 +344,12 @@ h.test("toggling a window out of the tree and back") { t in
     t.equal(wm.isFloating(2), true, "w2 floats")
     t.equal(wm.workspaces[1]?.layout.contains(2), false, "and has left the tree")
     t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), AREA, "w1 absorbs the whole area")
-    t.equalBox(wm.render().floating[2], box(200, 150, 640, 400), "its remembered frame is rendered")
+    t.equalBox(wm.render().floating[2], box(436, 291, 640, 400),
+               "centred on the monitor, at the size it remembers")
+
+    wm.floatingFrames[2] = box(40, 40, 640, 400)   // dragged into the corner by hand
+    t.equalBox(wm.render().floating[2], box(40, 40, 640, 400),
+               "a drag is not pulled back to the centre on the next render")
 
     wm.toggleFloating(2)
     t.equal(wm.isFloating(2), false, "w2 is tiled again")
