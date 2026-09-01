@@ -527,13 +527,9 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-w")?.command, .killActive, "SUPER+W closes")
     t.equal(binding("super-tab")?.command, .workspace(.next), "SUPER+TAB")
 
-    // SUPER+T is not a shipped default — it is a local-config binding, so assert the parser
-    // rather than the default table.
-    let (mods, code, key) = try BindingParser.parse("super-t", superKey: .option)
-    t.equal(mods, Modifiers.option, "super-t: SUPER resolves to Option")
-    t.equal(code, 0x11, "super-t: T key code")
-    t.equal(key, "t", "super-t: key name")
-    t.equal(try CommandParser.parse("togglefloating"), .toggleFloating, "togglefloating dispatcher")
+    t.equal(binding("super-t")?.command, .toggleFloating, "SUPER+T floats")
+    t.equal(binding("super-t")?.keyCode, 0x11, "T key code")
+    t.equal(binding("super-shift-v"), nil, "SUPER+SHIFT+V is no longer bound")
 
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
     t.equal(arrows.allSatisfy { binding($0) != nil }, true, "all four focus arrows bound")
