@@ -64,15 +64,31 @@ built when the menu opens, so nothing is maintained while it is closed.
 ## Install
 
 ```sh
-make install          # builds, ad-hoc signs, copies to /Applications
+brew tap theclifmeister/toe https://github.com/theclifmeister/toe
+brew install --cask theclifmeister/toe/toe
 open /Applications/Toe.app
-make start-at-login   # optional
 ```
+
+The two-argument `brew tap` is because the cask lives in this repository rather than a
+separate `homebrew-toe` one. `brew upgrade --cask toe` picks up new releases.
 
 Grant **System Settings → Privacy & Security → Accessibility** when asked. That single
 permission is all toe needs.
 
+### From source
+
+```sh
+make install          # builds, signs, copies to /Applications
+open /Applications/Toe.app
+```
+
 `make run` builds and launches in place without installing. `make test` runs the layout suite.
+
+### Start at login
+
+```sh
+make start-at-login   # from a clone; writes a LaunchAgent for /Applications/Toe.app
+```
 
 ## How faithful is the dwindle?
 
@@ -165,3 +181,7 @@ log stream --predicate 'subsystem == "com.clifmeister.toe"' --level info
 
 By design: no scratchpads, no binding modes, no scripting API, no resize bindings, no window
 groups. It is a layout engine and the bindings that drive it.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
