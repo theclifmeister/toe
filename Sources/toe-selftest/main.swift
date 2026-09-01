@@ -865,6 +865,540 @@ h.test("clicking the strip picks the workspace under the pointer") { t in
 }
 
 // MARK: - The quick menu
+
+/// A context with three windows spread over two workspaces, so the Windows and Workspaces levels
+/// have something real to be built from.
+func menuFixture() -> MenuContext {
+    let ws1 = WorkspaceSummary(
+        index: 1, isFocused: true, isVisible: true, monitorName: nil,
+        apps: [AppSummary(name: "Ghostty", windowCount: 2, pid: 501,
+                          representativeWindow: 1001, windowTitle: "~/src/toe"),
+               AppSummary(name: "Safari", windowCount: 1, pid: 502,
+                          representativeWindow: 1002, windowTitle: "Hyprland Wiki")])
+    let ws4 = WorkspaceSummary(
+        index: 4, isFocused: false, isVisible: false, monitorName: nil,
+        apps: [AppSummary(name: "Google Chrome", windowCount: 1, pid: 503,
+                          representativeWindow: 1003, windowTitle: "Inbox")])
+    let others = [2, 3, 5, 6, 7, 8, 9, 10].map {
+        WorkspaceSummary(index: $0, isFocused: false, isVisible: false, monitorName: nil, apps: [])
+    }
+    let config = Config.makeDefault()
+    return MenuContext(workspaces: ([ws1, ws4] + others).sorted { $0.index < $1.index },
+                       focusedWindow: 1001,
+                       focusedWorkspace: 1,
+                       config: config,
+                       version: "0.2.0")
+}
+
+h.test("menu parses as a command and round-trips") { t in
+    t.equal(try? CommandParser.parse("menu"), .some(.menu), "the dispatcher exists")
+    // Like `reload`, a trailing argument is ignored rather than rejected — the house style for
+    // commands that take none.
+    t.equal(try? CommandParser.parse("menu extra"), .some(.menu), "an argument is ignored")
+
+    let every: [Command] = [
+        .moveFocus(.left), .moveFocus(.right), .moveFocus(.up), .moveFocus(.down),
+        .swapWindow(.left), .moveWindow(.down),
+        .workspace(.index(1)), .workspace(.index(10)),
+        .workspace(.next), .workspace(.previous), .workspace(.former),
+        .moveToWorkspace(3, follow: true), .moveToWorkspace(7, follow: false),
+        .killActive, .toggleFloating, .toggleSplit, .swapSplit,
+        .exec("osascript -e 'tell application \"Ghostty\" to new window'"),
+        .reload, .menu,
+    ]
+    for command in every {
+        t.equal(try? CommandParser.parse(command.described), .some(command),
+                "\(command.described) round-trips")
+    }
+}
+
+h.test("the shipped config binds SUPER+SPACE to the menu") { t in
+    let config = try! Config.parse(Config.defaultTOML)
+    let binding = config.bindings.first { $0.command == .menu }
+    t.expect(binding != nil, "the default config binds the menu")
+    t.equal(binding?.keyCode, .some(0x31), "kVK_Space")
+    t.equal(binding?.modifiers, .some(Modifiers.option), "SUPER is Option by default")
+    t.equal(binding?.source, .some("super-space"), "written the way Omarchy writes it")
+}
+
+h.test("the root menu drills into seven destinations") { t in
+    let root = MenuTree.root(menuFixture())
+    t.equal(root.children.map(\.id),
+            ["windows", "workspaces", "layout", "style", "setup", "system", "about"],
+            "Omarchy's shape, minus the pacman-shaped sections")
+    t.expect(root.children.allSatisfy(\.isSubmenu), "every top-level row drills down")
+}
+
+h.test("the Windows level puts this workspace first and the rest one level down") { t in
+    let rows = MenuTree.windows(menuFixture())
+    t.equal(rows.map(\.id), ["windows.1001", "windows.1002", "windows.elsewhere"],
+            "the focused workspace's apps, then everything else")
+    t.equal(rows[0].title, "Ghostty  ×2", "grouped apps carry their count")
+    t.equal(rows[0].detail, .some("~/src/toe"), "and the window's current title")
+    t.equal(rows[1].title, "Safari", "a single window needs no count")
+
+    let elsewhere = rows[2].children
+    t.equal(elsewhere.map(\.id), ["windows.1003"], "one window on workspace 4")
+    t.equal(elsewhere[0].detail, .some("Workspace 4"), "which says where it is")
+
+    let empty = MenuTree.windows(MenuContext.empty)
+    t.equal(empty.map(\.id), ["windows.none"], "and an honest empty case")
+    t.expect(!empty[0].isSelectable, "which you cannot activate")
+}
+
+h.test("workspace rows keep all ten slots and tick the one you are on") { t in
+    let rows = MenuTree.workspaces(menuFixture())
+    let numbered = rows.filter { $0.id.hasPrefix("workspaces.") && Int($0.id.dropFirst(11)) != nil }
+    t.equal(numbered.count, 10, "all ten, whatever the bar shows")
+    t.equal(numbered.filter(\.isOn).map(\.id), ["workspaces.1"], "exactly one is current")
+    t.equal(numbered[3].detail, .some("1 window"), "workspace 4 says what is on it")
+    t.equal(numbered[1].detail, .some("empty"), "and an empty one says so")
+
+    if case .action(.command(.workspace(.index(let n)))) = numbered[6].kind {
+        t.equal(n, 7, "row seven switches to workspace seven, through the same dispatcher")
+    } else {
+        t.expect(false, "workspace rows dispatch a command")
+    }
+
+    let move = rows.first { $0.id == "workspaces.move" }
+    t.expect(move?.isEnabled == true, "move-to is available with a focused window")
+    t.expect(move?.children.first { $0.id == "workspaces.move.1" }?.isEnabled == false,
+             "except to the workspace you are already on")
+
+    var noWindow = menuFixture()
+    noWindow.focusedWindow = nil
+    let disabled = MenuTree.workspaces(noWindow).first { $0.id == "workspaces.move" }
+    t.expect(disabled?.isEnabled == false, "and not at all without one")
+}
+
+h.test("layout rows need a window and show the user's own shortcut") { t in
+    let rows = MenuTree.layout(menuFixture())
+    t.equal(rows.map(\.id), ["layout.togglesplit", "layout.swapsplit", "layout.togglefloating",
+                             "layout.killactive", "layout.swap"],
+            "the four commands toe has, plus the swap directions")
+    t.equal(rows[0].detail, .some("alt-j"), "read live from the config, not hardcoded")
+    t.equal(rows[3].detail, .some("alt-w"), "so a rebound key is never misreported")
+
+    var noWindow = menuFixture()
+    noWindow.focusedWindow = nil
+    t.expect(MenuTree.layout(noWindow).allSatisfy { !$0.isEnabled },
+             "all of them are disabled with nothing focused")
+}
+
+h.test("the style level ticks the running theme and gaps") { t in
+    let rows = MenuTree.style(menuFixture())
+    t.equal(rows.map(\.id), ["style.theme", "style.gaps", "style.border"], "three groups")
+
+    let themes = rows[0].children
+    t.equal(themes.filter(\.isOn).map(\.id), ["style.theme.toe"],
+            "the shipped gradient is toe's own theme")
+
+    let gaps = rows[1].children
+    t.equal(gaps.filter(\.isOn).map(\.id), ["style.gaps.omarchy"],
+            "and 5/10 is Omarchy's")
+
+    var recoloured = menuFixture()
+    recoloured.config.border.activeStart = "#7AA2F7EE"      // upper case on purpose
+    recoloured.config.border.activeEnd = "#bb9af7ee"
+    t.equal(MenuTree.style(recoloured)[0].children.filter(\.isOn).map(\.id),
+            ["style.theme.tokyonight"], "matched on colour, not on how the hex is spelled")
+}
+
+h.test("BorderTheme.matching only claims a theme it really is") { t in
+    t.equal(BorderTheme.matching(BorderConfig())?.id, .some("toe"), "the default is toe's own")
+    var odd = BorderConfig()
+    odd.activeStart = "#123456ff"
+    odd.activeEnd = "#654321ff"
+    t.expect(BorderTheme.matching(odd) == nil, "a hand-picked gradient matches nothing")
+}
+
+h.test("the setup level offers the LaunchAgent escape hatch instead of the toggle") { t in
+    var context = menuFixture()
+    context.startAtLogin = .off
+    t.expect(MenuTree.setup(context).contains { $0.id == "setup.startatlogin" },
+             "normally you get a toggle")
+
+    context.startAtLogin = .legacyLaunchAgent
+    let rows = MenuTree.setup(context)
+    t.expect(!rows.contains { $0.id == "setup.startatlogin" },
+             "but not while a LaunchAgent would launch a second toe")
+    t.expect(rows.contains { $0.id == "setup.legacylaunchagent" },
+             "you get the removal row instead")
+}
+
+h.test("only restart and shut down ask twice, and the safe row comes first") { t in
+    t.equal(SystemAction.allCases.filter(\.needsConfirmation), [.restart, .shutDown],
+            "log out raises the system's own dialog, so confirming it here would double up")
+
+    let rows = MenuTree.confirmation(.restart)
+    t.equal(rows.map(\.id), ["confirm.no", "confirm.yes"],
+            "asked as two rows, with Cancel first")
+    t.expect(!rows[0].isSelectable, "Cancel is a label; ESC is the key that means it")
+
+    // A fresh level preselects row 0, so the row ENTER lands on must be the one that does nothing.
+    var menu = MenuState(root: MenuEntry(id: "root", title: "Go", kind: .submenu([])),
+                         visibleRows: 12)
+    menu.push(title: "Restart", items: rows)
+    t.equal(menu.selection, 0, "the selection starts on Cancel")
+    t.equal(menu.handle(.enter), .ignored, "so ENTER twice in a row cannot restart your Mac")
+    t.equal(menu.handle(.down), .redraw, "you have to move to the row that acts")
+    t.equal(menu.handle(.enter), .perform(.system(.restart)), "and then it does")
+    t.equal(menu.handle(.escape), .redraw, "ESC backs out of the question")
+}
+
+h.test("the about level generates keybindings from the live config") { t in
+    let context = menuFixture()
+    let keys = MenuTree.about(context).first { $0.id == "about.keybindings" }?.children ?? []
+    t.equal(keys.count, context.config.bindings.count, "every binding, and only those")
+    let split = keys.first { $0.detail == "togglesplit" }
+    t.equal(split?.title, .some("alt-j"), "shown as the shortcut it is")
+    if case .action(.command(let c)) = split?.kind {
+        t.equal(c, .toggleSplit, "and the row runs it, not just describes it")
+    } else {
+        t.expect(false, "keybinding rows dispatch their command")
+    }
+}
+
+h.test("fuzzy match prefers word starts and runs") { t in
+    func s(_ q: String, _ c: String) -> Int? { FuzzyMatch.score(q, in: c)?.score }
+
+    t.expect(s("sf", "Safari") ?? -999 > s("sf", "Transfer files") ?? 999,
+             "initials beat letters buried mid-word")
+    t.expect(s("tog", "Toggle floating") ?? -999 > s("tog", "Back to last visited group") ?? 999,
+             "a consecutive run beats a scattered one")
+    t.expect(s("nord", "Nord") ?? -999 > s("nord", "Nord Extended Theme") ?? 999,
+             "and the shorter candidate wins a tie")
+    t.expect(s("SAF", "Safari") != nil, "matching is case-insensitive")
+    t.expect(s("xyz", "Safari") == nil, "a non-subsequence does not match at all")
+    t.equal(FuzzyMatch.score("", in: "Safari")?.offsets, .some([]), "an empty query matches with no highlight")
+    t.equal(FuzzyMatch.score("sfr", in: "Safari")?.offsets, .some([0, 2, 4]),
+            "offsets point at the characters that matched")
+}
+
+h.test("ranking is stable, so ten workspaces stay in order") { t in
+    let entries = (1...10).map {
+        MenuEntry.action("w.\($0)", "Workspace \($0)", .command(.workspace(.index($0))))
+    }
+    t.equal(FuzzyMatch.rank("", entries).map(\.entry.id), entries.map(\.id),
+            "an empty query keeps the original order")
+    t.equal(FuzzyMatch.rank("workspace", entries).map(\.entry.id), entries.map(\.id),
+            "and so does a query every row scores the same on")
+}
+
+h.test("keywords match but never highlight") { t in
+    let entries = [
+        MenuEntry.action("a", "Sleep display", .system(.sleepDisplay), keywords: ["monitor"]),
+        MenuEntry.action("b", "Monitor layout", .command(.reload)),
+    ]
+    let rows = FuzzyMatch.rank("monitor", entries)
+    t.equal(rows.map(\.entry.id), ["b", "a"], "a title match outranks a keyword match")
+    t.equal(rows[1].offsets, [], "a keyword hit shows no highlighting rather than misleading it")
+}
+
+h.test("CTRL+N and CTRL+P move like the arrows, and Option-held still types letters") { t in
+    func key(_ code: UInt32, _ chars: String, _ mods: Modifiers = []) -> MenuKey? {
+        MenuKey.from(keyCode: code, characters: chars, modifiers: mods)
+    }
+
+    t.equal(key(0x2D, "n", .control), .some(.down), "ctrl-n")
+    t.equal(key(0x23, "p", .control), .some(.up), "ctrl-p")
+    t.equal(key(0x0D, "w", .control), .some(.deleteWord), "ctrl-w")
+    t.equal(key(0x20, "u", .control), .some(.clearLine), "ctrl-u")
+    t.equal(key(0x00, "a", .control), .some(.home), "ctrl-a")
+    t.equal(key(0x0E, "e", .control), .some(.end), "ctrl-e")
+
+    t.equal(key(0x7E, ""), .some(.up), "the up arrow")
+    t.equal(key(0x24, "\r"), .some(.enter), "return")
+    t.equal(key(0x35, "\u{1B}"), .some(.escape), "escape")
+    t.equal(key(0x33, "\u{7F}"), .some(.backspace), "backspace")
+
+    // The regression this whole mapping exists for. SUPER is Option, so someone who opens the
+    // menu with ⌥Space and keeps ⌥ down must still be typing letters — `charactersIgnoringModifiers`
+    // gives "a" where `characters` would have given "å".
+    t.equal(key(0x00, "a", .option), .some(.character("a")), "option-a is still an a")
+    t.equal(key(0x11, "t", [.option, .shift]), .some(.character("t")), "and so is option-shift-t")
+
+    t.expect(key(0x0C, "q", .command) == nil, "⌘Q is never the menu's to take")
+    t.expect(key(0x30, "\t", .command) == nil, "nor ⌘Tab")
+}
+
+/// Twenty rows, so scrolling has somewhere to go.
+func longMenu(visible: Int) -> MenuState {
+    let items = (1...20).map { MenuEntry.action("row.\($0)", "Row \($0)", .command(.reload)) }
+    return MenuState(root: MenuEntry(id: "root", title: "Go", kind: .submenu(items)),
+                     visibleRows: visible)
+}
+
+h.test("typing filters and puts the selection back at the top") { t in
+    var menu = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    t.equal(menu.rows.count, 7, "everything, to begin with")
+    t.equal(menu.handle(.down), .redraw, "move down one")
+    t.equal(menu.selection, 1, "so the selection is on the second row")
+
+    t.equal(menu.handle(.character("s")), .redraw, "start typing")
+    t.equal(menu.selection, 0, "and the selection returns to the top")
+    // Still seven: `s` reaches every row, several of them only through a keyword — "layout" by
+    // "split", "about" by "keybindings". Broadening like that is the point of keywords.
+    t.equal(menu.rows.count, 7, "a single letter can still reach everything")
+
+    for c in "ty" { _ = menu.handle(.character(c)) }
+    t.expect(menu.rows.count < 7, "two more characters narrow it")
+
+    for c in "le" { _ = menu.handle(.character(c)) }
+    t.equal(menu.rows.map(\.entry.id), ["style"], "down to one match")
+    t.equal(menu.query, "style", "and the query reads back")
+}
+
+h.test("the selection wraps and keeps itself in view") { t in
+    var menu = longMenu(visible: 5)
+    t.equal(menu.scrollOffset, 0, "starts at the top")
+
+    for _ in 0..<4 { _ = menu.handle(.down) }
+    t.equal(menu.selection, 4, "the last visible row")
+    t.equal(menu.scrollOffset, 0, "needs no scrolling yet")
+
+    _ = menu.handle(.down)
+    t.equal(menu.selection, 5, "one further")
+    t.equal(menu.scrollOffset, 1, "scrolls by exactly one, not a page")
+
+    _ = menu.handle(.up)
+    t.equal(menu.scrollOffset, 1, "coming back up does not scroll again")
+
+    _ = menu.handle(.end)
+    t.equal(menu.selection, 19, "End goes to the last row")
+    t.equal(menu.scrollOffset, 15, "with the window against the bottom")
+
+    _ = menu.handle(.down)
+    t.equal(menu.selection, 0, "and one more wraps to the top")
+    t.equal(menu.scrollOffset, 0, "bringing the window with it")
+
+    _ = menu.handle(.up)
+    t.equal(menu.selection, 19, "wrapping backwards too")
+}
+
+h.test("ENTER descends, ESC comes back, and ESC at the root dismisses") { t in
+    var menu = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    t.equal(menu.depth, 0, "at the root")
+    t.equal(menu.prompt, "Go…", "walker's prompt")
+
+    for c in "layout" { _ = menu.handle(.character(c)) }
+    t.equal(menu.handle(.enter), .redraw, "ENTER on a submenu descends rather than performing")
+    t.equal(menu.depth, 1, "one level down")
+    t.equal(menu.query, "", "with the query cleared")
+    t.equal(menu.breadcrumb, ["Go", "Layout"], "and a trail back")
+
+    t.equal(menu.handle(.escape), .redraw, "ESC pops")
+    t.equal(menu.depth, 0, "back at the root")
+    t.equal(menu.handle(.escape), .dismiss, "and ESC there closes the menu")
+}
+
+h.test("BACKSPACE edits the query but never backs out of the menu") { t in
+    var menu = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    t.equal(menu.handle(.backspace), .ignored,
+            "an empty query at the root has nothing to do — only ESC dismisses")
+
+    _ = menu.handle(.character("s"))
+    _ = menu.handle(.character("t"))
+    t.equal(menu.handle(.backspace), .redraw, "with a query it deletes")
+    t.equal(menu.query, "s", "one character at a time")
+
+    for c in "tyle" { _ = menu.handle(.character(c)) }
+    _ = menu.handle(.enter)
+    t.equal(menu.depth, 1, "inside Style")
+    t.equal(menu.handle(.backspace), .redraw, "an empty query in a submenu")
+    t.equal(menu.depth, 0, "pops back out")
+}
+
+h.test("ENTER performs an action, and cannot perform what is not there") { t in
+    var menu = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    for c in "workspaces" { _ = menu.handle(.character(c)) }
+    _ = menu.handle(.enter)
+    for c in "workspace 7" { _ = menu.handle(.character(c)) }
+    t.equal(menu.handle(.enter), .perform(.command(.workspace(.index(7)))),
+            "the row dispatches through the same command a hotkey would")
+
+    var empty = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    for c in "zzzz" { _ = empty.handle(.character(c)) }
+    t.equal(empty.rows.count, 0, "nothing matches")
+    t.equal(empty.handle(.enter), .ignored, "so ENTER does nothing")
+    t.equal(empty.handle(.down), .ignored, "and neither does moving")
+
+    var info = MenuState(root: MenuEntry(id: "root", title: "Go",
+                                         kind: .submenu([.info("i", "No windows")])),
+                         visibleRows: 12)
+    t.equal(info.handle(.enter), .ignored, "a label is not activatable")
+}
+
+h.test("TAB descends but never fires an action") { t in
+    var menu = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    for c in "system" { _ = menu.handle(.character(c)) }
+    t.equal(menu.handle(.tab), .redraw, "TAB into a submenu")
+    t.equal(menu.depth, 1, "descends")
+    t.equal(menu.handle(.tab), .ignored,
+            "but on an action it does nothing — reaching for it must never restart your Mac")
+}
+
+h.test("CTRL+W and CTRL+U clear the query") { t in
+    var menu = MenuState(root: MenuTree.root(menuFixture()), visibleRows: 12)
+    for c in "sty le" { _ = menu.handle(.character(c)) }
+    t.equal(menu.handle(.deleteWord), .redraw, "delete a word")
+    t.equal(menu.query, "sty ", "back to the previous one")
+    t.equal(menu.handle(.clearLine), .redraw, "clear the line")
+    t.equal(menu.query, "", "all of it")
+    t.equal(menu.handle(.clearLine), .ignored, "and again does nothing")
+}
+
+h.test("the panel keeps walker's geometry") { t in
+    t.equal(QuickMenuGeometry.width, 295, "walker's --width")
+    t.equal(QuickMenuGeometry.height(rowCount: 100), 630, "clamped to walker's --maxheight")
+    t.equal(QuickMenuGeometry.height(rowCount: 0), QuickMenuGeometry.chrome,
+            "and an empty list is just the prompt")
+    t.equal(QuickMenuGeometry.height(rowCount: 3),
+            QuickMenuGeometry.chrome + 3 * QuickMenuGeometry.rowHeight, "three rows deep")
+    t.expect(QuickMenuGeometry.visibleRows() >= 18, "630pt holds a useful number of rows")
+
+    let screen = box(0, 0, 1512, 900)
+    let frame = QuickMenuGeometry.frame(rowCount: 5, on: screen)
+    t.equal(frame.w, 295, "the panel is walker's width")
+    t.equal(frame.x, ((1512 - 295) / 2).rounded(), "horizontally centred")
+    t.expect(frame.y > 0 && frame.maxY < 900, "and sits on the screen, a little above centre")
+
+    let narrow = QuickMenuGeometry.frame(rowCount: 5, on: box(0, 0, 200, 900))
+    t.equal(narrow.w, 200, "never wider than the display it is on")
+}
+
+h.test("TOMLEdit replaces a value and leaves the file otherwise alone") { t in
+    let before = """
+    # toe
+    [border]
+    enabled      = true
+    width        = 2
+    active_start = "#33ccffee"   # the gradient's first stop
+    active_end   = "#00ff99ee"
+    angle        = 45
+
+    [[float]]
+    app = "com.apple.finder"
+    """
+    let after = TOMLEdit.apply([
+        .init(table: "border", key: "active_start", value: .string("#7aa2f7ee")),
+        .init(table: "border", key: "active_end", value: .string("#bb9af7ee")),
+    ], to: before)
+
+    t.expect(after.contains("active_start = \"#7aa2f7ee\"   # the gradient's first stop"),
+             "the value changes, the alignment and the comment do not")
+    t.expect(after.contains("active_end   = \"#bb9af7ee\""), "and the column is kept")
+    t.expect(after.contains("# toe"), "the header comment survives")
+    t.expect(after.contains("width        = 2"), "untouched keys are untouched")
+    t.expect(after.contains("app = \"com.apple.finder\""), "and so is the float rule")
+
+    let parsed = try Config.parse(after)
+    t.equal(parsed.border.activeStart, "#7aa2f7ee", "and it parses back to the new theme")
+    t.equal(parsed.border.activeEnd, "#bb9af7ee", "both stops")
+    t.equal(parsed.border.width, 2, "with everything else intact")
+}
+
+h.test("TOMLEdit inserts a missing key inside its own section") { t in
+    let before = """
+    [border]
+    enabled = true
+
+    [bar]
+    persistent_workspaces = 5
+    """
+    let after = TOMLEdit.apply([
+        .init(table: "border", key: "active_start", value: .string("#7aa2f7ee")),
+    ], to: before)
+
+    let lines = after.components(separatedBy: "\n")
+    let inserted = lines.firstIndex { $0.contains("active_start") }
+    let barHeader = lines.firstIndex { $0.trimmingCharacters(in: .whitespaces) == "[bar]" }
+    t.expect(inserted != nil, "the key is added")
+    t.expect((inserted ?? 99) < (barHeader ?? 0),
+             "above the next section header, not at the end of the file")
+    t.equal(try Config.parse(after).border.activeStart, "#7aa2f7ee", "and it takes effect")
+}
+
+h.test("TOMLEdit appends a section that is not there at all") { t in
+    let after = TOMLEdit.apply([
+        .init(table: "border", key: "active_start", value: .string("#7aa2f7ee")),
+        .init(table: "border", key: "active_end", value: .string("#bb9af7ee")),
+    ], to: "[general]\nsuper_key = \"alt\"\n")
+    t.expect(after.contains("[border]"), "the section is created")
+    let parsed = try Config.parse(after)
+    t.equal(parsed.border.activeStart, "#7aa2f7ee", "and read back")
+    t.equal(parsed.superKey, Modifiers.option, "without disturbing what was there")
+}
+
+h.test("TOMLEdit is not fooled by lookalike headers") { t in
+    let before = """
+    # A [border] mentioned in a comment is not a section.
+    [general]
+    note = "see [border] below"
+    gaps_in = 5
+
+    [[float]]
+    app = "com.apple.finder"
+
+    [border]
+    active_start = "#33ccffee"
+    """
+    let after = TOMLEdit.apply([
+        .init(table: "border", key: "active_start", value: .string("#7aa2f7ee")),
+    ], to: before)
+
+    t.expect(after.contains("note = \"see [border] below\""),
+             "a header inside a string is left alone")
+    t.expect(after.contains("# A [border] mentioned in a comment is not a section."),
+             "and so is one inside a comment")
+    t.expect(after.contains("active_start = \"#7aa2f7ee\""), "the real section is edited")
+    t.expect(!after.contains("#33ccffee"), "exactly once")
+    t.equal(after.components(separatedBy: "active_start").count - 1, 1,
+            "and no duplicate key is inserted")
+}
+
+h.test("TOMLEdit writes ints, floats and bools, and is idempotent") { t in
+    let before = "[general]\ngaps_in  = 5\ngaps_out = 10\n\n[border]\nenabled = true\n"
+    let once = TOMLEdit.apply([
+        .init(table: "general", key: "gaps_in", value: .int(10)),
+        .init(table: "general", key: "gaps_out", value: .int(20)),
+        .init(table: "border", key: "enabled", value: .bool(false)),
+    ], to: before)
+    let twice = TOMLEdit.apply([
+        .init(table: "general", key: "gaps_in", value: .int(10)),
+        .init(table: "general", key: "gaps_out", value: .int(20)),
+        .init(table: "border", key: "enabled", value: .bool(false)),
+    ], to: once)
+    t.equal(once, twice, "applying the same edit twice changes nothing the second time")
+
+    let parsed = try Config.parse(once)
+    t.equal(parsed.gaps.inner, 10, "gaps_in")
+    t.equal(parsed.gaps.outer, 20, "gaps_out")
+    t.equal(parsed.border.enabled, false, "and a bool")
+
+    let floated = TOMLEdit.apply([
+        .init(table: "dwindle", key: "default_split_ratio", value: .double(1.0)),
+    ], to: "[dwindle]\ndefault_split_ratio = 0.5\n")
+    t.expect(floated.contains("= 1.0"), "a whole float still reads as a float")
+}
+
+h.test("the shipped default config survives a theme apply intact") { t in
+    let after = TOMLEdit.apply([
+        .init(table: "border", key: "active_start", value: .string("#88c0d0ee")),
+        .init(table: "border", key: "active_end", value: .string("#5e81acee")),
+    ], to: Config.defaultTOML)
+
+    let beforeLines = Config.defaultTOML.components(separatedBy: "\n")
+    let afterLines = after.components(separatedBy: "\n")
+    t.equal(afterLines.count, beforeLines.count, "no lines added or removed")
+    let changed = zip(beforeLines, afterLines).filter { $0 != $1 }
+    t.equal(changed.count, 2, "exactly the two lines the theme touches")
+
+    let config = try Config.parse(after)
+    t.equal(BorderTheme.matching(config.border)?.id, .some("nord"), "and the menu ticks Nord")
+    t.equal(config.bindings.count, try Config.parse(Config.defaultTOML).bindings.count,
+            "with every binding still bound")
+}
 h.test("RGBA parses the spellings Hyprland writes") { t in
     t.equal(RGBA.parse(hex: "#33ccffee"), .some(RGBA(r: 0x33 / 255, g: 0xcc / 255,
                                                      b: 0xff / 255, a: 0xee / 255)),

@@ -19,6 +19,7 @@ as the defaults.
 | `SUPER` + `1`…`9`, `0` | Switch to workspace 1…10 |
 | `SUPER` + `SHIFT` + `1`…`9`, `0` | Move window to workspace and follow it |
 | `SUPER` + `TAB` / `SHIFT`+`TAB` / `CTRL`+`TAB` | Next / previous / former workspace |
+| `SUPER` + `SPACE` | The quick menu |
 | `SUPER` + `ENTER` | New terminal window |
 | `SUPER` + `SHIFT` + `ENTER` | New browser window |
 | `SUPER` + `W` | Close window |
@@ -65,6 +66,60 @@ Config loaded
 Rows are live: click a workspace to switch to it, or an application to focus its window —
 including one on a hidden workspace, which brings that workspace forward first. The list is
 built when the menu opens, so nothing is maintained while it is closed.
+
+## The quick menu
+
+`SUPER`+`SPACE` opens Omarchy's menu — the `walker --dmenu` panel its `omarchy-menu` script drives,
+at walker's own 295pt width. Type to filter, arrows or `CTRL`+`N`/`P` to move, `ENTER` to pick,
+`ESC` to go back a level and again to dismiss, `SUPER`+`SPACE` to close it outright. `BACKSPACE` on
+an empty query goes back a level too, but never out of the menu: only `ESC` does that.
+
+```
+┌─────────────────────────────┐
+│ Go…                         │
+├─────────────────────────────┤
+│  Windows                   ›│
+│  Workspaces                ›│
+│  Layout                    ›│
+│  Style                     ›│
+│  Setup                     ›│
+│  System                    ›│
+│  About                      │
+└─────────────────────────────┘
+```
+
+Omarchy's Install, Remove, Update and Learn are pacman, the AUR and Arch's own documentation, so
+they have no counterpart here. What is left maps onto what toe actually does:
+
+- **Windows** — every window, this workspace's first and the rest one level down, with its current
+  title. Picking one on a hidden workspace brings that workspace forward first, exactly as the menu
+  bar's rows do.
+- **Workspaces** — all ten, whatever `[bar] persistent_workspaces` shows, plus next, previous, last
+  visited, and move-window-to. All ten always have a row so their positions never shift under your
+  muscle memory.
+- **Layout** — `togglesplit`, `swapsplit`, `togglefloating`, `killactive` and the four
+  `swapwindow` directions, each showing your own binding for it. Nothing for resize or window
+  groups, because there is nothing to show.
+- **Style** — Omarchy's theme names, and picking one **rewrites `[border]` in your config**, which
+  the watcher then reloads. That is what Omarchy's own Style menu does, and it means a theme
+  persists without toe keeping any state of its own. Gaps presets sit beside it rather than inside
+  it — in Omarchy `looknfeel.conf` is shared across every theme and only the colours change.
+- **Setup** — open or reveal the config, reload it, start toe at login, the Accessibility pane.
+- **System** — lock, sleep, log out, restart, shut down. Restart and shut down ask first, as a
+  Cancel/Confirm level whose preselected row is the one that does nothing, so `ENTER` twice in a row
+  cannot reboot you. Log out is not asked about here because the system asks itself.
+- **About** — the version, and **Keybindings**, generated from the live config, where each row runs
+  the command it describes. This is Omarchy's `Learn`, for the only part of it toe can answer.
+
+Rows are built when the menu opens and nothing is kept while it is closed — the same discipline the
+menu bar item keeps. Everything a hotkey can do is dispatched through the same command a hotkey
+would, so there is no second implementation of anything.
+
+Entries are compiled in rather than configurable. A menu you have to configure is the scripting API
+under **Not included**, with a friendlier name.
+
+`SUPER`+`SPACE` is a default, so a config written by an earlier version will not have it — add
+`"super-space" = "menu"` to `[binds]`, or delete `~/.config/toe/toe.toml` to get a fresh one.
 
 ## Install
 
@@ -158,6 +213,32 @@ with a read-only global event monitor rather than an event tap. For as long as y
 a window toe writes nothing to it, which is what stops it being yanked out from under the cursor;
 its frame is written once, into whatever tile it now owns, when you release.
 
+**The quick menu's keyboard.** toe is a background app, and a borderless panel in one does not get
+keystrokes for free: `NSWindow.canBecomeKey` is false for a borderless window, and macOS's
+cooperative activation can refuse to activate an app it cannot attribute recent input to. Both are
+handled — the panel overrides `canBecomeKey`, and after activating, toe checks that the panel really
+did become key and closes rather than leaving a visible menu quietly swallowing what you type into
+whatever was underneath. Carbon hotkeys are dispatched ahead of key-window delivery and keep firing
+while toe is frontmost, so they are gated for as long as the menu is open; the focus border is hidden
+for the same span, which is the courtesy already extended to a window being dragged. Dismissing
+without picking anything puts focus back on the window you came from explicitly, rather than trusting
+macOS to reactivate the app you were in — it reactivates the next one in order, which is not always
+the same thing.
+
+There is no text field: typed characters go straight into the menu's own query, which keeps one
+source of truth for what is on screen and makes every key rule testable without AppKit. The cost is
+no input method, so the query is Latin-only. Two other honest edges: while a password field has
+secure input engaged, Carbon hotkeys can be suppressed altogether, so `SUPER`+`SPACE` may not fire —
+that is pre-existing toe behaviour, not the menu's; and the rows are drawn rather than built from
+controls, so VoiceOver sees the list and the selected row but not yet each row as its own element.
+
+**Restyling from the menu writes your config.** `Style` edits the `[border]` and gaps keys in
+`~/.config/toe/toe.toml` in place, preserving every comment and the `=` alignment, and then leaves
+the reload to the watcher rather than reloading itself — a second reload inside the watcher's debounce
+would rewrite every window's frame and flicker the whole screen for the sake of a colour. Two
+properties this shares with Omarchy's own theme switching: an editor holding unsaved changes to that
+file wins on its next save, and there is no undo beyond picking something else.
+
 **Floating windows.** `togglefloating` lifts a window out of the tree and centres it, at a
 consistent fraction of the display — 70% wide by 80% tall by default — so every floating window
 is the same shape whichever window it came from. No floating window is ever wider than 1.6 times
@@ -186,7 +267,10 @@ one: `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same bind
 
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
-`reload`.
+`reload`, `menu`.
+
+`menu` is the only one with no Hyprland counterpart — Omarchy reaches its menu through
+`exec walker`, and toe's is built in.
 
 The TOML parser is a dependency-free subset: tables, arrays of tables, bare and quoted keys,
 basic and literal strings, numbers, booleans, arrays and inline tables. No multi-line strings
@@ -220,7 +304,8 @@ log stream --predicate 'subsystem == "com.clifmeister.toe"' --level info
 ## Not included
 
 By design: no scratchpads, no binding modes, no scripting API, no resize bindings, no window
-groups. It is a layout engine and the bindings that drive it.
+groups. It is a layout engine and the bindings that drive it — and a menu onto the bindings, whose
+entries are compiled in for the same reason.
 
 ## License
 

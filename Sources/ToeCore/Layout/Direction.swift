@@ -14,6 +14,19 @@ public enum Direction: String, CaseIterable, Sendable {
         }
     }
 
+    /// The single letter Hyprland writes, which is also what `Direction.init` reads back.
+    public var hyprlandLetter: String {
+        switch self {
+        case .left: return "l"
+        case .right: return "r"
+        case .up: return "u"
+        case .down: return "d"
+        }
+    }
+
+    /// For menu rows and anything else user-facing.
+    public var label: String { rawValue.capitalized }
+
     public var opposite: Direction {
         switch self {
         case .left: return .right

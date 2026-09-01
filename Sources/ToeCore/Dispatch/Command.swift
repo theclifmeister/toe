@@ -7,7 +7,10 @@ public enum WorkspaceTarget: Equatable {
     case former         // `workspace previous` in Hyprland: the last one you were on
 }
 
-/// The dispatchers toe implements. Names match Hyprland's so bindings can be copied over.
+/// The dispatchers toe implements. Names match Hyprland's so bindings can be copied over —
+/// with one exception: `menu` has no Hyprland counterpart, because Omarchy reaches SUPER+SPACE's
+/// menu through `exec walker`. toe's is built in, so it gets a dispatcher of its own rather than
+/// hiding inside an `exec` string.
 public enum Command: Equatable {
     case moveFocus(Direction)
     case swapWindow(Direction)
@@ -20,6 +23,34 @@ public enum Command: Equatable {
     case swapSplit
     case exec(String)
     case reload
+    /// The quick menu — toe's own, see the note above.
+    case menu
+
+    /// The command written back out in the spelling `CommandParser` accepts, so
+    /// `parse(described) == self` for every case. The quick menu shows this beside a binding.
+    public var described: String {
+        switch self {
+        case .moveFocus(let d):     return "movefocus \(d.hyprlandLetter)"
+        case .swapWindow(let d):    return "swapwindow \(d.hyprlandLetter)"
+        case .moveWindow(let d):    return "movewindow \(d.hyprlandLetter)"
+        case .workspace(let t):
+            switch t {
+            case .index(let n):  return "workspace \(n)"
+            case .next:          return "workspace next"
+            case .previous:      return "workspace prev"
+            case .former:        return "workspace previous"
+            }
+        case .moveToWorkspace(let n, let follow):
+            return follow ? "movetoworkspace \(n)" : "movetoworkspacesilent \(n)"
+        case .killActive:       return "killactive"
+        case .toggleFloating:   return "togglefloating"
+        case .toggleSplit:      return "togglesplit"
+        case .swapSplit:        return "swapsplit"
+        case .exec(let line):   return "exec \(line)"
+        case .reload:           return "reload"
+        case .menu:             return "menu"
+        }
+    }
 }
 
 public enum CommandError: Error, CustomStringConvertible {
@@ -72,6 +103,7 @@ public enum CommandParser {
         case "togglesplit":                 return .toggleSplit
         case "swapsplit":                   return .swapSplit
         case "reload":                      return .reload
+        case "menu":                        return .menu
 
         case "exec", "exec-and-forget":
             guard !argument.isEmpty else { throw CommandError.missingArgument(name) }

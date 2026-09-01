@@ -8,15 +8,16 @@ final class Coordinator: WindowTrackerDelegate {
     static let configURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/toe/toe.toml")
 
-    private let workspaces = WorkspaceManager()
+    let workspaces = WorkspaceManager()
     private let tracker = WindowTracker()
     private let hotkeys = HotkeyManager()
     private let border = BorderOverlay()
     private let drag = DragMonitor()
     private let status = StatusItem()
+    private let quickMenu = QuickMenuController()
     private var watcher: ConfigWatcher?
 
-    private var config = Config.makeDefault()
+    private(set) var config = Config.makeDefault()
     private var warnings: [String] = []
     /// The frame each window is supposed to occupy, so a re-render does not churn every window.
     private var desired: [WindowID: Box] = [:]
@@ -30,6 +31,8 @@ final class Coordinator: WindowTrackerDelegate {
     /// to a floating window.
     private var draggedWindow: WindowID? { drag.isDragging ? drag.window : nil }
     private var signalSources: [any DispatchSourceSignal] = []
+    /// While the quick menu is up it owns the keyboard, and the focus border stays out of its way.
+    private var quickMenuOpen = false
 
     // MARK: - Start-up
 
@@ -39,22 +42,27 @@ final class Coordinator: WindowTrackerDelegate {
         status.onSelectWorkspace = { [weak self] index in
             self?.dispatch(.workspace(.index(index)))
         }
-        status.onSelectWindow = { [weak self] id in
-            guard let self else { return }
-            // Focusing a window on a hidden workspace should bring that workspace forward.
-            if let index = self.workspaces.workspaceIndex(of: id),
-               index != self.workspaces.focusedWorkspaceIndex {
-                self.dispatch(.workspace(.index(index)))
-            }
-            self.focus(id)
-        }
+        status.onSelectWindow = { [weak self] id in self?.reveal(id) }
         status.onReload = { [weak self] in self?.loadConfig() }
         status.onOpenConfig = { NSWorkspace.shared.open(Coordinator.configURL) }
         status.onOpenAccessibility = { Self.openAccessibilitySettings() }
-        status.onQuit = { [weak self] in
-            self?.unstashEverything()
-            NSApp.terminate(nil)
+        status.onQuit = { [weak self] in self?.quit() }
+        // The status item's NSMenu blocks the run loop while it tracks, so it must not come up
+        // over a live key panel.
+        status.onMenuWillOpen = { [weak self] in self?.quickMenu.closeForStatusMenu() }
+
+        quickMenu.contextProvider = { [weak self] in self?.menuContext() ?? .empty }
+        quickMenu.focusProvider = { [weak self] in self?.workspaces.focusedWindow }
+        quickMenu.monitorProvider = { [weak self] in
+            guard let self else { return nil }
+            return self.workspaces.monitor(id: self.workspaces.focusedMonitorID)?.usable
         }
+        quickMenu.onPerform = { [weak self] action in self?.perform(action) }
+        quickMenu.onRestoreFocus = { [weak self] id in
+            guard let self, let id, let window = self.tracker.window(id) else { return }
+            WindowMover.focus(window)
+        }
+        quickMenu.onOpenChanged = { [weak self] open in self?.quickMenuOpenChanged(open) }
 
         installSignalHandlers()
         writeDefaultConfigIfMissing()
@@ -64,7 +72,22 @@ final class Coordinator: WindowTrackerDelegate {
         watcher?.onChange = { [weak self] in self?.loadConfig() }
         watcher?.start()
 
-        hotkeys.onTrigger = { [weak self] binding in self?.dispatch(binding.command) }
+        // Carbon hotkeys are dispatched before key-window delivery and fire while toe is
+        // frontmost, so with the menu open SUPER+3 would switch workspaces behind it. Gated here
+        // rather than by unregistering: `unregisterAll` would race `loadConfig`, and a slip there
+        // leaves the user with no keyboard at all.
+        //
+        // One consequence is worth knowing: a binding written with no modifier at all would be
+        // taken from the menu's own key handling. No shipped default is modifier-less.
+        hotkeys.onTrigger = { [weak self] binding in
+            guard let self else { return }
+            if case .menu = binding.command {
+                self.quickMenu.toggle()
+                return
+            }
+            guard !self.quickMenu.isOpen else { return }
+            self.dispatch(binding.command)
+        }
         // Dragging a tiled window over another one trades their places, live, the way
         // Hyprland's `IHyprLayout::onMouseMove` does.
         drag.onMove = { [weak self] id, point in
@@ -164,6 +187,7 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.floatingSize = newConfig.floating
         tracker.floatRules = newConfig.floatRules
         border.apply(newConfig.border)
+        quickMenu.applyStyle(newConfig.border)
         status.persistentWorkspaces = newConfig.bar.persistentWorkspaces
 
         refreshStatus()
@@ -183,7 +207,7 @@ final class Coordinator: WindowTrackerDelegate {
 
     /// What the menu bar shows: every workspace, the applications on it, and which display
     /// (if any) is currently showing it.
-    private func workspaceSummaries() -> [WorkspaceSummary] {
+    func workspaceSummaries() -> [WorkspaceSummary] {
         let focusedIndex = workspaces.focusedWorkspaceIndex
 
         return (1...WorkspaceManager.workspaceCount).map { index in
@@ -192,11 +216,16 @@ final class Coordinator: WindowTrackerDelegate {
                 self?.tracker.window(id)?.appName
             }
             let apps = groups.compactMap { group -> AppSummary? in
-                guard let first = group.windows.first else { return nil }
-                let icon = tracker.window(first)
-                    .flatMap { NSRunningApplication(processIdentifier: $0.pid) }?.icon
+                guard let first = group.windows.first, let window = tracker.window(first) else {
+                    return nil
+                }
+                // Read the title now rather than trusting the one recorded at adopt time.
+                // `WindowTracker` observes no `kAXTitleChangedNotification`, so the stored title is
+                // whatever the window was called when it first appeared — a browser's first-ever
+                // tab, forever. One AX read per window, only while a menu is being built.
                 return AppSummary(name: group.name, windowCount: group.count,
-                                  icon: icon, representativeWindow: first)
+                                  pid: window.pid, representativeWindow: first,
+                                  windowTitle: window.element.title)
             }
 
             let showingOn = workspaces.monitorShowing(workspace: index)
@@ -367,7 +396,34 @@ final class Coordinator: WindowTrackerDelegate {
         refreshStatus()
     }
 
+    /// The border is hidden outright while the quick menu is open, which is the same courtesy
+    /// already extended to a window being dragged. It also matters for correctness: `Depth`'s
+    /// reasoning about a normal-level panel landing beneath the frontmost window assumes toe is not
+    /// itself frontmost, and while the menu is up it is.
+    private func quickMenuOpenChanged(_ open: Bool) {
+        quickMenuOpen = open
+        if open { border.hide() } else { updateBorder() }
+    }
+
+    func quit() {
+        unstashEverything()
+        NSApp.terminate(nil)
+    }
+
+    /// Focusing a window on a hidden workspace brings that workspace forward first. Shared by the
+    /// menu bar's window rows and the quick menu's.
+    func reveal(_ id: WindowID) {
+        if let index = workspaces.workspaceIndex(of: id),
+           index != workspaces.focusedWorkspaceIndex {
+            dispatch(.workspace(.index(index)))
+        }
+        focus(id)
+    }
+
     private func updateBorder() {
+        // `apply` and `refreshStatus` can fire from the config watcher or an AX notification while
+        // the menu is up, so the guard belongs here rather than only at the call sites.
+        guard !quickMenuOpen else { border.hide(); return }
         guard config.border.enabled,
               let focused = draggedWindow ?? workspaces.focusedWindow,
               let window = tracker.window(focused),
@@ -412,7 +468,7 @@ final class Coordinator: WindowTrackerDelegate {
         apply(refocus: false)
     }
 
-    private func unstashEverything() {
+    func unstashEverything() {
         for window in tracker.windows.values where window.isStashed {
             window.isStashed = false
             if let frame = window.frameBeforeStash {
@@ -493,6 +549,9 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .reload:
             loadConfig()
+
+        case .menu:
+            quickMenu.toggle()
         }
     }
 }

@@ -1,31 +1,6 @@
 import AppKit
 import ToeCore
 
-/// One application's presence on a workspace.
-struct AppSummary {
-    let name: String
-    let windowCount: Int
-    let icon: NSImage?
-    /// Selecting the row focuses this window.
-    let representativeWindow: WindowID
-}
-
-struct WorkspaceSummary {
-    let index: Int
-    /// Shown on the monitor that currently has focus.
-    let isFocused: Bool
-    /// Shown on some monitor — with several displays, more than one workspace is visible.
-    let isVisible: Bool
-    let monitorName: String?
-    let apps: [AppSummary]
-
-    var isEmpty: Bool { apps.isEmpty }
-
-    var stripState: WorkspaceStrip.State {
-        .init(index: index, isFocused: isFocused, isVisible: isVisible, isEmpty: isEmpty)
-    }
-}
-
 /// The menu bar item. toe is an `LSUIElement`, so this is its only visible surface.
 ///
 /// The title is the workspace strip in Omarchy's waybar styling — the focused workspace is
@@ -46,6 +21,9 @@ final class StatusItem: NSObject, NSMenuDelegate {
     var onOpenConfig: (() -> Void)?
     var onOpenAccessibility: (() -> Void)?
     var onQuit: (() -> Void)?
+    /// The quick menu owns the keyboard while it is up, and `popUpMenu` blocks the run loop —
+    /// so it has to be told before this menu starts tracking.
+    var onMenuWillOpen: (() -> Void)?
 
     private var warnings: [String] = []
     private var accessibilityGranted = false
@@ -218,6 +196,10 @@ final class StatusItem: NSObject, NSMenuDelegate {
 
     // MARK: - The menu
 
+    func menuWillOpen(_ menu: NSMenu) {
+        onMenuWillOpen?()
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
@@ -260,11 +242,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
                 entry.target = self
                 entry.indentationLevel = 1
                 entry.representedObject = app.representativeWindow
-                if let icon = app.icon {
-                    let sized = icon.copy() as! NSImage
-                    sized.size = NSSize(width: 16, height: 16)
-                    entry.image = sized
-                }
+                entry.image = MenuIconRenderer.image(for: .runningApp(pid: app.pid))
                 menu.addItem(entry)
             }
         }

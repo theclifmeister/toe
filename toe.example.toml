@@ -101,6 +101,12 @@ persistent_workspaces = 5
 "super-j"       = "togglesplit"
 "super-t"       = "togglefloating"
 
+# ── The menu ──────────────────────────────────────────────────────────────────
+# Omarchy binds SUPER+SPACE to `walker`, its launcher and command menu. toe's is built in:
+# type to filter, arrows or CTRL+N/P to move, ENTER to pick, ESC to go back, SUPER+SPACE again
+# to dismiss.
+"super-space" = "menu"
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current
 # workspace without a second app process lingering. `ghostty +new-window` is not supported on
