@@ -79,7 +79,7 @@ public struct Config: Equatable {
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
     /// Non-fatal problems (a binding that would not parse, an unknown key). Surfaced in the
-    /// menu bar rather than thrown, so one typo never leaves you without a keyboard.
+    /// menu bar item rather than thrown, so one typo never leaves you without a keyboard.
     public var warnings: [String] = []
 
     public init() {}
@@ -166,7 +166,7 @@ public struct Config: Equatable {
         }
 
         if let binds = root["binds"]?.tableValue {
-            // Sorted so the menu and any diagnostics are stable run to run.
+            // Sorted so the tooltip and any diagnostics are stable run to run.
             for spec in binds.keys.sorted() {
                 guard let raw = binds[spec]?.stringValue else {
                     config.warnings.append("binds.\(spec): value must be a string")

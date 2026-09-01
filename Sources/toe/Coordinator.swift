@@ -35,26 +35,10 @@ final class Coordinator: WindowTrackerDelegate {
 
     func start() {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
-        status.workspaceProvider = { [weak self] in self?.workspaceSummaries() ?? [] }
         status.onSelectWorkspace = { [weak self] index in
             self?.dispatch(.workspace(.index(index)))
         }
-        status.onSelectWindow = { [weak self] id in
-            guard let self else { return }
-            // Focusing a window on a hidden workspace should bring that workspace forward.
-            if let index = self.workspaces.workspaceIndex(of: id),
-               index != self.workspaces.focusedWorkspaceIndex {
-                self.dispatch(.workspace(.index(index)))
-            }
-            self.focus(id)
-        }
-        status.onReload = { [weak self] in self?.loadConfig() }
-        status.onOpenConfig = { NSWorkspace.shared.open(Coordinator.configURL) }
         status.onOpenAccessibility = { Self.openAccessibilitySettings() }
-        status.onQuit = { [weak self] in
-            self?.unstashEverything()
-            NSApp.terminate(nil)
-        }
 
         installSignalHandlers()
         writeDefaultConfigIfMissing()
@@ -85,7 +69,7 @@ final class Coordinator: WindowTrackerDelegate {
     /// `make run` restarts toe with `pkill`, and SIGTERM's default action would leave a hidden
     /// workspace's windows parked in the stash corner. The next launch then adopts them there
     /// and records that corner as the frame to float them back to — so a window you floated
-    /// would disappear. Unstash before going away, exactly as the Quit menu item does.
+    /// would disappear. Unstash before going away, exactly as `quit` does.
     private func installSignalHandlers() {
         for number in [SIGTERM, SIGINT] {
             signal(number, SIG_IGN)
@@ -179,14 +163,12 @@ final class Coordinator: WindowTrackerDelegate {
     private func refreshStatus() {
         status.update(workspaces: workspaceStates(),
                       warnings: warnings,
-                      accessibilityGranted: AXIsProcessTrusted(),
-                      showMonitorNames: workspaces.monitors.count > 1)
+                      accessibilityGranted: AXIsProcessTrusted())
     }
 
     /// What the strip in the menu bar title draws. This runs on every focus change and every
     /// adopted window, so it stays to what the strip actually reads — no window lists, no app
-    /// names, and above all no icons. Those belong to `workspaceSummaries()`, which the menu
-    /// asks for only when it opens.
+    /// names, and above all no icons.
     private func workspaceStates() -> [WorkspaceStrip.State] {
         let focusedIndex = workspaces.focusedWorkspaceIndex
 
@@ -196,38 +178,6 @@ final class Coordinator: WindowTrackerDelegate {
                                  isVisible: workspaces.monitorShowing(workspace: index) != nil,
                                  isEmpty: workspaces.isEmpty(workspace: index))
         }
-    }
-
-    /// What the menu shows: every workspace, the applications on it, and which display
-    /// (if any) is currently showing it. Only built while the menu is opening.
-    private func workspaceSummaries() -> [WorkspaceSummary] {
-        let focusedIndex = workspaces.focusedWorkspaceIndex
-
-        return (1...WorkspaceManager.workspaceCount).map { index in
-            let ordered = workspaces.orderedWindows(inWorkspace: index)
-            let groups = AppGrouping.group(ordered) { [weak self] id in
-                self?.tracker.window(id)?.appName
-            }
-            let apps = groups.compactMap { group -> AppSummary? in
-                guard let first = group.windows.first else { return nil }
-                let icon = tracker.window(first)
-                    .flatMap { NSRunningApplication(processIdentifier: $0.pid) }?.icon
-                return AppSummary(name: group.name, windowCount: group.count,
-                                  icon: icon, representativeWindow: first)
-            }
-
-            let showingOn = workspaces.monitorShowing(workspace: index)
-            return WorkspaceSummary(
-                index: index,
-                isFocused: index == focusedIndex,
-                isVisible: showingOn != nil,
-                monitorName: showingOn.map { Self.monitorName(for: $0) },
-                apps: apps)
-        }
-    }
-
-    private static func monitorName(for displayID: UInt32) -> String {
-        NSScreen.screens.first { $0.displayID == displayID }?.localizedName ?? "Display \(displayID)"
     }
 
     // MARK: - Monitors
@@ -530,6 +480,39 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .reload:
             loadConfig()
+
+        case .editConfig:
+            openConfigInTerminal()
+
+        case .quit:
+            unstashEverything()
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// The config has no window of its own and, since the menu bar item lost its menu, no
+    /// menu item either — so `editconfig` opens it the way you would edit it anyway: a
+    /// terminal with nano in it. Terminal.app rather than the terminal you launch with
+    /// SUPER+ENTER, because it is the one that is always installed; bind `exec` instead if
+    /// you want your own (there is a line for it in the default config).
+    private func openConfigInTerminal() {
+        let shell = "nano '" + Coordinator.configURL.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let quoted = shell
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = """
+            tell application "Terminal"
+                activate
+                do script "\(quoted)"
+            end tell
+            """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        do {
+            try process.run()
+        } catch {
+            Log.error("editconfig: could not open Terminal: \(error)")
         }
     }
 }

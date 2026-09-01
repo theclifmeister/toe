@@ -631,6 +631,11 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-t")?.keyCode, 0x11, "T key code")
     t.equal(binding("super-shift-v"), nil, "SUPER+SHIFT+V is no longer bound")
 
+    // Everything the menu bar item used to offer, now that it offers nothing.
+    t.equal(binding("super-comma")?.command, .editConfig, "SUPER+, edits the config")
+    t.equal(binding("super-shift-r")?.command, .reload, "SUPER+SHIFT+R reloads it")
+    t.equal(binding("super-shift-q")?.command, .quit, "SUPER+SHIFT+Q quits toe")
+
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
     t.equal(arrows.allSatisfy { binding($0) != nil }, true, "all four focus arrows bound")
     t.equal((1...10).allSatisfy { n in c.bindings.contains { $0.command == .workspace(.index(n)) } },
@@ -834,37 +839,17 @@ h.test("hidden windows park on the monitor's bottom corner") { t in
     t.equal(r, Point(x: 3431, y: 1079), "no neighbour further right")
 }
 
-// MARK: - Menu bar summaries
+// MARK: - Menu bar
 
-h.test("windows are listed in tree order, floating last") { t in
+h.test("a workspace knows whether it holds anything") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
-    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
+    wm.addWindow(1); wm.addWindow(2)
     wm.addWindow(9, floating: true)
-    wm.addWindow(7, floating: true)
 
-    t.equal(wm.orderedWindows(inWorkspace: 1), [1, 2, 3, 7, 9],
-            "tiled left-to-right depth-first, then floating")
-    t.equal(wm.orderedWindows(inWorkspace: 4), [], "an untouched workspace is empty")
-
-    // What the menu bar strip asks on every refresh, and why it does not ask for the list.
+    // What the strip asks on every refresh — no window list is ever built for it.
     t.equal(wm.isEmpty(workspace: 1), false, "tiled and floating windows both count")
     t.equal(wm.isEmpty(workspace: 4), true, "an untouched workspace holds nothing")
-}
-
-h.test("windows group by application in first-appearance order") { t in
-    let names: [WindowID: String] = [1: "Ghostty", 2: "Google Chrome", 3: "Ghostty",
-                                     4: "Safari", 5: "Google Chrome"]
-    let groups = AppGrouping.group([1, 2, 3, 4, 5]) { names[$0] }
-
-    t.equal(groups.map(\.name), ["Ghostty", "Google Chrome", "Safari"],
-            "ordered by where each app first appears, not alphabetically")
-    t.equal(groups.map(\.count), [2, 2, 1], "windows per app")
-    t.equal(groups.first?.windows, [1, 3], "selecting the row focuses the first window")
-
-    // A window whose application cannot be named is dropped rather than shown blank.
-    t.equal(AppGrouping.group([1, 99]) { names[$0] }.map(\.name), ["Ghostty"], "unnamed windows skipped")
-    t.equal(AppGrouping.group([]) { names[$0] }.isEmpty, true, "no windows, no groups")
 }
 
 h.test("a workspace knows which monitor is showing it") { t in
@@ -954,8 +939,8 @@ h.test("clicking the strip picks the workspace under the pointer") { t in
     t.equal(hit(21), .some(0), "just past the first item")
     t.equal(hit(24), .some(1), "just before the second")
 
-    t.equal(hit(5), nil, "the padding before the strip opens the menu instead")
-    t.equal(hit(55), nil, "and so does the padding after it")
+    t.equal(hit(5), nil, "the padding before the strip is not a workspace")
+    t.equal(hit(55), nil, "and neither is the padding after it")
     t.equal(WorkspaceStrip.hit(x: 30, widths: [], gap: 7, buttonWidth: 60), nil, "no items, no hit")
 }
 

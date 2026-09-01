@@ -69,7 +69,7 @@ public enum WorkspaceStrip {
     ///
     /// The strip is centred in `buttonWidth`, its items `gap` apart. Zones reach to the
     /// midpoint between neighbours so the gaps are not dead, but a click beyond either end
-    /// of the strip returns nil — that is the padding, and it opens the menu instead.
+    /// of the strip returns nil — that is the padding, and nothing lives there.
     public static func hit(x: Double, widths: [Double], gap: Double, buttonWidth: Double) -> Int? {
         guard !widths.isEmpty else { return nil }
 

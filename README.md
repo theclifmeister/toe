@@ -24,6 +24,8 @@ as the defaults.
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
 | `SUPER` + `T` | Toggle floating |
+| `SUPER` + `,` | Edit the config — nano, in a terminal window |
+| `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
 | Drag a tiled window | Swap it with the tile you drag it over |
 
 `SUPER` is **Option (⌥)** — the same physical key position as SUPER on a PC keyboard, and it
@@ -48,23 +50,10 @@ not focused on gets the same square, outlined.
 `[bar] persistent_workspaces` sets how many keep a slot: `0` shows only the ones in use, `10`
 always shows all ten.
 
-Clicking a workspace switches to it, as Omarchy's `on-click: activate` does. Right-click —
-or left-click the padding at either end — to open the menu, which breaks each workspace down
-into the applications living there:
-
-```
-▪ Workspace 1
-      Ghostty  ×2
-      Safari  ×2
-  Workspace 4
-      Google Chrome
-────────────────────
-Config loaded
-```
-
-Rows are live: click a workspace to switch to it, or an application to focus its window —
-including one on a hidden workspace, which brings that workspace forward first. The list is
-built when the menu opens, so nothing is maintained while it is closed.
+Clicking a workspace switches to it, as Omarchy's `on-click: activate` does. That is the
+whole of it — waybar's strip has no menu behind it, and neither has this one. toe's own
+actions are key bindings instead: `SUPER`+`,` edits the config, `SUPER`+`SHIFT`+`R` reloads
+it, `SUPER`+`SHIFT`+`Q` quits. A config that will not parse is named in the item's tooltip.
 
 ## Install
 
@@ -187,16 +176,18 @@ rules.
 
 ## Config
 
-`~/.config/toe/toe.toml` is written on first run and reloaded whenever you save it. If it
-fails to parse, the running config is kept and the error appears in the menu bar item — a typo
-can never leave you without a keyboard. See [`toe.example.toml`](toe.example.toml).
+`~/.config/toe/toe.toml` is written on first run and reloaded whenever you save it. `SUPER`+`,`
+opens it in nano, in a Terminal.app window; bind `exec` with your own terminal instead if you
+would rather. If it fails to parse, the running config is kept and the error is named in the
+menu bar item's tooltip — a typo can never leave you without a keyboard. See
+[`toe.example.toml`](toe.example.toml).
 
 Binding specs parse in both spellings, so you can paste from an AeroSpace config or an Omarchy
 one: `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
-`reload`.
+`reload`, `editconfig`, `quit`.
 
 The TOML parser is a dependency-free subset: tables, arrays of tables, bare and quoted keys,
 basic and literal strings, numbers, booleans, arrays and inline tables. No multi-line strings

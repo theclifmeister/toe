@@ -20,6 +20,10 @@ public enum Command: Equatable {
     case swapSplit
     case exec(String)
     case reload
+    /// Opens the config file in a terminal, in nano. toe has no settings window and, since
+    /// the menu bar item lost its menu, no other way in.
+    case editConfig
+    case quit
 }
 
 public enum CommandError: Error, CustomStringConvertible {
@@ -72,6 +76,8 @@ public enum CommandParser {
         case "togglesplit":                 return .toggleSplit
         case "swapsplit":                   return .swapSplit
         case "reload":                      return .reload
+        case "editconfig", "config":        return .editConfig
+        case "quit", "exit":                return .quit
 
         case "exec", "exec-and-forget":
             guard !argument.isEmpty else { throw CommandError.missingArgument(name) }

@@ -8,7 +8,8 @@ let defaultConfigText = #"""
 # toe — The Omarchy Experience
 #
 # Reloads automatically when you save. If a line does not parse, the running config is kept
-# and the error is shown in the menu bar item, so a typo can never leave you keyboardless.
+# and the error is named in the menu bar item's tooltip, so a typo can never leave you
+# keyboardless. SUPER+, opens this file in nano.
 
 [general]
 # Omarchy's SUPER maps to Option: same physical key position as SUPER on a PC keyboard, and
@@ -107,6 +108,17 @@ persistent_workspaces = 5
 "super-w"       = "killactive"
 "super-j"       = "togglesplit"
 "super-t"       = "togglefloating"
+
+# ── toe itself ────────────────────────────────────────────────────────────────
+# The menu bar item is only the workspace strip — waybar's has nothing behind it either — so
+# these are the way in to everything toe can do to itself.
+# `editconfig` opens this file in nano, in a Terminal.app window. To use your own terminal,
+# bind exec instead:  "exec open -na Ghostty --args -e nano ~/.config/toe/toe.toml"
+"super-comma"   = "editconfig"
+# Saving this file already reloads it; this is the manual way.
+"super-shift-r" = "reload"
+# Puts every window on a hidden workspace back where it came from on the way out.
+"super-shift-q" = "quit"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current
