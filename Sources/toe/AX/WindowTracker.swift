@@ -92,7 +92,7 @@ final class WindowTracker {
     @objc private func appActivated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               app.processIdentifier != ownPID else { return }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
+        let element = AX.application(app.processIdentifier)
         if let focused = element.value(kAXFocusedWindowAttribute) {
             // swiftlint:disable:next force_cast
             if let id = (focused as! AXUIElement).windowID, windows[id] != nil {
@@ -129,7 +129,7 @@ final class WindowTracker {
         guard AXObserverCreate(pid, axCallback, &observer) == .success, let observer else { return }
         observers[pid] = observer
 
-        let element = AXUIElementCreateApplication(pid)
+        let element = AX.application(pid)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         for notification in [kAXWindowCreatedNotification,
                              kAXFocusedWindowChangedNotification,
@@ -155,7 +155,7 @@ final class WindowTracker {
     }
 
     private func adoptWindows(of pid: pid_t) {
-        let element = AXUIElementCreateApplication(pid)
+        let element = AX.application(pid)
         for window in element.windows { adopt(window, pid: pid) }
     }
 
@@ -225,7 +225,7 @@ final class WindowTracker {
             }
 
         case kAXApplicationActivatedNotification:
-            let app = AXUIElementCreateApplication(element.pid)
+            let app = AX.application(element.pid)
             if let focused = app.value(kAXFocusedWindowAttribute) {
                 // swiftlint:disable:next force_cast
                 let focusedElement = focused as! AXUIElement

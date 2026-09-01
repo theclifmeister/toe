@@ -12,6 +12,38 @@ private let axGetWindow: (@convention(c) (AXUIElement, UnsafeMutablePointer<CGWi
     return unsafeBitCast(sym, to: (@convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError).self)
 }()
 
+/// How long toe will wait for an application to answer a single Accessibility call.
+///
+/// Every AX call toe makes is synchronous and on the main thread, and they are not rare:
+/// `isManageable` alone makes six cross-process round trips per candidate window, on every
+/// window creation and focus change, and `WindowMover.setFrame` five more per tile. The macOS
+/// default timeout is measured in seconds, so one unresponsive application — an Electron app
+/// mid-startup, a process stopped in a debugger — would stall hotkeys, the menu bar strip and
+/// the layout for every other app along with it. yabai and AeroSpace cap it for this reason.
+///
+/// A quarter of a second is far more than a healthy app needs to answer, and short enough that
+/// a hung one costs a frame rather than a freeze.
+private let axMessagingTimeout: Float = 0.25
+
+enum AX {
+
+    /// The application element for `pid`, with toe's messaging timeout applied. Always use
+    /// this rather than `AXUIElementCreateApplication`: the timeout is a property of the
+    /// element, and setting it on an application element covers every message to that app.
+    static func application(_ pid: pid_t) -> AXUIElement {
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, axMessagingTimeout)
+        return element
+    }
+
+    /// Applies the timeout to every element that does not carry one of its own. The window
+    /// elements the observer callbacks hand to toe are what this is for: they arrive from the
+    /// AX API rather than from an application element toe created, so nothing else caps them.
+    static func setGlobalMessagingTimeout() {
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), axMessagingTimeout)
+    }
+}
+
 extension AXUIElement {
 
     func value(_ attribute: String) -> CFTypeRef? {

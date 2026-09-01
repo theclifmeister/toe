@@ -116,6 +116,8 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func beginManaging() {
+        // Before the first AX call: caps how long any single one can block the main thread.
+        AX.setGlobalMessagingTimeout()
         tracker.delegate = self
         tracker.floatRules = config.floatRules
         refreshMonitors()

@@ -16,7 +16,7 @@ enum WindowMover {
     ///    silently ignore programmatic resizes. Turning it off around the write and restoring
     ///    it afterwards is what makes those apps tile at all.
     static func setFrame(_ frame: Box, element: AXUIElement, pid: pid_t) {
-        let app = AXUIElementCreateApplication(pid)
+        let app = AX.application(pid)
         let enhanced = app.bool(kAXEnhancedUserInterface) ?? false
         if enhanced { app.set(kAXEnhancedUserInterface, kCFBooleanFalse) }
         defer { if enhanced { app.set(kAXEnhancedUserInterface, kCFBooleanTrue) } }
@@ -31,7 +31,7 @@ enum WindowMover {
 
     /// Moves a window without touching its size, used for stashing and un-stashing.
     static func setPosition(_ point: CGPoint, element: AXUIElement, pid: pid_t) {
-        let app = AXUIElementCreateApplication(pid)
+        let app = AX.application(pid)
         let enhanced = app.bool(kAXEnhancedUserInterface) ?? false
         if enhanced { app.set(kAXEnhancedUserInterface, kCFBooleanFalse) }
         defer { if enhanced { app.set(kAXEnhancedUserInterface, kCFBooleanTrue) } }
