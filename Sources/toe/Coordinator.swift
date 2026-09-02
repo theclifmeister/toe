@@ -460,7 +460,7 @@ final class Coordinator: WindowTrackerDelegate {
             // Behind the window being dragged, and above every other one — where Hyprland puts
             // it, since it draws each border with its own window and the focused window last.
             if let tile = desired[focused] {
-                border.show(around: tile, depth: .behindFrontmost)
+                border.show(around: tile, of: focused, depth: .behindFrontmost)
             } else {
                 border.hide()
             }
@@ -469,7 +469,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         // Prefer the frame we wrote; fall back to asking the window for floating ones.
         if let box = window.element.frame ?? desired[focused] {
-            border.show(around: box, depth: borderDepth(around: box, of: focused))
+            border.show(around: box, of: focused, depth: borderDepth(around: box, of: focused))
         } else {
             border.hide()
         }
