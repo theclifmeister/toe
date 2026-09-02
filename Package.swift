@@ -16,6 +16,7 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("ApplicationServices"),
+                .linkedFramework("ServiceManagement"),
             ]
         ),
         // XCTest ships with Xcode, not the Command Line Tools, so the layout suite is a

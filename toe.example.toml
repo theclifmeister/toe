@@ -96,6 +96,26 @@ restore_session = true
 # empty, dimmed. 0 shows only the workspaces in use; 10 always shows all ten.
 persistent_workspaces = 5
 
+[menu]
+# SUPER+SPACE opens the quick menu, styled after Omarchy's — the one walker draws for
+# `omarchy-menu`. Arrows to move, Enter to choose, Escape to back out. Typing searches the whole
+# tree rather than the level you are on, and each hit says which submenu it came from.
+# These are its theme's tokens: Omarchy's default (Tokyo Night) resolved the way walker's
+# stylesheet resolves them — background, foreground (which is also the border), and the accent
+# the selected row's text takes.
+background = "#1a1b26"
+foreground = "#a9b1d6"
+accent     = "#7aa2f7"
+# The window is the background at 95%, as walker's .box-wrapper is. The search line stays solid.
+opacity    = 0.95
+# omarchy-menu asks walker for 295 points, and 800 for a list like the keybindings page. Both
+# are clamped to the display if it is narrower.
+width      = 295
+list_width = 800
+# walker draws at 18px and so does this. The one measurement here worth changing: the padding,
+# the icon size and the gaps are all walker's and are left alone.
+font_size  = 18
+
 [binds]
 # ── Focus — SUPER + arrows ────────────────────────────────────────────────────
 "super-left"  = "movefocus l"
@@ -158,6 +178,10 @@ persistent_workspaces = 5
 "super-shift-r" = "reload"
 # Puts every window on a hidden workspace back where it came from on the way out.
 "super-shift-q" = "quit"
+# The quick menu — Omarchy's SUPER+ALT+SPACE, and the keybindings list it holds. Note that this
+# takes ⌥Space and ⌥K away from typing ` ` and ˚ for as long as toe runs.
+"super-space"   = "menu"
+"super-k"       = "keybindings"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current

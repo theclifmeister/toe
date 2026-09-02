@@ -28,6 +28,8 @@ as the defaults.
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
+| `SUPER` + `SPACE` | The quick menu — Configure, Learn, Quit |
+| `SUPER` + `K` | Every binding, in a list |
 | `SUPER` + `,` | Edit the config — nano, in a terminal window |
 | `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
 | Drag a tiled window | Swap it with the tile you drag it over |
@@ -48,11 +50,15 @@ up only once it has windows on it. With several displays, a workspace showing on
 not focused on gets the same square, outlined.
 
 ```
-▪ 2 3 4 5 7
+T  ▪ 2 3 4 5 7
 ```
 
 `[bar] persistent_workspaces` sets how many keep a slot: `0` shows only the ones in use, `10`
 always shows all ten.
+
+toe's own mark leads the strip — the T from the app icon, without the tile, drawn at menu bar
+size so it takes the menu bar's own colour. Clicking it opens the quick menu, which is the one
+thing on the bar that is not a workspace.
 
 Clicking a workspace switches to it, as Omarchy's `on-click: activate` does. That is the
 whole of it — waybar's strip has no menu behind it, and neither has this one. toe's own
@@ -170,6 +176,47 @@ desktop" — and, since that outlives the process just as a symbolic hotkey does
 removing the key again, so a setting you never set is not left holding a value you never chose.
 A reveal you had already switched off yourself is left alone. `misc.disable_wallpaper_click = false`
 hands the click back.
+
+**The quick menu.** The menu bar item is the workspace strip and nothing else, which is faithful
+to waybar and leaves toe with nowhere to *show* you anything: the bindings above are the whole
+interface, and a Homebrew user has no way to discover one of them. Omarchy has the surface that
+fills that gap, and it is not a menu bar menu — it is the one walker draws for `omarchy-menu`, on
+`SUPER`+`ALT`+`SPACE`. toe ports that to `SUPER`+`SPACE`, with the keybindings list on
+`SUPER`+`K` as Omarchy has it. Arrows to move, `ENTER` to choose, `ESC` or backspace to back out,
+and a second `SUPER`+`SPACE` to close. `Configure` holds *Run on startup* and *Edit
+configuration*, `Learn` holds the keybindings, and `Quit` is a row rather than a keystroke you
+had to know. *Run on startup* is `SMAppService`, so it appears in System Settings › General ›
+Login Items too — and it is left out of the menu entirely where it cannot work: from a build
+directory rather than `/Applications`, or alongside a LaunchAgent that `make start-at-login`
+wrote. The log says which, and what fixes it.
+
+Typing searches what a row does as well as what it is called — on the keybindings page the name
+is `SUPER`+`W` and the description is *Close window*, so a filter that read only names would have
+you typing modifiers to find anything. It searches the whole tree rather than the level in front
+of you, too, and every hit says where it was found — type `startup` at the top and *Run on startup* comes back labelled `Configure`,
+ready to act on without going there first. That is Omarchy's behaviour, and it is the difference
+between a filter and a search: you should not have to know which submenu something lives in to be
+able to type its name.
+
+It is drawn to walker's own stylesheet — the 0.95 background, the 2px border with no corner
+radius, the 20px padding, the 14px rows and the selected row at 7% with its text in the accent
+colour — and in the font Omarchy renders it in, JetBrainsMono Nerd Font, which ships inside
+Toe.app and is registered for toe's own process only. Nothing is installed, no permission is
+asked, and it never appears in another app's font menu; bundling it rather than looking for one
+is also what makes the rows the same width on every Mac. `[menu]` retunes the colours and the
+size.
+
+The panel is a `.nonactivatingPanel`, so it takes the keyboard without toe becoming the active
+application: the window you were in keeps its title bar and its menu bar, and the focus model
+keeps working — `isEchoOfOwnRaise` tells a real focus change from the echo of a raise by asking
+which application is frontmost, and toe making *itself* frontmost would break that test for every
+window it had recently raised. While the menu is up, the other bindings are held back, since
+`SUPER`+`W` would otherwise close a window you cannot see; `quit` stays live so a wedged menu can
+never trap you.
+
+The costs, plainly: `SUPER`+`SPACE` and `SUPER`+`K` are ⌥Space and ⌥K, and Carbon claims them
+system-wide while toe runs, so neither types ` ` or `˚` any more. Neither collides with a system
+shortcut — Spotlight is ⌘Space — and both are ordinary bindings you can move.
 
 **Hiding.** `⌘H` and `⌘⌥H` take an application's windows out of the layout without closing them:
 the tree reflows around the gap, and `SUPER`+arrows cannot reach them again because they are no
@@ -306,9 +353,9 @@ menu bar item's tooltip — a typo can never leave you without a keyboard. See
 Binding specs parse in both the dash spelling and Omarchy's, so you can paste from either:
 `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
-`editconfig`, `reload` and `quit` are bound in code as well as in the file — `SUPER`+`,`,
-`SUPER`+`SHIFT`+`R` and `SUPER`+`SHIFT`+`Q` — so the ways out exist whether or not your config
-mentions them. Your config is never rewritten once it is there, so a binding introduced after you
+`editconfig`, `reload`, `quit` and the quick menu are bound in code as well as in the file —
+`SUPER`+`,`, `SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE` and `SUPER`+`K` — so the
+ways out exist whether or not your config mentions them. Your config is never rewritten once it is there, so a binding introduced after you
 first ran toe would otherwise never reach you: that is how the menu bar item losing its menu left
 anyone upgrading with no way to quit but `pkill`. A fallback applies only when the command is
 bound nowhere, so rebinding `quit` keeps your key and does not also collect the default, and a
@@ -317,7 +364,7 @@ registered on top of yours.
 
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
-`reload`, `editconfig`, `quit`.
+`reload`, `editconfig`, `menu`, `keybindings`, `quit`.
 
 The TOML parser is a dependency-free subset: tables, arrays of tables, bare and quoted keys,
 basic and literal strings, numbers, booleans, arrays and inline tables. No multi-line strings
@@ -356,3 +403,6 @@ groups. It is a layout engine and the bindings that drive it.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Toe.app bundles JetBrainsMono Nerd Font for the quick menu, used under the SIL Open Font License
+1.1 — see [`Resources/JetBrainsMonoNerdFont-OFL.txt`](Resources/JetBrainsMonoNerdFont-OFL.txt).

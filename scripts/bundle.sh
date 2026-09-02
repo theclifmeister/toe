@@ -20,6 +20,11 @@ cp "$root/Resources/Info.plist" "$app/Contents/Info.plist"
 # Info.plist's CFBundleIconFile names this. Copied before codesign below, so the signature
 # covers it — otherwise `codesign --verify --deep --strict` in the release workflow fails.
 cp "$root/Resources/Toe.icns" "$app/Contents/Resources/Toe.icns"
+# The quick menu's typeface — Omarchy renders its own menu in this, and toe registers it at
+# process scope rather than asking anyone to install it. Same placement as the icon above, and
+# for the same reason: the signature has to cover it.
+cp "$root/Resources/JetBrainsMonoNerdFont-Regular.ttf" "$app/Contents/Resources/"
+cp "$root/Resources/JetBrainsMonoNerdFont-OFL.txt" "$app/Contents/Resources/"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 
 # Releases stamp the tag's version into the bundle. Left alone, the committed Info.plist

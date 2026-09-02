@@ -141,19 +141,11 @@ final class BorderOverlay {
         panel.orderOut(nil)
     }
 
-    /// Parses `#RRGGBB` and `#RRGGBBAA` (Hyprland's `rgba()` ordering).
+    /// `#RRGGBB` and `#RRGGBBAA`, parsed in ToeCore where the selftest can reach it — see `Hex`.
+    /// The stand-in for a colour that will not parse stays here, because it is a drawing
+    /// decision: the config layer has already named the typo in the menu bar tooltip.
     private static func color(_ hex: String) -> CGColor {
-        var text = hex.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("#") { text.removeFirst() }
-        if text.hasPrefix("0x") { text.removeFirst(2) }
-        guard text.count == 6 || text.count == 8, let value = UInt64(text, radix: 16) else {
-            return NSColor.systemBlue.cgColor
-        }
-        let hasAlpha = text.count == 8
-        let r = Double((value >> (hasAlpha ? 24 : 16)) & 0xFF) / 255
-        let g = Double((value >> (hasAlpha ? 16 : 8)) & 0xFF) / 255
-        let b = Double((value >> (hasAlpha ? 8 : 0)) & 0xFF) / 255
-        let a = hasAlpha ? Double(value & 0xFF) / 255 : 1
-        return CGColor(red: r, green: g, blue: b, alpha: a)
+        guard let rgba = Hex.rgba(hex) else { return NSColor.systemBlue.cgColor }
+        return Colors.cgColor(rgba)
     }
 }

@@ -16,6 +16,7 @@ final class Coordinator: WindowTrackerDelegate {
     private let dockSwipes = DockSwipeTap()
     private let hideBlocker = HideBlocker()
     private let status = StatusItem()
+    private let quickMenu = QuickMenu()
     private var watcher: ConfigWatcher?
 
     private var config = Config.makeDefault()
@@ -66,6 +67,7 @@ final class Coordinator: WindowTrackerDelegate {
             self?.dispatch(.workspace(.index(index)))
         }
         status.onOpenAccessibility = { Self.openAccessibilitySettings() }
+        status.onOpenMenu = { [weak self] in self?.dispatch(.menu(.root)) }
 
         installSignalHandlers()
         // Symbolic hotkey state outlives the process, so a previous toe that was killed rather
@@ -82,7 +84,23 @@ final class Coordinator: WindowTrackerDelegate {
         watcher?.onChange = { [weak self] in self?.loadConfig() }
         watcher?.start()
 
-        hotkeys.onTrigger = { [weak self] binding in self?.dispatch(binding.command) }
+        hotkeys.onTrigger = { [weak self] binding in
+            guard let self else { return }
+            // A Carbon hotkey is resolved system-wide, ahead of whichever window has the
+            // keyboard — including toe's own menu. That is what lets a second SUPER+SPACE close
+            // the menu rather than typing a space into its filter, and it is also why everything
+            // else has to be held back: SUPER+W while the menu is up would close a window the
+            // user cannot see. `quit` stays live so a wedged menu can never trap anyone, which is
+            // the reasoning behind `Config.fallbackBindings` as well.
+            if self.quickMenu.isVisible {
+                switch binding.command {
+                case .menu, .quit: break
+                default: return
+                }
+            }
+            self.dispatch(binding.command)
+        }
+        quickMenu.onCommand = { [weak self] command in self?.dispatch(command) }
         // Dragging a tiled window over another one trades their places, live, the way
         // Hyprland's `IHyprLayout::onMouseMove` does.
         drag.onMove = { [weak self] id, point in
@@ -833,6 +851,10 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .editConfig:
             openConfigInTerminal()
+
+        case .menu(let page):
+            quickMenu.toggle(page: page, config: config,
+                             usable: workspaces.monitor(id: workspaces.focusedMonitorID)?.usable)
 
         case .quit:
             shutDown()

@@ -23,6 +23,10 @@ public enum Command: Equatable {
     /// Opens the config file in a terminal, in nano. toe has no settings window and, since
     /// the menu bar item lost its menu, no other way in.
     case editConfig
+    /// The quick menu, and the keybindings list it holds. One case with a page rather than two
+    /// cases: the keybindings view *is* the menu on another page — same panel, same filter, same
+    /// keys — so two cases would give `dispatch` two arms with one body between them.
+    case menu(MenuPage)
     case quit
 }
 
@@ -78,6 +82,16 @@ public enum CommandParser {
         case "reload":                      return .reload
         case "editconfig", "config":        return .editConfig
         case "quit", "exit":                return .quit
+
+        // Spelled the way `omarchy-menu` and `omarchy-menu keybindings` are invoked, so a
+        // binding can be read across from an Omarchy config without translating it.
+        case "menu":
+            switch argument.lowercased() {
+            case "", "root":            return .menu(.root)
+            case "keybindings", "keys": return .menu(.keybindings)
+            default:                    throw CommandError.badArgument(name, argument)
+            }
+        case "keybindings":                 return .menu(.keybindings)
 
         case "exec", "exec-and-forget":
             guard !argument.isEmpty else { throw CommandError.missingArgument(name) }

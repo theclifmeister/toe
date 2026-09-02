@@ -70,14 +70,35 @@ public enum WorkspaceStrip {
     /// The strip is centred in `buttonWidth`, its items `gap` apart. Zones reach to the
     /// midpoint between neighbours so the gaps are not dead, but a click beyond either end
     /// of the strip returns nil — that is the padding, and nothing lives there.
-    public static func hit(x: Double, widths: [Double], gap: Double, buttonWidth: Double) -> Int? {
-        guard !widths.isEmpty else { return nil }
+    /// What a click landed on.
+    public enum Hit: Equatable {
+        /// toe's own mark, which leads the strip and opens the quick menu.
+        case mark
+        /// A workspace, by its position in `widths`.
+        case workspace(Int)
+    }
 
-        let total = widths.reduce(0, +) + gap * Double(widths.count - 1)
+    /// `leading` is the mark's width plus the gap after it — part of what the strip is centred
+    /// on, but not one of the `widths`, because it is not a workspace and does not take a
+    /// workspace's share of a boundary between two of them.
+    public static func hit(x: Double, widths: [Double], gap: Double, buttonWidth: Double,
+                           leading: Double = 0) -> Hit? {
+        guard !widths.isEmpty || leading > 0 else { return nil }
+
+        let spans = widths.isEmpty ? 0 : gap * Double(widths.count - 1)
+        let total = leading + widths.reduce(0, +) + spans
         let origin = (buttonWidth - total) / 2
 
+        if leading > 0 {
+            // The mark keeps its own space and the gap after it: a click in the gap is nearer
+            // the mark than the first workspace, and the mark is the more forgiving target.
+            guard x >= origin else { return nil }
+            if x < origin + leading { return .mark }
+        }
+        guard !widths.isEmpty else { return nil }
+
         var starts: [Double] = []
-        var cursor = origin
+        var cursor = origin + leading
         for width in widths {
             starts.append(cursor)
             cursor += width + gap
@@ -89,7 +110,7 @@ public enum WorkspaceStrip {
         for i in widths.indices {
             let left = i == 0 ? starts[0] : (ends[i - 1] + starts[i]) / 2
             let right = i == widths.count - 1 ? ends[i] : (ends[i] + starts[i + 1]) / 2
-            if x >= left, x <= right { return i }
+            if x >= left, x <= right { return .workspace(i) }
         }
         return nil
     }
