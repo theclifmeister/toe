@@ -57,6 +57,30 @@ public struct GestureConfig: Equatable {
     public init() {}
 }
 
+/// The quick menu's colours and size — walker's theme, as config.
+///
+/// The defaults are Omarchy's default theme (Tokyo Night) resolved through walker's own token
+/// mapping: `@base` is the background, `@text` is both the foreground and the border, and
+/// `@selected-text` is the accent the selected row's text takes.
+public struct MenuConfig: Equatable {
+    public var background: String = "#1a1b26"
+    public var foreground: String = "#a9b1d6"
+    public var accent: String = "#7aa2f7"
+    /// walker maps `@border` to the foreground. nil keeps that; a value overrides it.
+    public var border: String?
+    /// `.box-wrapper { background: alpha(@base, 0.95) }`. The search strip stays opaque.
+    public var opacity: Double = 0.95
+    /// `omarchy-menu` invokes walker with `--width 295`, and `--width 800` for a list view.
+    public var width: Double = 295
+    public var listWidth: Double = 800
+    /// GTK's 18px, one for one. The one metric worth a knob: 18 pt is large by macOS convention
+    /// and this is how you disagree with that without re-theming the rest.
+    public var fontSize: Double = 18
+    public init() {}
+
+    public var borderColor: String { border ?? foreground }
+}
+
 /// macOS behaviours that pull windows out from under the layout. Hyprland's catch-all table.
 public struct MiscConfig: Equatable {
     /// `Ctrl`+`↑` and `Ctrl`+`↓` open the same Mission Control and App Exposé the vertical swipe
@@ -120,6 +144,7 @@ public struct Config: Equatable {
     public var bar: BarConfig = BarConfig()
     public var floating: FloatingSize = FloatingSize()
     public var gestures: GestureConfig = GestureConfig()
+    public var menu: MenuConfig = MenuConfig()
     public var misc: MiscConfig = MiscConfig()
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
@@ -144,6 +169,10 @@ public struct Config: Equatable {
         ("super-comma", .editConfig),
         ("super-shift-r", .reload),
         ("super-shift-q", .quit),
+        // The menu holds the escape hatches now — Quit and Edit configuration are rows in it —
+        // so it belongs on this list by the same reasoning that put them here.
+        ("super-space", .menu(.root)),
+        ("super-k", .menu(.keybindings)),
     ]
 
     public static let defaultFloatRules: [FloatRule] = [
@@ -301,6 +330,42 @@ public struct Config: Equatable {
                 config.gestures.swallowDockSwipes = v
             } else {
                 config.warnings.append("gestures.swallow_dock_swipes: must be true or false, using \(config.gestures.swallowDockSwipes)")
+            }
+        }
+
+        if let m = root["menu"]?.tableValue {
+            // Colours are checked here rather than at drawing time, so a typo is named in the
+            // menu bar tooltip instead of quietly resolving to something else on screen.
+            for (key, path) in [("background", "menu.background"), ("foreground", "menu.foreground"),
+                                ("accent", "menu.accent"), ("border", "menu.border")] {
+                guard let raw = m[key]?.stringValue else { continue }
+                guard Hex.rgba(raw) != nil else {
+                    config.warnings.append("\(path): '\(raw)' is not a #RRGGBB or #RRGGBBAA colour, "
+                                           + "using the default")
+                    continue
+                }
+                switch key {
+                case "background": config.menu.background = raw
+                case "foreground": config.menu.foreground = raw
+                case "accent": config.menu.accent = raw
+                default: config.menu.border = raw
+                }
+            }
+            if let v = number(m["opacity"], "menu.opacity", in: 0...1,
+                              keeping: config.menu.opacity, warnings: &config.warnings) {
+                config.menu.opacity = v
+            }
+            if let v = number(m["width"], "menu.width", in: 100...2000,
+                              keeping: config.menu.width, warnings: &config.warnings) {
+                config.menu.width = v
+            }
+            if let v = number(m["list_width"], "menu.list_width", in: 100...4000,
+                              keeping: config.menu.listWidth, warnings: &config.warnings) {
+                config.menu.listWidth = v
+            }
+            if let v = number(m["font_size"], "menu.font_size", in: 8...72,
+                              keeping: config.menu.fontSize, warnings: &config.warnings) {
+                config.menu.fontSize = v
             }
         }
 

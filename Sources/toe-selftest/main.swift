@@ -871,6 +871,10 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-comma")?.command, .editConfig, "SUPER+, edits the config")
     t.equal(binding("super-shift-r")?.command, .reload, "SUPER+SHIFT+R reloads it")
     t.equal(binding("super-shift-q")?.command, .quit, "SUPER+SHIFT+Q quits toe")
+    t.equal(binding("super-space")?.command, .menu(.root), "SUPER+SPACE opens the quick menu")
+    t.equal(binding("super-space")?.keyCode, 0x31, "space key code")
+    t.equal(binding("super-k")?.command, .menu(.keybindings), "SUPER+K lists the bindings")
+    t.equal(c.menu.background, "#1a1b26", "the menu ships Omarchy's Tokyo Night background")
 
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
     t.equal(arrows.allSatisfy { binding($0) != nil }, true, "all four focus arrows bound")
@@ -1488,20 +1492,409 @@ h.test("markers follow focus and visibility") { t in
 
 h.test("clicking the strip picks the workspace under the pointer") { t in
     // Three 8pt items, 7pt apart, centred in a 60pt button: they start at 11, 26 and 41.
-    func hit(_ x: Double) -> Int? {
+    func hit(_ x: Double) -> WorkspaceStrip.Hit? {
         WorkspaceStrip.hit(x: x, widths: [8, 8, 8], gap: 7, buttonWidth: 60)
     }
-    t.equal(hit(15), .some(0), "on the first item")
-    t.equal(hit(30), .some(1), "on the middle item")
-    t.equal(hit(45), .some(2), "on the last item")
+    t.equal(hit(15), .workspace(0), "on the first item")
+    t.equal(hit(30), .workspace(1), "on the middle item")
+    t.equal(hit(45), .workspace(2), "on the last item")
 
     // The gaps are not dead: they belong to whichever neighbour is nearer.
-    t.equal(hit(21), .some(0), "just past the first item")
-    t.equal(hit(24), .some(1), "just before the second")
+    t.equal(hit(21), .workspace(0), "just past the first item")
+    t.equal(hit(24), .workspace(1), "just before the second")
 
     t.equal(hit(5), nil, "the padding before the strip is not a workspace")
     t.equal(hit(55), nil, "and neither is the padding after it")
     t.equal(WorkspaceStrip.hit(x: 30, widths: [], gap: 7, buttonWidth: 60), nil, "no items, no hit")
+}
+
+h.test("the mark leads the strip and is its own target") { t in
+    // A 10pt mark and its 7pt gap, then three 8pt items 7pt apart, centred in a 78pt button:
+    // the mark starts at 11 and the items at 28, 43 and 58.
+    func hit(_ x: Double) -> WorkspaceStrip.Hit? {
+        WorkspaceStrip.hit(x: x, widths: [8, 8, 8], gap: 7, buttonWidth: 78, leading: 17)
+    }
+    t.equal(hit(15), .mark, "on the mark")
+    t.equal(hit(25), .mark, "and in the gap after it, which is the mark's to keep")
+    t.equal(hit(30), .workspace(0), "the first workspace has moved along by the mark's width")
+    t.equal(hit(62), .workspace(2), "and so has the last")
+    t.equal(hit(5), nil, "the padding before the mark is still nothing")
+
+    t.equal(WorkspaceStrip.hit(x: 34, widths: [], gap: 7, buttonWidth: 60, leading: 17), .mark,
+            "with no workspaces on the bar at all, the mark is the whole strip")
+    t.equal(WorkspaceStrip.hit(x: 5, widths: [], gap: 7, buttonWidth: 60, leading: 17), nil,
+            "and the padding beside it is still nothing")
+}
+
+// MARK: - The quick menu
+
+h.test("the filter ranks a prefix above a match buried in the middle") { t in
+    let ranked = FuzzyFilter.rank("s", in: ["Setup", "Run on startup"])
+    t.equal(ranked.map(\.index), [0, 1], "the prefix comes first, the boundary match second")
+    t.expect(ranked[0].score > ranked[1].score, "and it scores higher rather than tying")
+}
+
+h.test("an empty query keeps every item in the order it was written") { t in
+    let names = ["Setup", "Learn", "Quit"]
+    t.equal(FuzzyFilter.rank("", in: names).map(\.index), [0, 1, 2],
+            "no query, no reordering — a menu is a menu until you type")
+}
+
+h.test("the filter matches a subsequence rather than a substring") { t in
+    t.equal(FuzzyFilter.rank("ecfg", in: ["Edit configuration"]).map(\.index), [0],
+            "letters in order with gaps between them still match, the way walker's does")
+    t.equal(FuzzyFilter.rank("gfce", in: ["Edit configuration"]).count, 0,
+            "the same letters out of order do not")
+    t.equal(FuzzyFilter.rank("zz", in: ["Setup", "Learn"]).count, 0,
+            "and what matches nothing is dropped, not merely ranked last")
+}
+
+h.test("typing puts the selection back at the top") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    m.move(by: 2)
+    t.equal(m.selection, 2, "moved down two")
+    m.type("q")
+    t.equal(m.selection, 0, "a keystroke re-ranks the list, so the old index means nothing")
+    t.equal(m.visible.map(\.title), ["Quit"], "and the list is what was typed")
+}
+
+h.test("a submenu is entered, backed out of, and clears the query on the way in") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .on), visibleRows: 10)
+    t.equal(m.prompt, "Go…", "walker's placeholder at the root")
+    m.type("configure")
+    t.equal(m.visible.count, 1, "one row matches 'configure'")
+    t.equal(m.activate(), .pushed, "Configure descends rather than dispatching")
+    t.equal(m.query, "", "the query does not follow you into the submenu")
+    t.equal(m.breadcrumb, ["Configure"], "the level is named")
+    t.equal(m.prompt, "Configure…", "and the placeholder says where you are")
+    t.equal(m.visible.map(\.title), ["Run on startup", "Edit configuration"], "Omarchy's two rows")
+    t.equal(m.pop(), .popped, "Escape climbs one level")
+    t.equal(m.pop(), .closed, "and closes at the root")
+}
+
+h.test("backspace eats the query, then leaves the submenu") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    m.type("learn")
+    t.equal(m.activate(), .pushed, "into Learn")
+    m.type("ke")
+    t.equal(m.backspace(), true, "there is a query to eat")
+    t.equal(m.backspace(), true, "and one character more")
+    t.equal(m.backspace(), false, "an empty query has nothing left — the caller pops")
+}
+
+h.test("the filter reads what a row does, not only what it is called") { t in
+    let c = try Config.parse(Config.defaultTOML)
+    var m = MenuState(root: MenuModel.keybindings(c.bindings, superKey: c.superKey),
+                      visibleRows: 40)
+    m.type("close")
+    t.expect(m.visible.contains { $0.value == "Close window" },
+             "on the keybindings page the name is a shortcut, so the description has to match too")
+    t.expect(m.visible.allSatisfy { $0.value?.localizedCaseInsensitiveContains("close") == true },
+             "and nothing else comes with it")
+
+    var focus = MenuState(root: MenuModel.keybindings(c.bindings, superKey: c.superKey),
+                          visibleRows: 40)
+    focus.type("focus")
+    t.equal(focus.visible.count, 4, "all four arrows, found by what they do")
+}
+
+h.test("a name match outranks the same letters found in a description") { t in
+    let rows = [["Quit", "Quit toe"], ["Reload the config", "quit nothing"]]
+    let ranked = FuzzyFilter.rank("quit", in: rows)
+    t.equal(ranked.first?.index, 0, "the row actually called Quit comes first")
+    t.equal(ranked.count, 2, "the other still matches rather than being dropped")
+}
+
+h.test("an empty field is not a match") { t in
+    t.equal(FuzzyFilter.rank("x", in: [["Quit", ""]]).count, 0,
+            "a row with no description cannot be found by one")
+}
+
+h.test("typing searches the whole tree, not the level in front of you") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    m.type("startup")
+    t.equal(m.visible.map(\.title), ["Run on startup"],
+            "found two levels down without anyone having to go there")
+    t.equal(m.visible.first?.subtitle, "Configure", "and the row says where it lives")
+    t.equal(m.activate(), .toggleLoginItem, "acting on it needs no descent either")
+
+    var deep = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    deep.type("keyb")
+    t.equal(deep.visible.map(\.title), ["Keybindings"], "the same for the other branch")
+    t.equal(deep.visible.first?.subtitle, "Learn", "named by its path")
+    t.equal(deep.activate(), .page(.keybindings), "and it still opens the page")
+}
+
+h.test("a branch found by searching is still a branch") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    m.type("learn")
+    t.equal(m.visible.map(\.title), ["Learn"], "the branch itself matches, not only its children")
+    t.equal(m.visible.first?.subtitle, nil, "a row at the level you are on has no path to show")
+    t.equal(m.activate(), .pushed, "and it descends the way it does unfiltered")
+}
+
+h.test("an empty query is one level at a time, with no paths") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    m.type("z")
+    t.equal(m.visible.count, 0, "nothing matches")
+    m.backspace()
+    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Quit"], "the level comes back")
+    t.expect(m.visible.allSatisfy { $0.subtitle == nil },
+             "and the paths go away with the search that needed them")
+}
+
+h.test("the rows lead where the menu says they do") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Quit"], "the whole menu, bare minimum")
+    t.equal(m.visible.map(\.leadsOn), [true, true, false], "two lead on, Quit acts")
+    m.type("quit")
+    t.equal(m.activate(), .run(.quit), "and Quit dispatches rather than descending")
+
+    var learn = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    learn.type("learn")
+    _ = learn.activate()
+    t.equal(learn.activate(), .page(.keybindings), "Learn holds the keybindings page")
+}
+
+h.test("the startup row reads the state it is handed") { t in
+    func startup(_ state: LoginItemState) -> MenuItem? {
+        guard case .submenu(let setup)? = MenuModel.root(loginItem: state).first?.action else {
+            return nil
+        }
+        return setup.first
+    }
+    t.equal(startup(.on)?.value, "on", "the row shows launchd's answer, not a preference")
+    t.equal(startup(.on)?.action, .toggleLoginItem, "and pressing it flips it")
+    t.equal(startup(.off)?.value, "off", "the other way round")
+    t.equal(startup(.unavailable("needs /Applications"))?.title, "Edit configuration",
+            "where it cannot work the row is not there at all — a switch you can see but not "
+            + "throw is worse than one you were never offered")
+}
+
+h.test("Configure keeps working with the startup row gone") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications")),
+                      visibleRows: 10)
+    m.type("configure")
+    t.equal(m.activate(), .pushed, "into Configure")
+    t.equal(m.visible.map(\.title), ["Edit configuration"], "one row, and it is the one that works")
+    t.equal(m.activate(), .run(.editConfig), "which still does what it says")
+
+    var searching = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications")),
+                              visibleRows: 10)
+    searching.type("startup")
+    t.equal(searching.visible.count, 0, "and the search cannot turn it up either")
+}
+
+h.test("the second column never runs into the title") { t in
+    let m = MenuMetrics(lineHeight: 22)
+    let row = MenuLayout.rowFrame(0, width: 295, m)
+    // "Run on startup" at 18pt JetBrainsMono, past a 16pt icon and its 14pt gap.
+    let titleEnd = row.x + m.itemPaddingLeft + m.iconSide + m.iconGap + 151
+    let space = MenuLayout.valueSpace(inRow: row, titleEnd: titleEnd, m)
+    t.expect(space < 40, "at walker's 295 points there is room for about three characters")
+    t.expect(space > 0, "but not less than none")
+
+    let wide = MenuLayout.rowFrame(0, width: 800, m)
+    t.expect(MenuLayout.valueSpace(inRow: wide, titleEnd: titleEnd, m) > 400,
+             "the keybindings page at 800 has room for the whole second column")
+    t.equal(MenuLayout.valueSpace(inRow: row, titleEnd: 10_000, m), 0,
+            "a title longer than the row leaves nothing rather than a negative width")
+}
+
+h.test("the selection clamps at both ends") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    m.move(by: -1)
+    t.equal(m.selection, 0, "up from the top stays at the top — a list is not a carousel")
+    m.move(by: 99)
+    t.equal(m.selection, m.visible.count - 1, "and down from the bottom stays at the bottom")
+}
+
+h.test("the keybindings page is every binding, in the config's own order") { t in
+    let c = try Config.parse(Config.defaultTOML)
+    let rows = MenuModel.keybindings(c.bindings, superKey: c.superKey)
+    t.equal(rows.count, c.bindings.count, "one row per binding")
+    t.expect(rows.first?.value.map { $0.hasPrefix("Move focus") } == true,
+             "it opens on the focus keys rather than on SUPER+0, which is where sorting the "
+             + "binding strings lands")
+    t.expect(rows.allSatisfy { !$0.leadsOn }, "no row on this page leads anywhere else")
+
+    func firstRow(_ predicate: (String) -> Bool) -> Int? { rows.firstIndex { predicate($0.value ?? "") } }
+    let workspace = firstRow { $0.hasPrefix("Workspace") }
+    let quit = firstRow { $0 == "Quit toe" }
+    let launch = firstRow { $0.hasPrefix("Run ") }
+    t.expect(workspace ?? 0 < quit ?? 0, "the workspaces come before what toe does to itself")
+    t.expect(quit ?? 0 < launch ?? 0, "and the exec bindings are last, being the ones you replace")
+
+    let again = MenuModel.keybindings(c.bindings, superKey: c.superKey)
+    t.equal(again.map(\.title), rows.map(\.title), "the order is the same twice running")
+}
+
+h.test("shortcuts read the way Omarchy writes them") { t in
+    func describe(_ spec: String) throws -> String {
+        let (mods, _, name) = try BindingParser.parse(spec, superKey: .option)
+        return ShortcutFormatter.describe(modifiers: mods, keyName: name, superKey: .option)
+    }
+    t.equal(try describe("super-shift-r"), "SUPER + SHIFT + R", "the modifier meaning SUPER prints first")
+    t.equal(try describe("super-left"), "SUPER + ←", "arrows are arrows")
+    t.equal(try describe("super-comma"), "SUPER + ,", "a named punctuation key is the character it types")
+    t.equal(try describe("super-space"), "SUPER + SPACE", "the menu's own binding")
+    t.equal(try describe("ctrl-shift-cmd-k"), "CTRL + SHIFT + CMD + K", "a fixed order, however it was typed")
+}
+
+h.test("every command has a label a reader could use") { t in
+    let all: [Command] = [
+        .moveFocus(.left), .swapWindow(.up), .moveWindow(.down),
+        .workspace(.index(3)), .workspace(.next), .workspace(.previous), .workspace(.former),
+        .moveToWorkspace(5, follow: true), .moveToWorkspace(5, follow: false),
+        .killActive, .toggleFloating, .toggleSplit, .swapSplit,
+        .exec("open -a Safari"), .reload, .editConfig, .quit,
+        .menu(.root), .menu(.keybindings),
+    ]
+    for command in all {
+        let label = CommandLabel.describe(command)
+        t.expect(!label.isEmpty, "\(command) has a label")
+        t.expect(label.first?.isUppercase == true, "\(command)'s label is prose, not a case name")
+    }
+    t.equal(CommandLabel.describe(.moveFocus(.left)), "Move focus left", "a sample of the prose")
+    t.equal(CommandLabel.describe(.menu(.keybindings)), "Show the keybindings", "and the new one")
+}
+
+h.test("a long exec line cannot set the width of every row") { t in
+    let long = String(repeating: "x", count: 200)
+    let label = CommandLabel.describe(.exec(long))
+    t.expect(label.count < 60, "cut where the number is visible rather than left to the drawing")
+    t.expect(label.hasSuffix("…"), "and said to be cut")
+    t.equal(CommandLabel.describe(.exec("open -a Safari")), "Run open -a Safari",
+            "a line that fits is left alone")
+}
+
+h.test("the panel is as tall as its rows, and never taller than the display") { t in
+    let m = MenuMetrics(lineHeight: 22)
+    t.equal(MenuLayout.rowHeight(m), 50, "14 above, 22 of text, 14 below — walker's .item-text-box")
+
+    var searching = m
+    searching.showsSubtitles = true
+    searching.subtitleLineHeight = 16
+    t.equal(MenuLayout.rowHeight(searching), 68, "a searched list grows a line for the path")
+    t.equal(MenuLayout.subtitleOrigin(inRow: MenuLayout.rowFrame(0, width: 295, searching),
+                                      hasIcon: true, searching).y,
+            MenuLayout.rowFrame(0, width: 295, searching).y + 14 + 22 + 2,
+            "which sits under the title, not beside it")
+    t.equal(MenuLayout.chromeHeight(m), 96, "two insets, the search strip and the gap under it")
+
+    let small = MenuLayout.size(rows: 3, width: 295, maxHeight: 900, m)
+    t.equal(small.visibleRows, 3, "three rows fit with room to spare")
+    t.equal(small.size.y, 246, "and the panel is exactly that tall")
+    t.equal(small.size.x, 295, "omarchy-menu's --width 295")
+
+    let long = MenuLayout.size(rows: 50, width: 800, maxHeight: 900, m)
+    t.expect(long.size.y <= 900, "fifty bindings do not make a panel taller than the screen")
+    t.equal(long.visibleRows, 16, "it shows as many whole rows as fit")
+    t.equal(long.size.y, 896, "and is exactly that tall, with no half row at the bottom")
+}
+
+h.test("a click lands on the row under the pointer") { t in
+    let m = MenuMetrics(lineHeight: 22)
+    t.equal(MenuLayout.row(at: Point(x: 100, y: 79), rows: 3, width: 295, m), 0,
+            "just inside the first row")
+    t.equal(MenuLayout.row(at: Point(x: 100, y: 129), rows: 3, width: 295, m), 1,
+            "and the second")
+    t.equal(MenuLayout.row(at: Point(x: 100, y: 5), rows: 3, width: 295, m), nil,
+            "the search line is not a row")
+    t.equal(MenuLayout.row(at: Point(x: 100, y: 574), rows: 3, width: 295, m), nil,
+            "and neither is the space below the last one")
+    t.equal(MenuLayout.row(at: Point(x: 5, y: 79), rows: 3, width: 295, m), nil,
+            "nor the padding beside it")
+}
+
+h.test("scrolling follows the selection by the fewest rows") { t in
+    t.equal(MenuLayout.scroll(offset: 0, selection: 3, count: 40, visibleRows: 10), 0,
+            "a selection already on screen does not scroll")
+    t.equal(MenuLayout.scroll(offset: 0, selection: 12, count: 40, visibleRows: 10), 3,
+            "past the bottom scrolls just enough to show it")
+    t.equal(MenuLayout.scroll(offset: 20, selection: 4, count: 40, visibleRows: 10), 4,
+            "and back up puts it on the first row")
+    t.equal(MenuLayout.scroll(offset: 35, selection: 39, count: 40, visibleRows: 10), 30,
+            "the last page never scrolls past the end")
+    t.equal(MenuLayout.scroll(offset: 0, selection: 2, count: 3, visibleRows: 10), 0,
+            "a list that fits never scrolls at all")
+}
+
+h.test("the menu is centred on the monitor that has the focus") { t in
+    let usable = box(1512, 0, 2560, 1415)              // a second display, to the right
+    let frame = MenuLayout.centred(size: Point(x: 295, y: 250), on: usable)
+    t.equalBox(frame, box(1512 + (2560 - 295) / 2, (1415 - 250) / 2, 295, 250),
+               "dead centre of the usable area, not of the primary display")
+}
+
+h.test("hex colours parse in both lengths") { t in
+    t.equal(Hex.rgba("#1a1b26"), RGBA(r: 26.0/255, g: 27.0/255, b: 38.0/255, a: 1),
+            "Tokyo Night's background, six digits and opaque")
+    t.equal(Hex.rgba("#33ccffee")?.a, 238.0/255, "eight digits put the alpha last, as Hyprland does")
+    t.equal(Hex.rgba("7AA2F7"), Hex.rgba("#7aa2f7"), "the hash and the case are both optional")
+    t.equal(Hex.rgba("#1a1b26")?.withAlpha(0.95).a, 0.95, "and alpha(@base, 0.95) is a method")
+}
+
+h.test("a colour that will not parse is nil rather than a guess") { t in
+    t.equal(Hex.rgba("blue"), nil, "a name is not a hex colour")
+    t.equal(Hex.rgba("#12345"), nil, "and neither is five digits")
+    t.equal(Hex.rgba(""), nil, "nor nothing at all")
+    t.equal(Hex.rgba("#-2345f"), nil, "nor a sign smuggled into the digits")
+}
+
+h.test("the menu table defaults to Omarchy's Tokyo Night") { t in
+    let c = try Config.parse("[general]\ngaps_in = 5\n")
+    t.equal(c.menu.background, "#1a1b26", "@base")
+    t.equal(c.menu.foreground, "#a9b1d6", "@text, which is also @border")
+    t.equal(c.menu.accent, "#7aa2f7", "@selected-text")
+    t.equal(c.menu.borderColor, c.menu.foreground, "walker maps the border to the foreground")
+    t.equal(c.menu.opacity, 0.95, "alpha(@base, 0.95)")
+    t.equal(c.menu.width, 295, "omarchy-menu's --width for the menu")
+    t.equal(c.menu.listWidth, 800, "and for a list view")
+    t.equal(c.menu.fontSize, 18, "walker draws at 18px")
+}
+
+h.test("a nonsense menu colour is named and the default kept") { t in
+    let c = try Config.parse("[menu]\nbackground = \"chartreuse\"\nopacity = 4\n")
+    t.equal(c.menu.background, "#1a1b26", "the default stands")
+    t.equal(c.menu.opacity, 0.95, "and so does the opacity")
+    t.equal(c.warnings.count, 2, "both are named rather than swallowed")
+    t.expect(c.warnings.contains { $0.contains("menu.background") }, "the colour is named")
+    t.expect(c.warnings.contains { $0.contains("menu.opacity") }, "and so is the number")
+}
+
+h.test("an explicit menu border overrides walker's mapping") { t in
+    let c = try Config.parse("[menu]\nborder = \"#ff0000\"\n")
+    t.equal(c.menu.borderColor, "#ff0000", "a value wins over the foreground")
+    t.equal(c.warnings, [], "no warnings")
+}
+
+h.test("the menu reaches a config written before it existed") { t in
+    // No [binds] at all — an upgrade from a version with no menu. A config is never rewritten,
+    // so the fallback is the only way SUPER+SPACE ever arrives.
+    let c = try Config.parse("[general]\nsuper_key = \"alt\"\n")
+    let menu = c.bindings.first { $0.command == .menu(.root) }
+    t.expect(menu != nil, "SUPER+SPACE is bound in code")
+    t.equal(menu?.keyCode, KeyCodes.code(for: "space"), "to space")
+    t.equal(menu?.modifiers, Modifiers.option, "with SUPER resolved to the configured key")
+    t.expect(c.bindings.contains { $0.command == .menu(.keybindings) }, "and SUPER+K with it")
+}
+
+h.test("a config that binds the menu itself keeps its own key") { t in
+    let c = try Config.parse("[binds]\n\"super-slash\" = \"menu\"\n")
+    let menus = c.bindings.filter { $0.command == .menu(.root) }
+    t.equal(menus.count, 1, "the fallback stands aside for a binding you wrote")
+    t.equal(menus.first?.keyName, "slash", "and yours is the one that survives")
+}
+
+h.test("menu commands parse in both spellings") { t in
+    t.equal(try CommandParser.parse("menu"), .menu(.root), "bare")
+    t.equal(try CommandParser.parse("menu, keybindings"), .menu(.keybindings), "Hyprland's comma form")
+    t.equal(try CommandParser.parse("menu keybindings"), .menu(.keybindings), "and the plain one")
+    t.equal(try CommandParser.parse("keybindings"), .menu(.keybindings), "the shorthand")
+    t.equal(try CommandParser.parse("menu keys"), .menu(.keybindings), "and its abbreviation")
+    t.expect((try? CommandParser.parse("menu wardrobe")) == nil,
+             "an unknown page is an error rather than quietly the root menu")
 }
 
 exit(h.report())

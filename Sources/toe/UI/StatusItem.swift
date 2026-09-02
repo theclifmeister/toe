@@ -16,6 +16,8 @@ final class StatusItem: NSObject {
     /// The one thing a click still has to be able to do while toe is not yet running: without
     /// the permission there is no strip to click, and no menu to offer it from either.
     var onOpenAccessibility: (() -> Void)?
+    /// Clicking toe's own mark, at the head of the strip.
+    var onOpenMenu: (() -> Void)?
 
     private var accessibilityGranted = false
 
@@ -33,6 +35,12 @@ final class StatusItem: NSObject {
     private let gap: CGFloat = 7
     private let markerSide: CGFloat = 8
     private let markerRadius: CGFloat = 2.5
+    /// toe's mark, a little taller than the digits' cap height so it reads as a logo rather
+    /// than a letter that has wandered in from the strip.
+    private let markHeight: CGFloat = 11
+    /// The T's bounding box in `scripts/make-icon.swift` is `tWidth` by `tHeight` of the icon's
+    /// shape, so the mark keeps that proportion here rather than being squared off.
+    private var markWidth: CGFloat { (markHeight * 0.52 / 0.60).rounded() }
 
     /// Omarchy dims empty workspaces with `opacity: 0.5`, and so does toe: the ones you are
     /// using should be the ones your eye lands on, and the rest are there to be counted past
@@ -85,12 +93,15 @@ final class StatusItem: NSObject {
             ])
         }
 
+        // With `persistent_workspaces = 0` and nothing open there is no strip at all, and the
+        // mark is the whole item — still clickable, which is the point of it being there.
         let items = WorkspaceStrip.items(for: workspaces, persistent: persistentWorkspaces)
         guard !items.isEmpty else {
-            return NSAttributedString(string: "toe", attributes: [.font: font])
+            return NSAttributedString(attributedString: markPiece)
         }
 
         let strip = NSMutableAttributedString()
+        strip.append(markPiece)
         for item in items {
             if strip.length > 0 { strip.append(spacer) }
             strip.append(piece(for: item))
@@ -104,6 +115,17 @@ final class StatusItem: NSObject {
     private var spacer: NSAttributedString {
         let space = NSAttributedString(string: " ", attributes: [.font: font]).size().width
         return NSAttributedString(string: " ", attributes: [.font: font, .kern: gap - space])
+    }
+
+    /// The mark, plus the gap that separates it from the first workspace.
+    private var markPiece: NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.image = mark()
+        attachment.bounds = NSRect(x: 0, y: (font.capHeight - markHeight) / 2,
+                                   width: markWidth, height: markHeight)
+        let piece = NSMutableAttributedString(attachment: attachment)
+        piece.append(spacer)
+        return piece
     }
 
     private func piece(for item: WorkspaceStrip.Item) -> NSAttributedString {
@@ -127,6 +149,40 @@ final class StatusItem: NSObject {
         item.marker == .digit
             ? NSAttributedString(string: item.label, attributes: [.font: font]).size().width
             : markerSide
+    }
+
+    /// toe's own mark: the crossbar and stem of the app icon's T, without the tile under it.
+    ///
+    /// Drawn rather than scaled down from `Toe.icns`, for two reasons. A template image is made
+    /// from its alpha, and the icon's alpha is the whole rounded square — as a menu bar template
+    /// it would be a solid blob. And the proportions here are the icon's own, read off
+    /// `scripts/make-icon.swift`, so the two stay one design rather than two drawings of it.
+    ///
+    /// This is the icon's small-size representation, which that script already defines: under
+    /// 128px it drops the gutter and thickens the stem by 1.22, because a gutter a quarter of a
+    /// pixel wide is grey mud and a stem scaled straight down vanishes beside the crossbar.
+    ///
+    /// `labelColor` rather than white, resolved at draw time like the workspace markers: macOS
+    /// darkens the menu bar to suit the desktop picture, and a hardcoded white goes invisible
+    /// the moment it does not.
+    private func mark() -> NSImage {
+        let image = NSImage(size: NSSize(width: markWidth, height: markHeight),
+                            flipped: false) { rect in
+            NSColor.labelColor.setFill()
+            let crossbarHeight = (rect.height * 0.24).rounded()
+            let stemWidth = (rect.width * 0.28 * 1.22).rounded()
+            let radius: CGFloat = 0.5
+            let crossbar = NSRect(x: rect.minX, y: rect.maxY - crossbarHeight,
+                                  width: rect.width, height: crossbarHeight)
+            let stem = NSRect(x: (rect.midX - stemWidth / 2).rounded(), y: rect.minY,
+                              width: stemWidth, height: rect.height - crossbarHeight)
+            NSBezierPath(roundedRect: crossbar, xRadius: radius, yRadius: radius).fill()
+            NSBezierPath(roundedRect: stem, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        // Redrawn on every use, so a light/dark switch cannot leave a stale mark behind.
+        image.cacheMode = .never
+        return image
     }
 
     /// `nf-md-square_rounded`, which is what Omarchy marks the active workspace with — drawn
@@ -165,9 +221,15 @@ final class StatusItem: NSObject {
 
         guard let event = NSApp.currentEvent else { return }
         let x = sender.convert(event.locationInWindow, from: nil).x
-        guard let hit = WorkspaceStrip.hit(x: Double(x), widths: stripWidths, gap: Double(gap),
-                                           buttonWidth: Double(sender.bounds.width))
-        else { return }
-        onSelectWorkspace?(stripItems[hit].index)
+        switch WorkspaceStrip.hit(x: Double(x), widths: stripWidths, gap: Double(gap),
+                                  buttonWidth: Double(sender.bounds.width),
+                                  leading: Double(markWidth + gap)) {
+        case .mark:
+            onOpenMenu?()
+        case .workspace(let index):
+            onSelectWorkspace?(stripItems[index].index)
+        case nil:
+            break
+        }
     }
 }
