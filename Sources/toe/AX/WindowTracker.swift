@@ -59,6 +59,12 @@ final class WindowTracker {
                               name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         workspace.addObserver(self, selector: #selector(appActivated(_:)),
                               name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        // Switching Spaces usually activates a different application, and the notification
+        // above would have covered it — but not when the fullscreen window belongs to an
+        // application that also owns tiled windows, which is the one case where nothing else
+        // says the frontmost window has changed.
+        workspace.addObserver(self, selector: #selector(activeSpaceChanged),
+                              name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -69,6 +75,8 @@ final class WindowTracker {
     }
 
     @objc private func screensChanged() { delegate?.screensChanged() }
+
+    @objc private func activeSpaceChanged() { noteStackChange() }
 
     @objc private func appLaunched(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,

@@ -544,10 +544,14 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func updateBorder() {
+        // `frontmostWindowIsFullscreen` is two cross-process Accessibility calls, so it comes
+        // last of the four: the three cheap conditions turn the border off in every case where
+        // there is nothing to draw anyway, and this only decides between drawing and not.
         guard config.border.enabled,
               let focused = draggedWindow ?? workspaces.focusedWindow,
               let window = tracker.window(focused),
-              !window.isStashed
+              !window.isStashed,
+              !AX.frontmostWindowIsFullscreen
         else {
             border.hide()
             return
