@@ -69,6 +69,20 @@ separate `homebrew-toe` one. `brew upgrade --cask toe` picks up new releases.
 Grant **System Settings → Privacy & Security → Accessibility** when asked. That single
 permission is all toe needs.
 
+### Treat your config as code
+
+`~/.config/toe/toe.toml` is not merely settings. An `exec` binding runs `/bin/sh -c` with
+whatever the file says, toe reloads the file about 150 ms after it changes, and it does so
+inside a long-running login agent holding the Accessibility grant you just gave. That is by
+design — it is Hyprland's `exec` dispatcher, and it is what `SUPER`+`RETURN` opening a terminal
+is built on — but the consequence is worth saying plainly: **anything that can write that file
+can run commands as you, with no prompt.** Give it the same care you would a shell profile.
+
+toe creates the directory `0700` and the file `0600` on first run, so nothing else on the
+machine can write it by default. If the file is later found writable by other users, or owned
+by someone else, the menu bar item says so. Symlinking it into a dotfiles repository still
+works, and is checked at the far end of the link.
+
 ### From source
 
 ```sh
@@ -251,7 +265,8 @@ rules.
 opens it in nano, in a Terminal.app window; bind `exec` with your own terminal instead if you
 would rather. If it fails to parse, the running config is kept and the error is named in the
 menu bar item's tooltip — a typo can never leave you without a keyboard. See
-[`toe.example.toml`](toe.example.toml).
+[`toe.example.toml`](toe.example.toml), and
+[Treat your config as code](#treat-your-config-as-code) for what an `exec` binding can do.
 
 Binding specs parse in both spellings, so you can paste from an AeroSpace config or an Omarchy
 one: `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
