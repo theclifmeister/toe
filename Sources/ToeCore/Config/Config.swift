@@ -23,14 +23,28 @@ public struct BarConfig: Equatable {
 
 /// How big a window is when it leaves the tiling tree.
 public struct FloatingSize: Equatable {
-    /// Fraction of the monitor's usable width and height.
+    /// Fraction of the monitor's usable width and height, at the first stop of the cycle.
     public var width: Double = 0.70
     public var height: Double = 0.80
+    /// The second stop: pressing `togglefloating` again on a window that already floats grows
+    /// it to this instead of tiling it, and only the press after that puts it back in the tree.
+    public var largeWidth: Double = 0.80
+    public var largeHeight: Double = 0.90
     /// Widest the window may be relative to its own height. On an ultrawide, 70% of the
     /// width is a letterbox; capping the ratio keeps a floating window a shape you would
     /// have picked by hand, on any display.
     public var maxAspectRatio: Double = 1.6
     public init() {}
+
+    /// How many floating sizes `togglefloating` walks through before it tiles the window.
+    public static let stages = 2
+
+    /// The fractions stage 1 and stage 2 use. Anything outside that range is the nearest end,
+    /// so a stage that has drifted — a snapshot from a build with more of them — still lands
+    /// on a real size.
+    public func fractions(stage: Int) -> (width: Double, height: Double) {
+        stage >= 2 ? (largeWidth, largeHeight) : (width, height)
+    }
 }
 
 /// Trackpad gestures toe takes off macOS's hands.
@@ -199,6 +213,16 @@ public struct Config: Equatable {
             if let v = f["height"]?.doubleValue {
                 if v > 0, v <= 1 { config.floating.height = v } else {
                     config.warnings.append("floating.height: must be over 0 and at most 1, using \(config.floating.height)")
+                }
+            }
+            if let v = f["large_width"]?.doubleValue {
+                if v > 0, v <= 1 { config.floating.largeWidth = v } else {
+                    config.warnings.append("floating.large_width: must be over 0 and at most 1, using \(config.floating.largeWidth)")
+                }
+            }
+            if let v = f["large_height"]?.doubleValue {
+                if v > 0, v <= 1 { config.floating.largeHeight = v } else {
+                    config.warnings.append("floating.large_height: must be over 0 and at most 1, using \(config.floating.largeHeight)")
                 }
             }
             if let v = f["max_aspect_ratio"]?.doubleValue {

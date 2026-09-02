@@ -55,6 +55,11 @@ public final class WorkspaceManager {
     /// Frames of floating windows, supplied by the app layer so directional search has an
     /// origin box for them.
     public var floatingFrames: [WindowID: Box] = [:]
+    /// Where each window is on `togglefloating`'s cycle: 1 is the first floating size, 2 the
+    /// larger one, and a window with no entry is either tiled or floating because the app
+    /// layer adopted it that way — the next press tiles that one rather than resizing a
+    /// window toe never sized itself.
+    public private(set) var floatingStage: [WindowID: Int] = [:]
     /// The pointer, in AX coordinates, supplied by the app layer so ToeCore stays free of
     /// AppKit. Hyprland splits the window under the cursor when there is no focused tiled
     /// window to split — see `onWindowCreatedTiling`'s `use_active_for_splits` branch.
@@ -185,26 +190,37 @@ public final class WorkspaceManager {
             ws.layout.remove(id)
             ws.floating.remove(id)
         }
+        floatingStage.removeValue(forKey: id)
         focusHistory.removeAll { $0 == id }
     }
 
-    /// Toggle a window between the dwindle tree and floating.
+    /// Walk a window one step around `togglefloating`'s cycle: tiled, floating at the first
+    /// size, floating at the larger one, tiled again.
+    ///
+    /// A window the app layer floated on its own — a dialog, anything that will not take a
+    /// size — has no stage, and the first press tiles it. Resizing a window that arrived at a
+    /// size of its own choosing would be toe overriding a decision it never made.
     public func toggleFloating(_ id: WindowID) {
         guard let index = workspaceIndex(of: id) else { return }
         let ws = workspace(index)
-        if ws.floating.contains(id) {
+        let next = ws.floating.contains(id) ? (floatingStage[id] ?? FloatingSize.stages) + 1 : 1
+
+        guard next <= FloatingSize.stages else {
             ws.floating.remove(id)
+            floatingStage.removeValue(forKey: id)
             ws.layout.insert(id, anchor: anchor(on: ws, excluding: id), focalPoint: focalPoint(on: ws))
-        } else {
-            ws.layout.remove(id)
-            ws.floating.insert(id)
-            // A window leaving the tree is centred, at the size it remembers. This is set here
-            // rather than derived in `floatingBox` so that it happens once, when you float the
-            // window — deriving it every render would drag the window back to the middle of
-            // the screen the moment you tried to move it.
-            if let m = monitor(id: ws.monitorID) {
-                floatingFrames[id] = centredFloatingBox(on: m)
-            }
+            return
+        }
+
+        ws.layout.remove(id)
+        ws.floating.insert(id)
+        floatingStage[id] = next
+        // A window leaving the tree, or growing to the next size, is centred. This is set here
+        // rather than derived in `floatingBox` so that it happens once, on the keypress —
+        // deriving it every render would drag the window back to the middle of the screen the
+        // moment you tried to move it.
+        if let m = monitor(id: ws.monitorID) {
+            floatingFrames[id] = centredFloatingBox(on: m, stage: next)
         }
     }
 
@@ -417,8 +433,9 @@ public final class WorkspaceManager {
     /// captured from a parked window overlaps by 1×1pt, and handing that back would make the
     /// window vanish.
     private func floatingBox(for id: WindowID, on monitor: Monitor) -> Box {
+        let stage = floatingStage[id] ?? 1
         guard let remembered = floatingFrames[id] else {
-            return centredFloatingBox(on: monitor)
+            return centredFloatingBox(on: monitor, stage: stage)
         }
 
         let onScreen = remembered.intersection(monitor.usable)
@@ -431,16 +448,17 @@ public final class WorkspaceManager {
         // unplugged, or a window left parked in the stash corner. Centring rather than
         // clamping matters here — an edge-clamped window lands wherever the old geometry
         // happened to point, which on a display that is gone is arbitrary.
-        return centredFloatingBox(on: monitor)
+        return centredFloatingBox(on: monitor, stage: stage)
     }
 
     /// Centred on the monitor at a consistent fraction of it, so a floating window is the
     /// same shape whichever window it came from. The aspect cap is what keeps that honest on
     /// a wide display, where a plain width fraction would produce a letterbox.
-    private func centredFloatingBox(on monitor: Monitor) -> Box {
+    private func centredFloatingBox(on monitor: Monitor, stage: Int) -> Box {
         let usable = monitor.usable
-        let h = min(usable.h * floatingSize.height, usable.h)
-        let w = min(usable.w * floatingSize.width, usable.w, h * floatingSize.maxAspectRatio)
+        let fraction = floatingSize.fractions(stage: stage)
+        let h = min(usable.h * fraction.height, usable.h)
+        let w = min(usable.w * fraction.width, usable.w, h * floatingSize.maxAspectRatio)
         return Box(x: usable.minX + (usable.w - w) / 2.0,
                    y: usable.minY + (usable.h - h) / 2.0,
                    w: w, h: h).rounded()
@@ -498,7 +516,7 @@ public final class WorkspaceManager {
         out.focusedMonitor = monitorKey(focusedMonitorID)
         out.focusHistory = focusHistory
         out.floatingFrames = floatingFrames.keys.sorted().map {
-            FloatingFrame(window: $0, frame: floatingFrames[$0]!)
+            FloatingFrame(window: $0, frame: floatingFrames[$0]!, stage: floatingStage[$0])
         }
         return out
     }
@@ -576,9 +594,11 @@ public final class WorkspaceManager {
         // in the dictionary for the life of the process, since `reap` only knows about
         // windows it can find on a workspace.
         let placed = seen
-        floatingFrames = Dictionary(
-            snapshot.floatingFrames.filter { placed.contains($0.window) }.map { ($0.window, $0.frame) },
-            uniquingKeysWith: { first, _ in first })
+        let frames = snapshot.floatingFrames.filter { placed.contains($0.window) }
+        floatingFrames = Dictionary(frames.map { ($0.window, $0.frame) },
+                                    uniquingKeysWith: { first, _ in first })
+        floatingStage = Dictionary(frames.compactMap { f in f.stage.map { (f.window, $0) } },
+                                   uniquingKeysWith: { first, _ in first })
         focusHistory = snapshot.focusHistory.filter { placed.contains($0) }
 
         for ws in workspaces.values {
@@ -600,7 +620,7 @@ public final class WorkspaceManager {
         guard !stale.isEmpty else { return false }
 
         for id in stale {
-            removeWindow(id)
+            removeWindow(id)          // clears the floating stage too
             floatingFrames.removeValue(forKey: id)
         }
         return true

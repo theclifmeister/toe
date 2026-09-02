@@ -23,7 +23,7 @@ as the defaults.
 | `SUPER` + `SHIFT` + `ENTER` | New browser window |
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
-| `SUPER` + `T` | Toggle floating |
+| `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
 | `SUPER` + `,` | Edit the config — nano, in a terminal window |
 | `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
 | Drag a tiled window | Swap it with the tile you drag it over |
@@ -224,10 +224,15 @@ visible all the way round the window; only what is really in front of it covers 
 
 **Floating windows.** `togglefloating` lifts a window out of the tree and centres it, at a
 consistent fraction of the display — 70% wide by 80% tall by default — so every floating window
-is the same shape whichever window it came from. No floating window is ever wider than 1.6 times
-its own height, which is what stops 70% of a 32:9 ultrawide from being a letterbox; on a laptop
-that cap never comes into play. All three are `[floating]` keys in the config. Sizing happens
-when you float the window, not on every frame, so dragging it afterwards sticks: toe writes a
+is the same shape whichever window it came from. It is a cycle rather than a toggle: press it
+again and the window is re-centred at the larger size, 80% by 90%, and only the third press puts
+it back in the tree. A window toe floated on its own — a dialog, anything that will not take a
+size — has no place in that cycle, and the first press tiles it. No floating window is ever wider
+than 1.6 times its own height, which is what stops 70% of a 32:9 ultrawide from being a
+letterbox; on a laptop that cap never comes into play. All of it is `[floating]` keys in the
+config, and setting `large_width`/`large_height` to the same values as `width`/`height` gives
+back the plain two-state toggle. Sizing happens when you float the window, not on every frame,
+so dragging it afterwards sticks: toe writes a
 floating frame only when it actually changes and never re-asserts it, so a floating window is
 never fought the way a tile is. If the display it was last on has been unplugged, it is centred
 on the display that remains rather than clamped against an edge. It is raised when you float it
