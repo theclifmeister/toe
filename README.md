@@ -18,7 +18,7 @@ as the defaults.
 | `SUPER` + `SHIFT` + `←↑↓→` | Swap window with its neighbour |
 | `SUPER` + `1`…`9`, `0` | Switch to workspace 1…10 |
 | `SUPER` + `SHIFT` + `1`…`9`, `0` | Move window to workspace and follow it |
-| `SUPER` + `TAB` / `SHIFT`+`TAB` / `CTRL`+`TAB` | Next / previous / former workspace |
+| `SUPER` + `TAB` / `SHIFT`+`TAB` / `CTRL`+`TAB` | Next / previous workspace in use, former workspace |
 | `SUPER` + `ENTER` | New terminal window |
 | `SUPER` + `SHIFT` + `ENTER` | New browser window |
 | `SUPER` + `W` | Close window |

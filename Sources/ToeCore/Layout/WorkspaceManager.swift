@@ -400,11 +400,17 @@ public final class WorkspaceManager {
         if let prev = previousWorkspace[focusedMonitorID] { switchTo(workspace: prev) }
     }
 
+    /// `workspace e+1` / `e-1`. Cycles through the workspaces in use — the ones with windows
+    /// on them, plus whatever the monitors are showing — rather than all ten, so a press never
+    /// lands on a blank slot you would have to press past. With nothing else in use it does
+    /// nothing, and the workspace you are on always counts as one of them.
     public func switchToRelativeWorkspace(_ delta: Int) {
         let current = focusedWorkspaceIndex
-        var next = (current - 1 + delta) % Self.workspaceCount
-        if next < 0 { next += Self.workspaceCount }
-        switchTo(workspace: next + 1)
+        let ring = (1...Self.workspaceCount).filter { $0 == current || inUse(workspace: $0) }
+        guard ring.count > 1, let position = ring.firstIndex(of: current) else { return }
+        var next = (position + delta) % ring.count
+        if next < 0 { next += ring.count }
+        switchTo(workspace: ring[next])
     }
 
     /// `movetoworkspace <n>` / `movetoworkspacesilent <n>`.
@@ -669,5 +675,12 @@ public extension WorkspaceManager {
     /// Which monitor, if any, is currently showing this workspace.
     func monitorShowing(workspace index: Int) -> UInt32? {
         activeWorkspace.first { $0.value == index }?.key
+    }
+
+    /// Whether a workspace is one of the ones you are actually using: it holds windows, or a
+    /// monitor is showing it right now. This is what the strip draws as anything but a dim
+    /// digit, and what `workspace e+1` cycles through.
+    func inUse(workspace index: Int) -> Bool {
+        !isEmpty(workspace: index) || monitorShowing(workspace: index) != nil
     }
 }

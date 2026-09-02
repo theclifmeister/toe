@@ -133,6 +133,8 @@ persistent_workspaces = 5
 # Same, without following the window:  "movetoworkspacesilent 3"
 
 # ── Cycling ───────────────────────────────────────────────────────────────────
+# next/prev walk only the workspaces in use — the ones with windows on them, plus whatever the
+# other displays are showing — so a press never lands on a blank slot.
 "super-tab"       = "workspace next"
 "super-shift-tab" = "workspace prev"
 "super-ctrl-tab"  = "workspace previous"
