@@ -14,6 +14,8 @@ the one thing they cannot reproduce is dwindle itself. toe's tiler is a direct p
 `CHyprDwindleLayout`, with Omarchy's settings (`preserve_split = true`, `force_split = 2`)
 as the defaults.
 
+<img width="1728" height="1117" alt="image" src="https://github.com/user-attachments/assets/2256d0c4-884f-4af4-a405-51368390425c" />
+
 ## What it does
 
 | Binding | Action |
