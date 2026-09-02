@@ -148,12 +148,63 @@ final class Coordinator: WindowTrackerDelegate {
 
     // MARK: - Config
 
+    /// Writes the shipped default on first run, for this user only.
+    ///
+    /// This file is executable code, not merely settings: an `exec` binding runs `/bin/sh -c`
+    /// with whatever it says, about 150 ms after it changes, inside a login agent holding the
+    /// Accessibility grant. So the mode is set here rather than inherited from whatever umask
+    /// happens to be in effect, and a failure is named rather than swallowed — a first run
+    /// that could not write its config used to behave exactly like one that had, leaving you
+    /// looking for a file that was never created.
     private func writeDefaultConfigIfMissing() {
         let url = Coordinator.configURL
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? Config.defaultTOML.write(to: url, atomically: true, encoding: .utf8)
+
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+        } catch {
+            Log.error("could not create \(url.deletingLastPathComponent().path): \(error.localizedDescription)")
+            return
+        }
+
+        // open with O_EXCL rather than a write through FileManager, for two reasons: it
+        // refuses rather than following a symlink already sitting at that path, and it is one
+        // call that both creates the file and fixes its mode, so the file never exists at the
+        // umask's mode even briefly.
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        guard fd >= 0 else {
+            Log.error("could not create \(url.path): \(String(cString: strerror(errno)))")
+            return
+        }
+        defer { close(fd) }
+
+        let bytes = Data(Config.defaultTOML.utf8)
+        let written = bytes.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        if written != bytes.count {
+            Log.error("could not write \(url.path): \(String(cString: strerror(errno)))")
+        }
+    }
+
+    /// Names a config file that other people can rewrite, or that belongs to someone else.
+    ///
+    /// A warning and not a refusal: symlinking this file into a dotfiles repository is how a
+    /// good many people manage it, and refusing to load a symlink would break every one of
+    /// them. `stat` rather than `lstat` for exactly that reason — what runs is the file at the
+    /// end of the link, so that is the file whose permissions matter.
+    private static func permissionWarning(for url: URL) -> String? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        let name = url.lastPathComponent
+        if info.st_uid != getuid() {
+            return "\(name) belongs to uid \(info.st_uid), not to you — whoever owns it can run commands as you"
+        }
+        if info.st_mode & (S_IWGRP | S_IWOTH) != 0 {
+            let mode = String(info.st_mode & 0o777, radix: 8)
+            return "\(name) is mode \(mode), writable by other users — it runs shell commands, so chmod 600 it"
+        }
+        return nil
     }
 
     private func loadConfig() {
@@ -171,6 +222,9 @@ final class Coordinator: WindowTrackerDelegate {
 
         config = newConfig
         warnings = newConfig.warnings
+        if let warning = Coordinator.permissionWarning(for: Coordinator.configURL) {
+            warnings.append(warning)
+        }
 
         let rejected = hotkeys.register(newConfig.bindings)
         warnings += rejected.map { "\($0.source): already claimed by another app" }

@@ -10,6 +10,10 @@ let defaultConfigText = #"""
 # Reloads automatically when you save. If a line does not parse, the running config is kept
 # and the error is named in the menu bar item's tooltip, so a typo can never leave you
 # keyboardless. SUPER+, opens this file in nano.
+#
+# This file is code, not just settings: an `exec` binding below runs a shell command, and toe
+# picks up a change within about 150 ms of the save. Anything that can write this file can run
+# commands as you. It is created mode 600 for that reason — keep it that way.
 
 [general]
 # Omarchy's SUPER maps to Option: same physical key position as SUPER on a PC keyboard, and
