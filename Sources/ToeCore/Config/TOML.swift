@@ -13,7 +13,11 @@ public enum TOMLValue: Equatable {
     public var intValue: Int? {
         switch self {
         case .int(let i): return i
-        case .double(let d): return Int(d)
+        // A float where an integer was wanted, truncated toward zero — but guarded, because
+        // `Int(_: Double)` traps on a NaN, on an infinity and on anything past Int's range,
+        // and TOML spells all three (`nan`, `inf`, `1e400`). An unguarded conversion here is
+        // a crash any config file can cause.
+        case .double(let d): return d.isFinite ? Int(exactly: d.rounded(.towardZero)) : nil
         default: return nil
         }
     }

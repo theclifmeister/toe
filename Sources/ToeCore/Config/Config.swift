@@ -159,6 +159,37 @@ public struct Config: Equatable {
         (try? Config.parse(defaultTOML)) ?? Config()
     }
 
+    /// One number from the config, or nil — with a warning appended — when it is not a finite
+    /// value inside `range`.
+    ///
+    /// TOML spells `nan` and `inf`, and Swift's `Double(_: String)` accepts them as readily as
+    /// it accepts `0x1p10`, so without a check here a single `gaps_in = nan` reaches the
+    /// layout and three things go wrong at once. `Box` is `Equatable`, so every comparison
+    /// against a NaN coordinate is false: toe decides the window is in the wrong place and
+    /// re-writes its frame on every render, forever. The correction budget that notices a
+    /// window fighting the layout compares the same way, so it never resets either. And the
+    /// NaN geometry is written into other applications over Accessibility, where reading it
+    /// back into an `NSWindow.setFrame` — which the border overlay does — traps.
+    ///
+    /// `[bar]` and `[floating]` were already range-checked. This is the same treatment for
+    /// `[general]`, `[border]` and `[dwindle]`, and it catches the merely absurd (`0x1p10` is
+    /// a gap of 1024 points) along with the non-finite.
+    static func number(_ raw: TOMLValue?, _ path: String, in range: ClosedRange<Double>,
+                       keeping current: Double, warnings: inout [String]) -> Double? {
+        guard let value = raw?.doubleValue else { return nil }
+        guard value.isFinite, range.contains(value) else {
+            warnings.append("\(path): must be a number from \(brief(range.lowerBound)) to "
+                            + "\(brief(range.upperBound)), using \(brief(current))")
+            return nil
+        }
+        return value
+    }
+
+    /// `5` rather than `5.0`, so the warnings read the way the config file is written.
+    private static func brief(_ value: Double) -> String {
+        value == value.rounded() && abs(value) < 1e15 ? String(Int(value)) : String(value)
+    }
+
     public static func parse(_ text: String) throws -> Config {
         let root = try TOML.parse(text)
         var config = Config()
@@ -172,26 +203,52 @@ public struct Config: Equatable {
                 default: config.warnings.append("general.super_key: unknown value '\(s)', using alt")
                 }
             }
-            if let v = general["gaps_in"]?.doubleValue { config.gaps.inner = v }
-            if let v = general["gaps_out"]?.doubleValue { config.gaps.outer = v }
+            if let v = number(general["gaps_in"], "general.gaps_in", in: 0...500,
+                              keeping: config.gaps.inner, warnings: &config.warnings) {
+                config.gaps.inner = v
+            }
+            if let v = number(general["gaps_out"], "general.gaps_out", in: 0...500,
+                              keeping: config.gaps.outer, warnings: &config.warnings) {
+                config.gaps.outer = v
+            }
         }
 
         if let d = root["dwindle"]?.tableValue {
             if let v = d["preserve_split"]?.boolValue { config.dwindle.preserveSplit = v }
             if let v = d["force_split"]?.intValue { config.dwindle.forceSplit = v }
             if let v = d["smart_split"]?.boolValue { config.dwindle.smartSplit = v }
-            if let v = d["split_width_multiplier"]?.doubleValue { config.dwindle.splitWidthMultiplier = v }
-            if let v = d["default_split_ratio"]?.doubleValue { config.dwindle.defaultSplitRatio = v }
+            if let v = number(d["split_width_multiplier"], "dwindle.split_width_multiplier", in: 0.1...10,
+                              keeping: config.dwindle.splitWidthMultiplier, warnings: &config.warnings) {
+                config.dwindle.splitWidthMultiplier = v
+            }
+            // The same range the layout clamps to on use, so a value outside it is named here
+            // rather than silently becoming a different one later.
+            if let v = number(d["default_split_ratio"], "dwindle.default_split_ratio", in: 0.1...1.9,
+                              keeping: config.dwindle.defaultSplitRatio, warnings: &config.warnings) {
+                config.dwindle.defaultSplitRatio = v
+            }
             if let v = d["split_bias"]?.intValue { config.dwindle.splitBias = v }
         }
 
         if let b = root["border"]?.tableValue {
             if let v = b["enabled"]?.boolValue { config.border.enabled = v }
-            if let v = b["width"]?.doubleValue { config.border.width = v }
+            if let v = number(b["width"], "border.width", in: 0...100,
+                              keeping: config.border.width, warnings: &config.warnings) {
+                config.border.width = v
+            }
             if let v = b["active_start"]?.stringValue { config.border.activeStart = v }
             if let v = b["active_end"]?.stringValue { config.border.activeEnd = v }
-            if let v = b["angle"]?.doubleValue { config.border.angle = v }
-            if let v = b["radius"]?.doubleValue { config.border.radius = v }
+            if let v = number(b["angle"], "border.angle", in: 0...360,
+                              keeping: config.border.angle, warnings: &config.warnings) {
+                config.border.angle = v
+            }
+            // -1 is the documented "follow the window's own corner radius", and is the only
+            // negative the range admits: every other one means the same thing, and accepting
+            // them all would make a typo indistinguishable from a choice.
+            if let v = number(b["radius"], "border.radius", in: -1...100,
+                              keeping: config.border.radius, warnings: &config.warnings) {
+                config.border.radius = v
+            }
         }
 
         if let b = root["bar"]?.tableValue {

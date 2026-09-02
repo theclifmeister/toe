@@ -892,6 +892,88 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     }
 }
 
+h.test("nan and infinity are refused rather than reaching the layout") { t in
+    // TOML spells both, and Double("nan") accepts them. A NaN gap defeats every == in the
+    // coordinator: the window is re-written on every render forever, the correction budget
+    // never resets, and the NaN is passed to other applications over Accessibility.
+    for spelling in ["nan", "inf", "-inf", "+inf"] {
+        let c = try Config.parse("[general]\ngaps_in = \(spelling)\n")
+        t.equal(c.gaps.inner, 5, "gaps_in = \(spelling) keeps the default")
+        t.equal(c.gaps.inner.isFinite, true, "gaps_in = \(spelling) leaves a finite gap")
+        t.equal(c.warnings.contains { $0.contains("general.gaps_in") }, true,
+                "gaps_in = \(spelling) warns")
+    }
+
+    let out = try Config.parse("[general]\ngaps_out = nan\n")
+    t.equal(out.gaps.outer, 10, "gaps_out = nan keeps the default")
+    t.equal(out.warnings.contains { $0.contains("general.gaps_out") }, true, "and says so")
+
+    let border = try Config.parse("[border]\nwidth = nan\nangle = inf\nradius = nan\n")
+    t.equal(border.border.width, 2, "border.width = nan keeps the default")
+    t.equal(border.border.angle, 45, "border.angle = inf keeps the default")
+    t.equal(border.border.radius, -1, "border.radius = nan keeps the default")
+    t.equal(border.warnings.count, 3, "one warning each")
+
+    let dwindle = try Config.parse("[dwindle]\nsplit_width_multiplier = nan\ndefault_split_ratio = inf\n")
+    t.equal(dwindle.dwindle.splitWidthMultiplier, 1.0, "split_width_multiplier = nan keeps the default")
+    t.equal(dwindle.dwindle.defaultSplitRatio, 1.0, "default_split_ratio = inf keeps the default")
+    t.equal(dwindle.warnings.count, 2, "one warning each")
+}
+
+h.test("numbers outside a sensible range are refused too") { t in
+    // Swift's Double(_: String) takes hex floats, which TOML has no notion of, so this used
+    // to parse as a 1024 point gap with no warning at all.
+    let hex = try Config.parse("[general]\ngaps_in = 0x1p10\n")
+    t.equal(hex.gaps.inner, 5, "a 1024 point gap keeps the default")
+    t.equal(hex.warnings.contains { $0.contains("general.gaps_in") }, true, "and says so")
+
+    let negative = try Config.parse("[border]\nwidth = -5\n")
+    t.equal(negative.border.width, 2, "a negative border width keeps the default")
+    t.equal(negative.warnings.contains { $0.contains("border.width") }, true, "and says so")
+
+    let radius = try Config.parse("[border]\nradius = -2\n")
+    t.equal(radius.border.radius, -1, "-1 is the only negative radius, so -2 keeps the default")
+    t.equal(radius.warnings.contains { $0.contains("border.radius") }, true, "and says so")
+
+    let ratio = try Config.parse("[dwindle]\ndefault_split_ratio = 5\n")
+    t.equal(ratio.dwindle.defaultSplitRatio, 1.0, "a ratio past the clamp keeps the default")
+    t.equal(ratio.warnings.contains { $0.contains("dwindle.default_split_ratio") }, true, "and says so")
+}
+
+h.test("numbers in range are still read, and warn about nothing") { t in
+    let c = try Config.parse("""
+    [general]
+    gaps_in = 12
+    gaps_out = 24
+    [border]
+    width = 3
+    angle = 90
+    radius = 8
+    [dwindle]
+    split_width_multiplier = 1.5
+    default_split_ratio = 1.2
+    """)
+    t.equal(c.gaps, Gaps(inner: 12, outer: 24), "gaps are read")
+    t.equal(c.border.width, 3, "border width is read")
+    t.equal(c.border.angle, 90, "border angle is read")
+    t.equal(c.border.radius, 8, "border radius is read")
+    t.equal(c.dwindle.splitWidthMultiplier, 1.5, "split_width_multiplier is read")
+    t.equal(c.dwindle.defaultSplitRatio, 1.2, "default_split_ratio is read")
+    t.equal(c.warnings, [], "no warnings")
+}
+
+h.test("a float where an integer was wanted cannot trap") { t in
+    // TOMLValue.intValue truncates a float, and Int(_: Double) traps on a NaN, an infinity
+    // or anything past Int's range. Reaching this line at all is the assertion.
+    let c = try Config.parse("[dwindle]\nforce_split = nan\nsplit_bias = 1e400\n[bar]\npersistent_workspaces = inf\n")
+    t.equal(c.dwindle.forceSplit, 2, "force_split = nan keeps the default")
+    t.equal(c.dwindle.splitBias, 0, "split_bias = 1e400 keeps the default")
+    t.equal(c.bar.persistentWorkspaces, 5, "persistent_workspaces = inf keeps the default")
+
+    let truncated = try Config.parse("[dwindle]\nforce_split = 1.7\n")
+    t.equal(truncated.dwindle.forceSplit, 1, "an ordinary float still truncates toward zero")
+}
+
 h.test("a negative radius survives the TOML parser") { t in
     let c = try Config.parse("[border]\nradius = -1\n")
     t.equal(c.border.radius, -1, "radius = -1")
