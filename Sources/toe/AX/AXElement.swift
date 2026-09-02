@@ -43,22 +43,29 @@ enum AX {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), axMessagingTimeout)
     }
 
-    /// Whether the window in front right now is a native-fullscreen one.
+    /// The frame of the window in front, when that window is a native-fullscreen one — and
+    /// `nil` whenever it is not, which is the ordinary case.
     ///
     /// Asked of the frontmost application rather than of anything toe tracks, because the
     /// window that matters here is usually one toe manages nothing for: `isManageable` turns
     /// fullscreen windows away, so a Safari gone fullscreen is invisible to the tracker while
     /// being exactly the window the border must not draw over.
     ///
-    /// A fullscreen window owns its own Space, and the border panel is `.canJoinAllSpaces`
-    /// with `.fullScreenAuxiliary` — deliberately, so it survives the Space it sits on being
-    /// switched away and back — which is also what lets it paint the previous Space's outline
-    /// straight across a fullscreen one. This is the question that stops it.
-    static var frontmostWindowIsFullscreen: Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+    /// A frame rather than a yes/no, because "something is fullscreen somewhere" is not the
+    /// question. Under macOS's default *Displays have separate Spaces*, each display shows its
+    /// own Space at the same time, so a fullscreen Safari on one display says nothing about
+    /// the tiled window holding the border on another. The frame is what lets the caller ask
+    /// about the display the border is actually on; see `BorderGeometry.isBehindFullscreen`.
+    ///
+    /// `frame` is only read once `isFullscreen` says yes, so the common answer still costs the
+    /// two Accessibility round trips it always did rather than four.
+    static var frontmostFullscreenFrame: Box? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let element = application(app.processIdentifier)
-        guard let focused = element.elementValue(kAXFocusedWindowAttribute) else { return false }
-        return focused.isFullscreen
+        guard let focused = element.elementValue(kAXFocusedWindowAttribute),
+              focused.isFullscreen
+        else { return nil }
+        return focused.frame
     }
 }
 

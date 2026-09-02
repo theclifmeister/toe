@@ -491,6 +491,13 @@ final class Coordinator: WindowTrackerDelegate {
         updateBorder()
     }
 
+    /// A different Space is on show. The layout is untouched and so is the stacking inside it,
+    /// so the floats are left exactly where they are — the border is the only thing that cares,
+    /// because the window now in front may be a fullscreen one it must not draw over.
+    func activeSpaceChanged() {
+        updateBorder()
+    }
+
     // MARK: - Applying the layout
 
     private func apply(refocus: Bool) {
@@ -544,18 +551,20 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func updateBorder() {
-        // `frontmostWindowIsFullscreen` is two cross-process Accessibility calls, so it comes
-        // last of the four: the three cheap conditions turn the border off in every case where
-        // there is nothing to draw anyway, and this only decides between drawing and not.
         guard config.border.enabled,
               let focused = draggedWindow ?? workspaces.focusedWindow,
               let window = tracker.window(focused),
-              !window.isStashed,
-              !AX.frontmostWindowIsFullscreen
+              !window.isStashed
         else {
             border.hide()
             return
         }
+
+        // Read once, after the cheap conditions rather than among them: it costs a
+        // cross-process Accessibility round trip, and the guard above already turns the border
+        // off in every case where there was nothing to draw. Both `show` paths below test
+        // against it, because either can be the one pointed at a fullscreen display.
+        let fullscreen = AX.frontmostFullscreenFrame
 
         // While the user has hold of a window the border marks the tile it will land in rather
         // than the window itself. Two reasons, and they point the same way: toe hears about the
@@ -566,7 +575,8 @@ final class Coordinator: WindowTrackerDelegate {
         if focused == draggedWindow {
             // Behind the window being dragged, and above every other one — where Hyprland puts
             // it, since it draws each border with its own window and the focused window last.
-            if let tile = desired[focused] {
+            if let tile = desired[focused],
+               !BorderGeometry.isBehindFullscreen(window: tile, fullscreen: fullscreen) {
                 border.show(around: tile, of: focused, depth: .behindFrontmost)
             } else {
                 border.hide()
@@ -575,7 +585,8 @@ final class Coordinator: WindowTrackerDelegate {
         }
 
         // Prefer the frame we wrote; fall back to asking the window for floating ones.
-        if let box = window.element.frame ?? desired[focused] {
+        if let box = window.element.frame ?? desired[focused],
+           !BorderGeometry.isBehindFullscreen(window: box, fullscreen: fullscreen) {
             border.show(around: box, of: focused, depth: borderDepth(around: box, of: focused))
         } else {
             border.hide()

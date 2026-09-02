@@ -35,6 +35,10 @@ protocol WindowTrackerDelegate: AnyObject {
     /// forward, or one opened a window toe will never tile. Neither changes the layout, but
     /// both change what is stacked over the focused window.
     func windowStackChanged()
+    /// The displays are showing different Spaces than they were. Nothing toe manages has
+    /// moved — not the layout, and not the stacking within it — but what is in front of it
+    /// all has changed, which is a different fact and deliberately a separate callback.
+    func activeSpaceChanged()
 }
 
 /// Discovers windows and keeps them in sync with the running applications.
@@ -63,7 +67,7 @@ final class WindowTracker {
         // above would have covered it — but not when the fullscreen window belongs to an
         // application that also owns tiled windows, which is the one case where nothing else
         // says the frontmost window has changed.
-        workspace.addObserver(self, selector: #selector(activeSpaceChanged),
+        workspace.addObserver(self, selector: #selector(spaceChanged),
                               name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
@@ -76,7 +80,23 @@ final class WindowTracker {
 
     @objc private func screensChanged() { delegate?.screensChanged() }
 
-    @objc private func activeSpaceChanged() { noteStackChange() }
+    /// Deliberately not `noteStackChange`. That one sinks unfocused floats, and a Space switch
+    /// is the one moment it must not: `WindowStack.windowsAbove` returns an empty set for a
+    /// window that is off screen, and `Stacking.raiseOrder` reads empty as "this float is on
+    /// top of the tiles it covers" rather than "no idea" — so every switch away would raise
+    /// the tiles on the Space just left. Nothing toe manages has restacked here; only what is
+    /// in front of it has.
+    ///
+    /// Fires now and twice more shortly after, for the reason `noteStackChange` does: the
+    /// frontmost application is not necessarily the new Space's yet.
+    @objc private func spaceChanged() {
+        delegate?.activeSpaceChanged()
+        for delay in [0.15, 0.4] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.delegate?.activeSpaceChanged()
+            }
+        }
+    }
 
     @objc private func appLaunched(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
