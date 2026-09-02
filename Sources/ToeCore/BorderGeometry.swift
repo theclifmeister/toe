@@ -28,6 +28,33 @@ public enum BorderGeometry {
         return Box(x: box.x - w, y: box.y - w, w: box.w + 2 * w, h: box.h + 2 * w)
     }
 
+    /// Whether `window` sits on a display a fullscreen window has taken over.
+    ///
+    /// The border panel is `.canJoinAllSpaces` with `.fullScreenAuxiliary` — deliberately, so
+    /// the ring survives the Space it sits on being switched away and back — which is also
+    /// what lets it paint a tiled window's outline straight across a fullscreen Space. This
+    /// is the test that stops it.
+    ///
+    /// Geometry rather than a global "is anything fullscreen" flag, because under macOS's
+    /// default *Displays have separate Spaces* both are true at once: a fullscreen Safari on
+    /// the second display leaves the first showing its ordinary Space, tiled windows and all,
+    /// and the ring there is covering nothing. A fullscreen window fills exactly one display,
+    /// so overlapping its frame is the same question as sharing its display.
+    ///
+    /// Measured against the window rather than the band drawn around it. The band is outset
+    /// past the window's edges, so a tile flush against the boundary between two displays
+    /// would bleed its border width into the neighbouring one and read as covered there —
+    /// the window itself never does.
+    ///
+    /// `epsilon` leans the same way `bandIsCovered` does: a sliver of overlap is the window
+    /// server and Accessibility disagreeing about an edge, not a shared display.
+    public static func isBehindFullscreen(window: Box, fullscreen: Box?,
+                                          epsilon: Double = 1) -> Bool {
+        guard let fullscreen else { return false }
+        let clipped = window.intersection(fullscreen)
+        return clipped.w > epsilon && clipped.h > epsilon
+    }
+
     /// Whether anything in `others` covers part of the *band*, rather than merely sitting over
     /// the window's own interior — which the border never draws on anyway, so a dialog centred
     /// on the window hides none of it.

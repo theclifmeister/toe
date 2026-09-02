@@ -1146,6 +1146,73 @@ h.test("the border only gives way to a window that covers the band") { t in
             "neither of two is still nothing")
 }
 
+// The two displays are the built-in Retina panel at the origin and a 2560x1440 external one
+// to its right, which is where the coordinates below come from. A fullscreen window fills
+// exactly one display, so the fullscreen frames here are the display frames.
+h.test("the border gives way only on the display a fullscreen window took over") { t in
+    let builtIn = box(0, 0, 1512, 982)
+    let external = box(1512, 0, 2560, 1440)
+    let tile = box(15, 48, 842, 934)                    // a tile on the built-in display
+    func behind(_ fullscreen: Box?) -> Bool {
+        BorderGeometry.isBehindFullscreen(window: tile, fullscreen: fullscreen)
+    }
+
+    t.equal(behind(nil), false, "nothing is fullscreen, so the border stays")
+    t.equal(behind(builtIn), true, "fullscreen on this display covers the tile")
+    t.equal(behind(external), false,
+            "fullscreen on the other display leaves this one showing its own Space")
+
+    // The regression the display scoping exists for: with `Displays have separate Spaces` both
+    // of these are true at once, and a global "is anything fullscreen" flag cannot tell them
+    // apart. It answered `true` for both, and took the ring off a tile covering nothing.
+    let tileOnExternal = box(1600, 48, 900, 1300)
+    t.equal(BorderGeometry.isBehindFullscreen(window: tileOnExternal, fullscreen: external), true,
+            "the same fullscreen window does cover a tile on its own display")
+
+    // A window flush against the boundary between the displays. Measured against the window
+    // and not the band drawn around it, so the outset cannot bleed onto the neighbour.
+    let flush = box(1112, 48, 400, 934)                 // right edge exactly on the boundary
+    t.equal(BorderGeometry.isBehindFullscreen(window: flush, fullscreen: external), false,
+            "a tile touching the boundary is not on the display across it")
+    t.equal(BorderGeometry.isBehindFullscreen(window: flush, fullscreen: builtIn), true,
+            "it is on its own display, though")
+
+    // Leaning the same way `bandIsCovered` does: a sliver is AX and the window server
+    // disagreeing about an edge, not a shared display.
+    t.equal(BorderGeometry.isBehindFullscreen(window: box(1112, 48, 400.5, 934),
+                                              fullscreen: external), false,
+            "a right edge half a point past the boundary is rounding noise")
+    t.equal(BorderGeometry.isBehindFullscreen(window: box(1112, 48, 402, 934),
+                                              fullscreen: external), true,
+            "two points past it is a window really reaching onto that display")
+}
+
+// Guards the reason `activeSpaceChanged` is its own callback rather than `windowStackChanged`.
+// `WindowStack.windowsAbove` returns an empty set for a window that is not on screen, and this
+// is what `raiseOrder` does with that — so a Space switch that ran the float sink would raise
+// the tiles on the Space just left, three times over.
+h.test("an off-screen float reads as needing its tiles raised, not as settled") { t in
+    let tiles: [WindowID: Box] = [1: box(0, 0, 756, 982), 2: box(756, 0, 756, 982)]
+    let floats: [WindowID: Box] = [3: box(300, 200, 900, 500)]   // overlaps both tiles
+
+    // What `WindowStack.windowsAbove` answers for a window on another Space.
+    let offScreen = Stacking.raiseOrder(tiles: tiles, floats: floats, focused: 1,
+                                        stackedAbove: { _ in [] })
+    t.equal(offScreen.isEmpty, false,
+            "an empty set reads as 'the float is on top', so the tiles are raised")
+
+    // The same float genuinely at the bottom of what it covers asks for nothing.
+    let settled = Stacking.raiseOrder(tiles: tiles, floats: floats, focused: 1,
+                                      stackedAbove: { _ in [1, 2] })
+    t.equal(settled.isEmpty, true, "a float already under both tiles is left alone")
+
+    // And with no float at all there is nothing to sink either way, which is why this went
+    // unnoticed on a layout of pure tiles.
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: [:], focused: 1,
+                                stackedAbove: { _ in [] }).isEmpty, true,
+            "no floats, no raises")
+}
+
 h.test("binding specs parse in both spellings") { t in
     func parse(_ s: String) -> String? {
         guard let (m, code, name) = try? BindingParser.parse(s, superKey: .option) else { return nil }
