@@ -4,8 +4,8 @@ import ToeCore
 
 /// The window server's stacking order, which Accessibility does not expose at all.
 ///
-/// Reads `kCGWindowBounds`, `kCGWindowLayer`, `kCGWindowOwnerPID` and `kCGWindowAlpha`, and
-/// nothing else. `kCGWindowName` would need Screen Recording; Accessibility is the one
+/// Reads `kCGWindowNumber`, `kCGWindowBounds`, `kCGWindowLayer`, `kCGWindowOwnerPID` and
+/// `kCGWindowAlpha`, and nothing else. `kCGWindowName` would need Screen Recording; Accessibility is the one
 /// permission toe asks for, so the window list is read for geometry and never for content.
 enum WindowStack {
 
@@ -16,28 +16,41 @@ enum WindowStack {
     /// `.floating`: change one and change the other.
     private static let levels = 0...Int(CGWindowLevelForKey(.floatingWindow))
 
-    /// Ordinary windows stacked above `id`, in Accessibility coordinates.
+    /// The ordinary windows stacked above `id`.
     ///
     /// Empty when the window is not on screen — a stale id, another Space, a window on its way
     /// out — which reads as "nothing is covering it". That is the right way to fail: the
     /// fallback is the behaviour toe has always had, not a new one.
-    static func ordinaryWindowsAbove(_ id: WindowID) -> [Box] {
+    private static func infoForWindowsAbove(_ id: WindowID) -> [[String: Any]] {
         let options: CGWindowListOption = [.optionOnScreenAboveWindow, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, id) as? [[String: Any]] else {
             return []
         }
         let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
 
-        return list.compactMap { info in
+        return list.filter { info in
             // toe's own border panel is above the focused window by construction, so without
             // this the border would demote itself every single time, in every case.
-            guard info[kCGWindowOwnerPID as String] as? Int != ownPID else { return nil }
+            guard info[kCGWindowOwnerPID as String] as? Int != ownPID else { return false }
             guard let layer = info[kCGWindowLayer as String] as? Int,
                   levels.contains(layer)
-            else { return nil }
+            else { return false }
             // Apps keep invisible helper windows around; one of those covering the band is not
             // something anyone can see.
-            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha < 0.01 { return nil }
+            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha < 0.01 { return false }
+            return true
+        }
+    }
+
+    /// The ids of the windows above `id`. This is how toe knows whether a float it has already
+    /// sunk is still down there, so a stack that is right is left alone rather than re-raised.
+    static func windowsAbove(_ id: WindowID) -> Set<WindowID> {
+        Set(infoForWindowsAbove(id).compactMap { $0[kCGWindowNumber as String] as? WindowID })
+    }
+
+    /// The same windows as frames, in Accessibility coordinates.
+    static func ordinaryWindowsAbove(_ id: WindowID) -> [Box] {
+        infoForWindowsAbove(id).compactMap { info in
             guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
                   rect.width > 1, rect.height > 1

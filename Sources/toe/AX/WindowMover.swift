@@ -41,8 +41,15 @@ enum WindowMover {
     static func focus(_ window: ManagedWindow) {
         window.element.set(kAXMainAttribute, kCFBooleanTrue)
         window.element.set(kAXFocusedAttribute, kCFBooleanTrue)
-        AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        raise(window)
         NSRunningApplication(processIdentifier: window.pid)?.activate()
+    }
+
+    /// Stacking only: no `kAXMain`, no `kAXFocused`, no activation. Raising a window does not
+    /// make its application the active one, which is what lets toe lift a tile over a float
+    /// belonging to some other app without taking the focus off either of them.
+    static func raise(_ window: ManagedWindow) {
+        AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
     }
 
     static func close(_ window: ManagedWindow) {

@@ -33,6 +33,18 @@ final class Coordinator: WindowTrackerDelegate {
     /// than fought with forever.
     private var corrections: [WindowID: Int] = [:]
     private var focusApplied: WindowID?
+    /// Windows toe raised itself, and when — see `isEchoOfOwnRaise`.
+    private var selfRaised: [WindowID: TimeInterval] = [:]
+    /// How long a focus notification can still be the echo of one of those raises.
+    ///
+    /// Generous, because the cost of getting this wrong runs the two ways round very
+    /// differently. An echo let through is recorded as a focus change that never happened, and
+    /// toe then works from a window the user is not on — `movefocus` walks from the wrong
+    /// place, and the border sits on the wrong window until something corrects it. A click let
+    /// through late is one focus change toe hears about a beat later than it might have.
+    /// Applications answer a raise in milliseconds when they are idle and take their time when
+    /// they are not, so this is set for the slow ones.
+    private static let raiseEchoWindow: TimeInterval = 1.2
     /// True from the moment a snapshot is restored until the windows it named have had their
     /// chance to turn up. Saving is suspended meanwhile: a snapshot taken halfway through
     /// adoption would record a layout missing most of its windows, over the top of the good
@@ -378,9 +390,12 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     func windowFocused(_ id: WindowID) {
-        guard workspaces.workspaceIndex(of: id) != nil else { return }
+        guard workspaces.workspaceIndex(of: id) != nil, !isEchoOfOwnRaise(id) else { return }
         workspaces.noteFocus(id)
         focusApplied = id
+        // Clicking a window raises it, so the focused one is already in front and stays there;
+        // this is only about the float it has just taken the focus from.
+        sinkUnfocusedFloats(workspaces.render())
         updateBorder()
         refreshStatus()
         scheduleSessionSave()
@@ -441,6 +456,11 @@ final class Coordinator: WindowTrackerDelegate {
     /// Nothing about the layout has changed — only what is stacked over the focused window,
     /// which is what decides whether the border can sit above everything.
     func windowStackChanged() {
+        // Somebody else has re-ordered the stack — most often an application coming forward,
+        // which brings all of its windows with it, float included. That is the one thing toe
+        // cannot predict from its own state, so the floats are put back down from what the
+        // window server says is up there now, before the border is asked where it belongs.
+        sinkUnfocusedFloats(workspaces.render())
         updateBorder()
     }
 
@@ -482,6 +502,8 @@ final class Coordinator: WindowTrackerDelegate {
             if id == draggedWindow { continue }
             WindowMover.setFrame(box, element: window.element, pid: window.pid)
         }
+
+        sinkUnfocusedFloats(plan)
 
         if refocus, let target = plan.focus, target != focusApplied,
            let window = tracker.window(target) {
@@ -541,6 +563,61 @@ final class Coordinator: WindowTrackerDelegate {
         let above = WindowStack.ordinaryWindowsAbove(id)
         return BorderGeometry.bandIsCovered(window: box, width: config.border.width, by: above)
             ? .behindFrontmost : .aboveEverything
+    }
+
+    /// Sends every floating window that has lost the focus behind the tiles it covers.
+    ///
+    /// `togglefloating` raises a float, and focusing it raises it again — right while it is the
+    /// window in hand, wrong the moment the focus moves on, because the float was then left
+    /// sitting over half of whichever tile the focus had moved to. Accessibility has no lower
+    /// action, so the way down is to raise what the float covers; see `Stacking.raiseOrder`,
+    /// which works out the shortest set of raises that gets there.
+    ///
+    /// Not while a window is being dragged: the stack the user is looking at then is one they
+    /// are making themselves, and the drag ends in an `apply` that settles it anyway.
+    private func sinkUnfocusedFloats(_ plan: RenderPlan) {
+        guard draggedWindow == nil else { return }
+        // One focus change reaches this several ways over — the command, the notification the
+        // application sends back, the render that follows — so the order is worked out against
+        // the stack as it really is, and a float already at the bottom asks for no raises at
+        // all. Without that, the repeats are what the user sees as flicker.
+        let order = Stacking.raiseOrder(tiles: plan.frames,
+                                        floats: plan.floating,
+                                        focused: workspaces.focusedWindow,
+                                        stackedAbove: WindowStack.windowsAbove)
+        guard !order.isEmpty else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        selfRaised = selfRaised.filter { now - $0.value < Self.raiseEchoWindow }
+        for id in order {
+            guard let window = tracker.window(id), !window.isStashed else { continue }
+            selfRaised[id] = now
+            WindowMover.raise(window)
+        }
+    }
+
+    /// Whether a focus notification is toe's own restacking coming back at it.
+    ///
+    /// Raising a window makes it its application's focused window, and the notification that
+    /// arrives is the very one a click produces — nothing in it tells the two apart. Taken at
+    /// face value it is a loop: toe hands the focus to a window it only meant to re-order, that
+    /// focus sinks a float, sinking raises more windows, and every one of those reports a focus
+    /// change of its own. The window toe is focusing for real is the exception — it is raised
+    /// on purpose, and its echo is the truth.
+    private func isEchoOfOwnRaise(_ id: WindowID) -> Bool {
+        guard id != focusApplied, let raisedAt = selfRaised[id] else { return false }
+        // Raising a window does not bring its application forward, so a window toe raised that
+        // reports the focus from an application which is not the frontmost one is an echo
+        // however long it took to arrive. A click is never that: it activates as it focuses.
+        if let window = tracker.window(id),
+           NSWorkspace.shared.frontmostApplication?.processIdentifier != window.pid {
+            return true
+        }
+        guard ProcessInfo.processInfo.systemUptime - raisedAt < Self.raiseEchoWindow else {
+            selfRaised.removeValue(forKey: id)
+            return false
+        }
+        return true
     }
 
     /// The user has let go. The window has been off its tile for the length of the drag, so
@@ -672,6 +749,10 @@ final class Coordinator: WindowTrackerDelegate {
         guard let window = tracker.window(id) else { return }
         workspaces.noteFocus(id)
         focusApplied = id
+        // Before the focus, not after: this raises the tiles a float has stopped being
+        // entitled to cover, and doing it afterwards would raise them over the very window
+        // that is being focused.
+        sinkUnfocusedFloats(workspaces.render())
         WindowMover.focus(window)
         updateBorder()
         refreshStatus()
