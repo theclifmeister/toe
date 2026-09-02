@@ -22,9 +22,13 @@ public enum CommandLabel {
         case .toggleFloating:       return "Cycle floating"
         case .toggleSplit:          return "Toggle split orientation"
         case .swapSplit:            return "Swap the split"
-        case .exec(let line):       return "Run \(ellipsised(line))"
+        case .exec(let line):
+            // The one exec the list can name for you: `SUPER`+`,` read as "Edit the config"
+            // while toe owned the command, and a row that reads `Run open -a "Visual Studio
+            // Code" ~/.config/toe/…` is a worse answer to the same question. The text comes from
+            // the line you bound, not from a command — see `Command.opensConfig`.
+            return command.opensConfig ? "Edit the config" : "Run \(ellipsised(line))"
         case .reload:               return "Reload the config"
-        case .editConfig:           return "Edit the config"
         case .quit:                 return "Quit toe"
         case .menu(let page):
             switch page {

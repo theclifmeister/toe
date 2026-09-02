@@ -23,19 +23,22 @@ as the defaults.
 | `SUPER` + `1`…`9`, `0` | Switch to workspace 1…10 |
 | `SUPER` + `SHIFT` + `1`…`9`, `0` | Move window to workspace and follow it |
 | `SUPER` + `TAB` / `SHIFT`+`TAB` / `CTRL`+`TAB` | Next / previous workspace in use, former workspace |
-| `SUPER` + `ENTER` | New terminal window |
-| `SUPER` + `SHIFT` + `ENTER` | New browser window |
+| `SUPER` + `ENTER` | New terminal window — Ghostty |
+| `SUPER` + `SHIFT` + `ENTER` | New browser window — Safari |
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
 | `SUPER` + `SPACE` | The quick menu — Configure, Learn, Quit |
 | `SUPER` + `K` | Every binding, in a list |
-| `SUPER` + `,` | Edit the config — nano, in a terminal window |
+| `SUPER` + `,` | Edit the config — a VS Code window |
 | `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
 | Drag a tiled window | Swap it with the tile you drag it over |
 
 `SUPER` is **Option (⌥)** — the same physical key position as SUPER on a PC keyboard, and it
 leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab untouched. Configurable.
+
+The last three of those bindings name an application, because an opinion about your terminal is
+still an opinion — see [What the defaults assume](#what-the-defaults-assume).
 
 The focused window gets a gradient border, and everything is driven by a hot-reloaded config
 at `~/.config/toe/toe.toml`.
@@ -78,6 +81,39 @@ separate `homebrew-toe` one. `brew upgrade --cask toe` picks up new releases.
 
 Grant **System Settings → Privacy & Security → Accessibility** when asked. That single
 permission is all toe needs.
+
+### What the defaults assume
+
+The window manager itself needs nothing but that permission: the layout, the workspaces, the
+border, the menu bar item and the quick menu are all toe's own, and the menu's font ships inside
+the app (JetBrainsMono Nerd Font, the one Omarchy's walker resolves `monospace` to). Three of
+the shipped bindings are a different matter — they launch an application, and toe borrowed
+Omarchy's opinion about which one:
+
+| Binding | Opens | If you have not got it |
+|---|---|---|
+| `SUPER` + `ENTER` | [Ghostty](https://ghostty.org) | `brew install --cask ghostty` |
+| `SUPER` + `SHIFT` + `ENTER` | Safari | ships with macOS |
+| `SUPER` + `,` | [Visual Studio Code](https://code.visualstudio.com) | `brew install --cask visual-studio-code` |
+
+Each is one `exec` line in your config and nothing more. toe has no terminal, browser or editor
+of its own — the three names appear once, in the config it writes on first run, and nowhere in
+what it does — and it will not launch anything you did not bind. Point them wherever you like:
+
+```toml
+"super-enter"       = "exec open -na Alacritty"
+"super-shift-enter" = "exec open -na \"Google Chrome\" --args --new-window"
+"super-comma"       = "exec open -a Zed ~/.config/toe/toe.toml"
+```
+
+A binding naming an application you do not have fails quietly: `/bin/sh` runs, `open` reports
+that it cannot find it, and no window appears. Nothing else in toe depends on the press. The one
+knock-on is the quick menu's *Edit configuration* row, which is whichever `exec` mentions
+`toe.toml` — repoint `SUPER`+`,` and the row follows it; remove the binding and the row goes.
+
+The `[[float]]` rules name 1Password, Raycast, System Settings and Activity Monitor, but those
+are only *never tile this* rules. A rule for an application you have not installed costs nothing
+and can stay.
 
 ### Treat your config as code
 
@@ -189,6 +225,13 @@ had to know. *Run on startup* is `SMAppService`, so it appears in System Setting
 Login Items too — and it is left out of the menu entirely where it cannot work: from a build
 directory rather than `/Applications`, or alongside a LaunchAgent that `make start-at-login`
 wrote. The log says which, and what fixes it.
+
+*Edit configuration* runs **your** binding rather than an editor toe picked: it is whichever
+`exec` in your config mentions `toe.toml`, so pointing `SUPER`+`,` at Zed points the menu row at
+Zed, moving it to another key takes the row with it, and removing it removes the row. The
+keybindings list names that same binding *Edit the config* instead of printing the shell line, by
+the same rule. Where neither row can be offered — no such binding, and *Run on startup*
+unavailable — `Configure` is left out too, rather than leading into an empty level.
 
 Typing searches what a row does as well as what it is called — on the keybindings page the name
 is `SUPER`+`W` and the description is *Close window*, so a filter that read only names would have
@@ -344,8 +387,9 @@ rules.
 ## Config
 
 `~/.config/toe/toe.toml` is written on first run and reloaded whenever you save it. `SUPER`+`,`
-opens it in nano, in a Terminal.app window; bind `exec` with your own terminal instead if you
-would rather. If it fails to parse, the running config is kept and the error is named in the
+opens it in Visual Studio Code — an ordinary `exec` binding, the same kind as the one that opens
+a terminal on `SUPER`+`ENTER`, so point it at Zed, TextEdit, or nano in whichever terminal you
+use. toe has no editor of its own. If it fails to parse, the running config is kept and the error is named in the
 menu bar item's tooltip — a typo can never leave you without a keyboard. See
 [`toe.example.toml`](toe.example.toml), and
 [Treat your config as code](#treat-your-config-as-code) for what an `exec` binding can do.
@@ -353,18 +397,19 @@ menu bar item's tooltip — a typo can never leave you without a keyboard. See
 Binding specs parse in both the dash spelling and Omarchy's, so you can paste from either:
 `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
-`editconfig`, `reload`, `quit` and the quick menu are bound in code as well as in the file —
-`SUPER`+`,`, `SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE` and `SUPER`+`K` — so the
+`reload`, `quit` and the quick menu are bound in code as well as in the file —
+`SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE` and `SUPER`+`K` — so the
 ways out exist whether or not your config mentions them. Your config is never rewritten once it is there, so a binding introduced after you
 first ran toe would otherwise never reach you: that is how the menu bar item losing its menu left
 anyone upgrading with no way to quit but `pkill`. A fallback applies only when the command is
 bound nowhere, so rebinding `quit` keeps your key and does not also collect the default, and a
 fallback whose own combination you have already used for something else is dropped rather than
-registered on top of yours.
+registered on top of yours. Opening the config is not on that list: it is an `exec` like any
+other now, and a fallback would have to name an editor toe has no business choosing.
 
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
-`reload`, `editconfig`, `menu`, `keybindings`, `quit`.
+`reload`, `menu`, `keybindings`, `quit`.
 
 The TOML parser is a dependency-free subset: tables, arrays of tables, bare and quoted keys,
 basic and literal strings, numbers, booleans, arrays and inline tables. No multi-line strings

@@ -9,7 +9,8 @@ let defaultConfigText = #"""
 #
 # Reloads automatically when you save. If a line does not parse, the running config is kept
 # and the error is named in the menu bar item's tooltip, so a typo can never leave you
-# keyboardless. SUPER+, opens this file in nano.
+# keyboardless. SUPER+, opens this file in Visual Studio Code — a binding like any other,
+# so point it at the editor you actually use.
 #
 # This file is code, not just settings: an `exec` binding below runs a shell command, and toe
 # picks up a change within about 150 ms of the save. Anything that can write this file can run
@@ -178,9 +179,14 @@ font_size  = 18
 # ── toe itself ────────────────────────────────────────────────────────────────
 # The menu bar item is only the workspace strip — waybar's has nothing behind it either — so
 # these are the way in to everything toe can do to itself.
-# `editconfig` opens this file in nano, in a Terminal.app window. To use your own terminal,
-# bind exec instead:  "exec open -na Ghostty --args -e nano ~/.config/toe/toe.toml"
-"super-comma"   = "editconfig"
+# Editing this file is nothing special — it is an `exec`, the same as the launchers below, and
+# toe has no editor of its own. Whichever exec below mentions toe.toml is the one the quick menu
+# offers as "Edit configuration", so the menu follows this line wherever you point it. It runs
+# through /bin/sh, so ~ expands and any editor works:
+#   "exec open -a Zed ~/.config/toe/toe.toml"
+#   "exec open -e ~/.config/toe/toe.toml"                     # TextEdit, always installed
+#   "exec open -na Ghostty --args -e nano ~/.config/toe/toe.toml"
+"super-comma"   = "exec open -a \"Visual Studio Code\" ~/.config/toe/toe.toml"
 # Saving this file already reloads it; this is the manual way.
 "super-shift-r" = "reload"
 # Puts every window on a hidden workspace back where it came from on the way out.

@@ -6,7 +6,7 @@ import ToeCore
 final class Coordinator: WindowTrackerDelegate {
 
     static let configURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/toe/toe.toml")
+        .appendingPathComponent(".config/toe/" + Config.fileName)
 
     private let workspaces = WorkspaceManager()
     private let tracker = WindowTracker()
@@ -849,9 +849,6 @@ final class Coordinator: WindowTrackerDelegate {
         case .reload:
             loadConfig()
 
-        case .editConfig:
-            openConfigInTerminal()
-
         case .menu(let page):
             quickMenu.toggle(page: page, config: config,
                              usable: workspaces.monitor(id: workspaces.focusedMonitorID)?.usable)
@@ -859,32 +856,6 @@ final class Coordinator: WindowTrackerDelegate {
         case .quit:
             shutDown()
             NSApp.terminate(nil)
-        }
-    }
-
-    /// The config has no window of its own and, since the menu bar item lost its menu, no
-    /// menu item either — so `editconfig` opens it the way you would edit it anyway: a
-    /// terminal with nano in it. Terminal.app rather than the terminal you launch with
-    /// SUPER+ENTER, because it is the one that is always installed; bind `exec` instead if
-    /// you want your own (there is a line for it in the default config).
-    private func openConfigInTerminal() {
-        let shell = "nano '" + Coordinator.configURL.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let quoted = shell
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
-            tell application "Terminal"
-                activate
-                do script "\(quoted)"
-            end tell
-            """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        do {
-            try process.run()
-        } catch {
-            Log.error("editconfig: could not open Terminal: \(error)")
         }
     }
 }
