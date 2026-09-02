@@ -251,21 +251,52 @@ public final class WorkspaceManager {
         // floated window you cannot focus again is a window you have lost. Hyprland's
         // `window_direction_monitor_fallback` defaults to true, so focus crosses monitors.
         var candidates: [(id: WindowID, box: Box)] = []
+        var floatingCandidates: [(id: WindowID, box: Box)] = []
         for wsIndex in visibleWorkspaceIndices {
             guard let w = workspaces[wsIndex] else { continue }
             candidates.append(contentsOf: w.layout.idealBoxes())
             for id in w.floating {
-                if let box = floatingFrames[id] { candidates.append((id: id, box: box)) }
+                if let box = floatingFrames[id] { floatingCandidates.append((id: id, box: box)) }
             }
         }
+        candidates.append(contentsOf: floatingCandidates)
 
-        return DirectionalSearch.windowInDirection(
+        let onTheGrid = DirectionalSearch.windowInDirection(
             from: origin,
             ignoring: source,
             candidates: candidates,
             direction: dir,
             focusHistory: focusHistory
         )
+
+        // A floating window is off the grid: `togglefloating` centres it, so its edges land
+        // inside tiles instead of against them and edge adjacency never names it. Left at
+        // that, a detached window is one only the mouse can get back to. So it competes on
+        // proximity instead, and the nearer centre wins — a window floating between two
+        // tiles is a stop on the way across, not a window you have to step over. Tile to
+        // tile stays exactly Hyprland's grid walk; only a floating window takes this route,
+        // in either role.
+        let sourceIsFloating = ws.floating.contains(source)
+        let nearby = DirectionalSearch.nearestInDirection(
+            from: origin,
+            ignoring: source,
+            candidates: sourceIsFloating ? candidates : floatingCandidates,
+            direction: dir,
+            focusHistory: focusHistory
+        )
+
+        guard let nearby else { return onTheGrid }
+        // A window merely stacked over us lies in no direction; it answers only where the
+        // grid has nothing, so that a float centred over the one tile it left behind is
+        // still a keypress away.
+        guard !nearby.stacked else { return onTheGrid ?? nearby.id }
+        guard let onTheGrid, onTheGrid != nearby.id,
+              let box = candidates.first(where: { $0.id == onTheGrid })?.box
+        else { return nearby.id }
+
+        let dx = box.middle.x - origin.middle.x
+        let dy = box.middle.y - origin.middle.y
+        return (dx * dx + dy * dy).squareRoot() <= nearby.distance ? onTheGrid : nearby.id
     }
 
     /// `swapwindow <dir>` — exchange the focused window with its neighbour, leaving the

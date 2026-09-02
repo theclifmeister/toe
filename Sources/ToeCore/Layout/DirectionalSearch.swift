@@ -69,4 +69,74 @@ public enum DirectionalSearch {
 
         return leaderValue != -1 ? leader : nil
     }
+
+    /// The search floating windows are found with, since they never touch the grid.
+    ///
+    /// `windowInDirection` walks the tiling grid by edge adjacency, and a window floating in
+    /// the middle of the screen sticks to nothing — `togglefloating` centres it, so its edges
+    /// land inside tiles rather than against them. It qualifies here instead: a candidate is
+    /// in `direction` when its centre lies inside the 90° cone opening that way from ours,
+    /// and the nearest centre wins, focus history breaking a tie. The distance comes back
+    /// with the winner so the caller can weigh it against what the grid walk found.
+    ///
+    /// A window stacked right on top of us — a float centred over the single tile it left
+    /// behind, the two centres one point — lies in no direction at all. Rather than strand
+    /// it, it comes back flagged `stacked`, for the caller to use only where nothing else
+    /// answers: it is a last resort, never something that outranks a real neighbour. It is
+    /// exactly that degenerate case, the two centres within `STICKS` of each other, and
+    /// nothing wider: a window merely overlapping ours still lies somewhere, and answering
+    /// with one that sits below and to the left of a press of `up` is worse than not moving.
+    public static func nearestInDirection(
+        from origin: Box,
+        ignoring: WindowID?,
+        candidates: [(id: WindowID, box: Box)],
+        direction: Direction,
+        focusHistory: [WindowID]
+    ) -> (id: WindowID, distance: Double, stacked: Bool)? {
+
+        let a = origin.middle
+        var leader: WindowID?
+        var leaderDistance = Double.infinity
+        var leaderRecency = -1
+        var stacked: WindowID?
+        var stackedRecency = -1
+
+        for candidate in candidates {
+            if let ignoring, candidate.id == ignoring { continue }
+
+            let b = candidate.box.middle
+            let dx = b.x - a.x
+            let dy = b.y - a.y
+            // History is ordered most-recent-first; a window not in it sorts last.
+            let idx = focusHistory.firstIndex(of: candidate.id) ?? focusHistory.count
+            let recency = focusHistory.count - idx
+
+            let along: Double
+            switch direction {
+            case .left:  along = -dx
+            case .right: along = dx
+            case .up:    along = -dy
+            case .down:  along = dy
+            }
+            let across = (direction == .left || direction == .right) ? abs(dy) : abs(dx)
+
+            guard along > 0, along >= across else {
+                if STICKS(dx, 0), STICKS(dy, 0), recency > stackedRecency {
+                    stackedRecency = recency
+                    stacked = candidate.id
+                }
+                continue
+            }
+
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if distance < leaderDistance || (distance == leaderDistance && recency > leaderRecency) {
+                leaderDistance = distance
+                leaderRecency = recency
+                leader = candidate.id
+            }
+        }
+
+        if let leader { return (id: leader, distance: leaderDistance, stacked: false) }
+        return stacked.map { (id: $0, distance: .infinity, stacked: true) }
+    }
 }
