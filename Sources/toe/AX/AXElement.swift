@@ -42,6 +42,24 @@ enum AX {
     static func setGlobalMessagingTimeout() {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), axMessagingTimeout)
     }
+
+    /// Whether the window in front right now is a native-fullscreen one.
+    ///
+    /// Asked of the frontmost application rather than of anything toe tracks, because the
+    /// window that matters here is usually one toe manages nothing for: `isManageable` turns
+    /// fullscreen windows away, so a Safari gone fullscreen is invisible to the tracker while
+    /// being exactly the window the border must not draw over.
+    ///
+    /// A fullscreen window owns its own Space, and the border panel is `.canJoinAllSpaces`
+    /// with `.fullScreenAuxiliary` — deliberately, so it survives the Space it sits on being
+    /// switched away and back — which is also what lets it paint the previous Space's outline
+    /// straight across a fullscreen one. This is the question that stops it.
+    static var frontmostWindowIsFullscreen: Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let element = application(app.processIdentifier)
+        guard let focused = element.elementValue(kAXFocusedWindowAttribute) else { return false }
+        return focused.isFullscreen
+    }
 }
 
 extension AXUIElement {
