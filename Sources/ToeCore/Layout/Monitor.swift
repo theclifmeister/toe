@@ -22,8 +22,8 @@ public struct Monitor: Equatable, Sendable {
 /// drags it back until enough of its title bar is reachable, which leaves a wide strip of it
 /// visible. Asking for x = -20000 lands at x = -(width - 40).
 ///
-/// The trick — the same one AeroSpace uses — is to place the window's *top-left corner* on the
-/// monitor's bottom corner. The title bar is then still technically on screen, so nothing is
+/// The trick is to place the window's *top-left corner* on the monitor's bottom corner. The
+/// title bar is then still technically on screen, so nothing is
 /// clamped, and all that remains visible is a single pixel.
 public enum Stash {
 

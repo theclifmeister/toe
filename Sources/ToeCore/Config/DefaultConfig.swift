@@ -5,7 +5,7 @@
 ///                                   preserve_split = true, force_split = 2
 ///   default/hypr/bindings/tiling.conf → the bindings below
 let defaultConfigText = #"""
-# toe — The Omarchy Experience
+# toe — The Opinionated Experience
 #
 # Reloads automatically when you save. If a line does not parse, the running config is kept
 # and the error is named in the menu bar item's tooltip, so a typo can never leave you

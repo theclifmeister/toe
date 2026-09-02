@@ -39,7 +39,7 @@ public final class DwindleNode {
     ///
     /// With `preserve_split` on, the orientation chosen at insertion is never revisited —
     /// that is what makes Hyprland's dwindle stable as windows come and go, and it is the
-    /// behaviour AeroSpace's container normalization destroys.
+    /// behaviour i3-style container normalization destroys.
     public func recalcSizePosRecursive(
         _ opts: DwindleOptions,
         horizontalOverride: Bool = false,

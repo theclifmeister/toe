@@ -193,7 +193,7 @@ public final class DwindleLayout {
     // MARK: - Rearranging
 
     /// Port of `switchWindows` — Omarchy's `swapwindow`. Only the window payloads move;
-    /// the tree shape is untouched. This is the behaviour AeroSpace cannot reproduce.
+    /// the tree shape is untouched, so a swap never reshuffles the rest of the layout.
     public func swap(_ a: WindowID, _ b: WindowID) {
         guard a != b, let na = nodes[a], let nb = nodes[b] else { return }
         na.window = b
