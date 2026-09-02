@@ -2,9 +2,9 @@ import AppKit
 import ApplicationServices
 import ToeCore
 
-/// `_AXUIElementGetWindow` is private but stable, and is how every macOS tiler (AeroSpace,
-/// yabai) turns an AXUIElement into a CGWindowID. Resolved with dlsym so a missing symbol
-/// degrades instead of failing to launch.
+/// `_AXUIElementGetWindow` is private but stable, and is the only way to turn an AXUIElement
+/// into a CGWindowID. Resolved with dlsym so a missing symbol degrades instead of failing
+/// to launch.
 private let axGetWindow: (@convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError)? = {
     guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow") else {
         return nil
@@ -19,7 +19,7 @@ private let axGetWindow: (@convention(c) (AXUIElement, UnsafeMutablePointer<CGWi
 /// window creation and focus change, and `WindowMover.setFrame` five more per tile. The macOS
 /// default timeout is measured in seconds, so one unresponsive application — an Electron app
 /// mid-startup, a process stopped in a debugger — would stall hotkeys, the menu bar strip and
-/// the layout for every other app along with it. yabai and AeroSpace cap it for this reason.
+/// the layout for every other app along with it. Hence the cap.
 ///
 /// A quarter of a second is far more than a healthy app needs to answer, and short enough that
 /// a hung one costs a frame rather than a freeze.

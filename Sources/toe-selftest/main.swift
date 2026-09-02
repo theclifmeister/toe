@@ -1137,7 +1137,7 @@ h.test("binding specs parse in both spellings") { t in
         guard let (m, code, name) = try? BindingParser.parse(s, superKey: .option) else { return nil }
         return "\(m.description)|\(code)|\(name)"
     }
-    t.equal(parse("SUPER SHIFT, LEFT"), parse("super-shift-left"), "Omarchy and AeroSpace spellings agree")
+    t.equal(parse("SUPER SHIFT, LEFT"), parse("super-shift-left"), "Omarchy and dash spellings agree")
     t.equal(parse("alt-shift-1"), parse("super+shift+1"), "'+' separators and alt/super alias")
     t.equal(parse("cmd-alt-ctrl-shift-f"), "ctrl-alt-shift-cmd|3|f", "all four modifiers")
     t.equal(parse("super-minus")?.hasSuffix("|27|minus"), true, "'minus' is a key, not a modifier prefix")

@@ -1,12 +1,16 @@
-# Toe — The Omarchy Experience
+# Toe — The Opinionated Experience
 
-A small native macOS window manager that reproduces [Omarchy](https://omarchy.org)'s
-window management: Hyprland's **dwindle** layout, Omarchy's key bindings, ten workspaces,
-and nothing else.
+A small native macOS window manager: Hyprland's **dwindle** layout, ten workspaces, and
+nothing else. One layout, one set of key bindings, nothing to agonise over — that is the
+opinion, and it is the whole product.
 
-AeroSpace gets most of the way there, but it is i3-style — explicit splits, with container
-normalization that flattens the tree dwindle depends on — so the one thing it cannot
-reproduce is the layout itself. toe's tiler is a direct port of Hyprland's
+The opinions are borrowed, mind. `TOE` first stood for *The Omarchy Experience*, and toe
+still cribs every default from [Omarchy](https://omarchy.org) — the Linux that had these
+opinions first and, being an entire distribution, had a great many more of them.
+
+The layout is the part nothing else on macOS gets right. The tilers here are i3-style —
+explicit splits, with container normalization that flattens the tree dwindle depends on — so
+the one thing they cannot reproduce is dwindle itself. toe's tiler is a direct port of Hyprland's
 `CHyprDwindleLayout`, with Omarchy's settings (`preserve_split = true`, `force_split = 2`)
 as the defaults.
 
@@ -124,7 +128,7 @@ by `make test` against hand-computed Hyprland output:
 
 **Workspaces.** macOS has no API for putting a window on a virtual desktop without private
 SkyLight calls, so hidden workspaces park their windows far off-screen and restore their exact
-frames on return — the same approach AeroSpace takes. The trade-off is that stashed windows
+frames on return. The trade-off is that stashed windows
 remain visible to Cmd-Tab and Mission Control, and Cmd-Tabbing to one can pull it back onto the
 current workspace.
 
@@ -286,8 +290,8 @@ menu bar item's tooltip — a typo can never leave you without a keyboard. See
 [`toe.example.toml`](toe.example.toml), and
 [Treat your config as code](#treat-your-config-as-code) for what an `exec` binding can do.
 
-Binding specs parse in both spellings, so you can paste from an AeroSpace config or an Omarchy
-one: `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
+Binding specs parse in both the dash spelling and Omarchy's, so you can paste from either:
+`"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
 `editconfig`, `reload` and `quit` are bound in code as well as in the file — `SUPER`+`,`,
 `SUPER`+`SHIFT`+`R` and `SUPER`+`SHIFT`+`Q` — so the ways out exist whether or not your config

@@ -36,7 +36,7 @@ public enum BindingParser {
         "alt": .option, "opt": .option, "option": .option,
     ]
 
-    /// Parses both spellings so bindings can be pasted from either an AeroSpace config
+    /// Parses both spellings so bindings can be pasted from either a dash-style config
     /// (`"alt-shift-1"`) or an Omarchy one (`"SUPER SHIFT, 1"`).
     ///
     /// `super` resolves to whatever `general.super_key` says — Option by default, which is
