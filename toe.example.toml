@@ -72,6 +72,13 @@ swallow_dock_swipes = true
 # alone: it is the way out of a fullscreen app now that swiping is not.
 disable_expose_shortcuts = true
 
+# A click on bare wallpaper — the gaps between the tiles count — sweeps every window off the sides
+# of the screen, the windows parked off-screen on hidden workspaces along with them, until you
+# click again. macOS decides that inside WindowManager rather than from an event a tap could
+# swallow, so toe switches the setting itself (the one System Settings › Desktop & Dock calls
+# "Click wallpaper to show desktop") and puts it back the way it found it when it quits.
+disable_wallpaper_click = true
+
 # ⌘H and ⌘⌥H take an application's windows out of the layout without closing them — the tree
 # reflows around the gap and SUPER+arrows cannot reach them again, because they are no longer on
 # any workspace. toe puts a hidden application straight back.

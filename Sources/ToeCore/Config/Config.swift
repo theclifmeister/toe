@@ -63,6 +63,10 @@ public struct MiscConfig: Equatable {
     /// does, and a symbolic hotkey is resolved inside the window server, so the tap cannot reach
     /// them.
     public var disableExposeShortcuts: Bool = true
+    /// A click on bare wallpaper sweeps every window off the sides of the screen, tiles and the
+    /// off-screen stash alike, and macOS decides that inside WindowManager rather than from an
+    /// event any tap could swallow — so it is switched off through its preference instead.
+    public var disableWallpaperClick: Bool = true
     /// `⌘H` takes an application's windows out of the layout with no way to reach them again.
     public var preventHiding: Bool = true
     /// Whether the layout is written to disk and put back on the next launch. See
@@ -306,6 +310,13 @@ public struct Config: Equatable {
                     config.misc.disableExposeShortcuts = v
                 } else {
                     config.warnings.append("misc.disable_expose_shortcuts: must be true or false, using \(config.misc.disableExposeShortcuts)")
+                }
+            }
+            if let raw = m["disable_wallpaper_click"] {
+                if let v = raw.boolValue {
+                    config.misc.disableWallpaperClick = v
+                } else {
+                    config.warnings.append("misc.disable_wallpaper_click: must be true or false, using \(config.misc.disableWallpaperClick)")
                 }
             }
             if let raw = m["prevent_hiding"] {

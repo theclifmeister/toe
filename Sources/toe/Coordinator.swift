@@ -72,6 +72,9 @@ final class Coordinator: WindowTrackerDelegate {
         // than quit may have left Mission Control's shortcut switched off. Give it back before
         // anything else, so the config below decides from a known-good baseline.
         SymbolicHotkeys.repairAfterUncleanExit()
+        // Same reasoning, same shape: the reveal-desktop preference is the window server's, not
+        // toe's, so a copy that was killed rather than quit may have left it switched off.
+        WallpaperClick.repairAfterUncleanExit()
         writeDefaultConfigIfMissing()
         loadConfig()
 
@@ -274,8 +277,8 @@ final class Coordinator: WindowTrackerDelegate {
         }
     }
 
-    /// The two macOS behaviours toe takes over, applied at startup and on every reload. Neither
-    /// needs Accessibility, but both are gated on `isManaging` so they arrive together with the
+    /// The macOS behaviours toe takes over, applied at startup and on every reload. None of them
+    /// needs Accessibility, but all are gated on `isManaging` so they arrive together with the
     /// tap rather than flickering on before toe can actually manage anything.
     private func applyMiscSettings() {
         guard isManaging else { return }
@@ -284,6 +287,12 @@ final class Coordinator: WindowTrackerDelegate {
             SymbolicHotkeys.disable(SymbolicHotkeys.expose)
         } else {
             SymbolicHotkeys.restoreAll()
+        }
+
+        if config.misc.disableWallpaperClick {
+            WallpaperClick.disable()
+        } else {
+            WallpaperClick.restore()
         }
 
         if config.misc.preventHiding {
@@ -643,9 +652,11 @@ final class Coordinator: WindowTrackerDelegate {
         // WindowServer, so it is taken down deliberately rather than left to process death.
         dockSwipes.stop()
         hideBlocker.stop()
-        // The only one of the three that would otherwise outlive toe: the window server keeps a
-        // symbolic hotkey switched off until something switches it back on.
+        // The two that would otherwise outlive toe: the window server keeps a symbolic hotkey
+        // switched off until something switches it back on, and the reveal-desktop preference is
+        // written to the user's settings.
         SymbolicHotkeys.restoreAll()
+        WallpaperClick.restore()
     }
 
     private func unstashEverything() {

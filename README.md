@@ -158,6 +158,19 @@ replayed in reverse, which is what repairs a crash, a `kill -9` or a logout. Sho
 alone, because its gesture is a thumb-and-three-finger spread rather than a dock swipe — the key
 and the gesture stay consistent. `misc.disable_expose_shortcuts = false` leaves all of them alone.
 
+**The wallpaper click.** Clicking a bare patch of wallpaper sweeps every window off the sides of
+the screen and leaves them there until the next click — and with `gaps_out` set, bare wallpaper is
+one missed window edge away at any time. It takes the off-screen stash along with the tiles, so
+it lands toe in the same place a swipe up would. There is nothing to swallow here: WindowManager
+decides it from a click that belongs to the wallpaper rather than to any window, and it is a
+setting rather than a gesture. So toe writes the setting — `EnableStandardClickToShowDesktop` in
+`com.apple.WindowManager`, the one System Settings › Desktop & Dock calls "Click wallpaper to show
+desktop" — and, since that outlives the process just as a symbolic hotkey does, journals it to
+`~/.local/state/toe/wallpaper-click` first. An absent key is journalled as absent and restored by
+removing the key again, so a setting you never set is not left holding a value you never chose.
+A reveal you had already switched off yourself is left alone. `misc.disable_wallpaper_click = false`
+hands the click back.
+
 **Hiding.** `⌘H` and `⌘⌥H` take an application's windows out of the layout without closing them:
 the tree reflows around the gap, and `SUPER`+arrows cannot reach them again because they are no
 longer on any workspace. Omarchy has no equivalent, so toe puts a hidden application straight
