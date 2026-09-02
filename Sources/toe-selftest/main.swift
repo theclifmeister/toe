@@ -315,6 +315,50 @@ h.test("movetoworkspace follows the window") { t in
     t.equal(wm.workspaceIndex(of: 2), 1, "w2 moved anyway")
 }
 
+h.test("workspace next skips the workspaces nothing is on") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    wm.addWindow(1)                                   // workspace 1
+    wm.switchTo(workspace: 4); wm.addWindow(2)
+    wm.switchTo(workspace: 9); wm.addWindow(3)
+    wm.switchTo(workspace: 1)
+
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 4, "next is 4, not 2 — 2 and 3 are empty")
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 9, "then 9")
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 1, "and round to 1")
+    wm.switchToRelativeWorkspace(-1)
+    t.equal(wm.focusedWorkspaceIndex, 9, "prev walks the same ring backwards")
+}
+
+h.test("workspace next stays put when nothing else is in use") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1)
+
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 1, "one workspace in use, so the press does nothing")
+}
+
+h.test("workspace next reaches a workspace another monitor is showing") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    let leftWS = wm.activeWorkspace[1]!
+    let rightWS = wm.activeWorkspace[2]!
+    wm.switchTo(workspace: leftWS)
+    wm.addWindow(1)
+
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, rightWS, "the other display's workspace counts, empty or not")
+}
+
 h.test("a floating focus falls back to the window under the pointer") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])

@@ -34,16 +34,16 @@ final class StatusItem: NSObject {
     private let markerSide: CGFloat = 8
     private let markerRadius: CGFloat = 2.5
 
-    /// Omarchy dims empty workspaces with `opacity: 0.5`. The menu bar is translucent over
-    /// whatever wallpaper is behind it, and half opacity there is too faint to read, so toe
-    /// dims less far.
+    /// Omarchy dims empty workspaces with `opacity: 0.5`, and so does toe: the ones you are
+    /// using should be the ones your eye lands on, and the rest are there to be counted past
+    /// rather than read.
     ///
     /// Built from a dynamic provider rather than `secondaryLabelColor` so it resolves when it
     /// is drawn, against the menu bar's own appearance — which is not always the app's, since
     /// macOS darkens the menu bar to suit the desktop picture.
     private static let dimLabelColor = NSColor(name: "toeDimLabel") { appearance in
         let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.7)
+        return (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.5)
     }
 
     override init() {
