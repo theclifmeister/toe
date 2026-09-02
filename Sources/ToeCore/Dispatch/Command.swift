@@ -20,14 +20,30 @@ public enum Command: Equatable {
     case swapSplit
     case exec(String)
     case reload
-    /// Opens the config file in a terminal, in nano. toe has no settings window and, since
-    /// the menu bar item lost its menu, no other way in.
-    case editConfig
     /// The quick menu, and the keybindings list it holds. One case with a page rather than two
     /// cases: the keybindings view *is* the menu on another page — same panel, same filter, same
     /// keys — so two cases would give `dispatch` two arms with one body between them.
     case menu(MenuPage)
     case quit
+}
+
+public extension Command {
+
+    /// True for the `exec` that opens the config file.
+    ///
+    /// There is no `editconfig` command any more — opening the file is an `exec` like the ones
+    /// that launch a terminal or a browser — so the two places that want to know which binding
+    /// edits your config read the line rather than a command name: any `exec` that mentions the
+    /// config file is taken to be it. `MenuModel.configOpener` finds the menu row that way, and
+    /// `CommandLabel` names the row in the keybindings list that way, so both follow your config
+    /// instead of a command toe used to own.
+    ///
+    /// A shell line that merely touches the file for some other reason matches too. That is the
+    /// price of not asking you to declare which binding is the editor one.
+    var opensConfig: Bool {
+        guard case .exec(let line) = self else { return false }
+        return line.contains(Config.fileName)
+    }
 }
 
 public enum CommandError: Error, CustomStringConvertible {
@@ -80,7 +96,6 @@ public enum CommandParser {
         case "togglesplit":                 return .toggleSplit
         case "swapsplit":                   return .swapSplit
         case "reload":                      return .reload
-        case "editconfig", "config":        return .editConfig
         case "quit", "exit":                return .quit
 
         // Spelled the way `omarchy-menu` and `omarchy-menu keybindings` are invoked, so a

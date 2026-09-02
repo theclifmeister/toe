@@ -137,6 +137,12 @@ public struct FloatRule: Equatable {
 }
 
 public struct Config: Equatable {
+
+    /// The file a config is read from, by name. `Coordinator` owns the path; ToeCore needs only
+    /// this much of it, to recognise the `exec` binding that opens it — see
+    /// `MenuModel.configOpener`.
+    public static let fileName = "toe.toml"
+
     public var superKey: Modifiers = .option
     public var gaps: Gaps = Gaps(inner: 5, outer: 10)
     public var dwindle: DwindleOptions = DwindleOptions()
@@ -162,15 +168,19 @@ public struct Config: Equatable {
     /// losing its menu left them with no way to quit toe but `pkill`.
     ///
     /// Deliberately only the escape hatches. A fallback that covered every binding would be a
-    /// second config competing with yours; these three exist so that a config which forgot them
+    /// second config competing with yours; these exist so that a config which forgot them
     /// cannot leave you stuck, in the same spirit as keeping the last good config when a new one
     /// will not parse.
+    ///
+    /// Editing the config is not one of them, though it used to be. It is an `exec` binding now,
+    /// like the ones that open a terminal or a browser, and a fallback would have to name an
+    /// editor toe has no business choosing — and would put itself back on `SUPER`+`,` every time
+    /// you moved that binding to another key.
     public static let fallbackBindings: [(spec: String, command: Command)] = [
-        ("super-comma", .editConfig),
         ("super-shift-r", .reload),
         ("super-shift-q", .quit),
-        // The menu holds the escape hatches now — Quit and Edit configuration are rows in it —
-        // so it belongs on this list by the same reasoning that put them here.
+        // The menu holds the escape hatches now — Quit is a row in it — so it belongs on this
+        // list by the same reasoning that put them here.
         ("super-space", .menu(.root)),
         ("super-k", .menu(.keybindings)),
     ]

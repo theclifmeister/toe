@@ -106,7 +106,7 @@ final class QuickMenu {
 
         let items = page == .keybindings
             ? MenuModel.keybindings(config.bindings, superKey: config.superKey)
-            : MenuModel.root(loginItem: LoginItem.state())
+            : MenuModel.root(loginItem: LoginItem.state(), bindings: config.bindings)
         state = MenuState(root: items, visibleRows: 10)
 
         frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -190,15 +190,16 @@ final class QuickMenu {
         case .toggleLoginItem:
             // Deliberately does not close: the value flips under the cursor, as omarchy-menu's
             // toggles do, so you can see what you just did.
-            let items = MenuModel.root(loginItem: LoginItem.toggle())
-            if case .submenu(let setup)? = items.first?.action {
-                state?.replaceLevel(with: setup)
-            }
+            let setup = MenuModel.configure(loginItem: LoginItem.toggle(),
+                                            bindings: config.bindings)
+            // The level itself rather than the root's first row: Configure is not always the
+            // first row, and on the day the toggle answers `unavailable` it is not there at all.
+            if !setup.isEmpty { state?.replaceLevel(with: setup) }
             layoutAndRender()
         case .run(let command):
-            // Closed first, and dispatched a turn later: `editConfig` brings Terminal forward
-            // and `quit` tears the process down, and both want the panel gone and the keyboard
-            // handed back before they begin.
+            // Closed first, and dispatched a turn later: an `exec` brings another application
+            // forward and `quit` tears the process down, and both want the panel gone and the
+            // keyboard handed back before they begin.
             close()
             DispatchQueue.main.async { [weak self] in self?.onCommand?(command) }
         }

@@ -7,7 +7,7 @@ import ToeCore
 /// a filled rounded square, every other one its own digit. Clicking a workspace switches to
 /// it, as Omarchy's `on-click: activate` does, and that is the whole of it: waybar's strip
 /// has no menu behind it, so neither has this one. Everything the menu used to offer lives
-/// on a key binding instead — `editconfig`, `reload`, `quit`.
+/// on a key binding instead — `reload`, `quit`, and the `exec` that opens the config.
 final class StatusItem: NSObject {
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

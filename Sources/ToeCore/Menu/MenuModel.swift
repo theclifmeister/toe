@@ -70,18 +70,41 @@ public enum LoginItemState: Equatable, Sendable {
 /// row that shows a remembered value instead of launchd's is a row that will eventually lie.
 public enum MenuModel {
 
-    public static func root(loginItem: LoginItemState) -> [MenuItem] {
-        var configure: [MenuItem] = []
-        if let startup = startup(loginItem) { configure.append(startup) }
-        configure.append(MenuItem(title: "Edit configuration", icon: .pencil,
-                                  action: .run(.editConfig)))
-        return [
-            MenuItem(title: "Configure", icon: .gear, action: .submenu(configure)),
-            MenuItem(title: "Learn", icon: .book, action: .submenu([
-                MenuItem(title: "Keybindings", icon: .keyboard, action: .page(.keybindings)),
-            ])),
-            MenuItem(title: "Quit", icon: .power, action: .run(.quit)),
-        ]
+    public static func root(loginItem: LoginItemState, bindings: [Binding]) -> [MenuItem] {
+        var items: [MenuItem] = []
+        // Configure can come out empty — neither of its rows is guaranteed — and a row that
+        // leads into an empty level is worse than no row, so the parent goes with it.
+        let configure = configure(loginItem: loginItem, bindings: bindings)
+        if !configure.isEmpty {
+            items.append(MenuItem(title: "Configure", icon: .gear, action: .submenu(configure)))
+        }
+        items.append(MenuItem(title: "Learn", icon: .book, action: .submenu([
+            MenuItem(title: "Keybindings", icon: .keyboard, action: .page(.keybindings)),
+        ])))
+        items.append(MenuItem(title: "Quit", icon: .power, action: .run(.quit)))
+        return items
+    }
+
+    /// The Configure level. Also built on its own, by the menu, when throwing the startup toggle
+    /// rebuilds the level under the cursor.
+    public static func configure(loginItem: LoginItemState, bindings: [Binding]) -> [MenuItem] {
+        var rows: [MenuItem] = []
+        if let startup = startup(loginItem) { rows.append(startup) }
+        if let opener = configOpener(in: bindings) {
+            rows.append(MenuItem(title: "Edit configuration", icon: .pencil,
+                                 action: .run(opener.command)))
+        }
+        return rows
+    }
+
+    /// The binding that opens the config, if you have one — the row cannot name an editor of its
+    /// own without being exactly the hardcoding that was taken out, so it reads your config
+    /// instead. Point the binding at Zed and the row opens Zed; move it to another key and the
+    /// row follows it there; take the binding out and the row goes too, rather than the menu
+    /// offering an editor you never chose. `Command.opensConfig` is the rule, shared with the
+    /// label the keybindings list gives the same binding.
+    public static func configOpener(in bindings: [Binding]) -> Binding? {
+        bindings.first { $0.command.opensConfig }
     }
 
     /// nil where the toggle cannot work — the row is left out rather than shown dimmed beside a
@@ -136,7 +159,7 @@ public enum MenuModel {
         case .workspace:        return 5
         case .killActive, .toggleFloating, .toggleSplit, .swapSplit: return 6
         case .menu:             return 7
-        case .editConfig, .reload, .quit: return 8
+        case .reload, .quit:    return 8
         case .exec:             return 9
         }
     }

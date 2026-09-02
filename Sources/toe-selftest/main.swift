@@ -868,7 +868,9 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-shift-v"), nil, "SUPER+SHIFT+V is no longer bound")
 
     // Everything the menu bar item used to offer, now that it offers nothing.
-    t.equal(binding("super-comma")?.command, .editConfig, "SUPER+, edits the config")
+    t.equal(binding("super-comma")?.command,
+            .exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml"),
+            "SUPER+, opens the config in an editor, as an ordinary exec you can repoint")
     t.equal(binding("super-shift-r")?.command, .reload, "SUPER+SHIFT+R reloads it")
     t.equal(binding("super-shift-q")?.command, .quit, "SUPER+SHIFT+Q quits toe")
     t.equal(binding("super-space")?.command, .menu(.root), "SUPER+SPACE opens the quick menu")
@@ -963,9 +965,12 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     // rewritten, so without a fallback there is no way to quit toe but `pkill`.
     let old = try Config.parse("[binds]\n\"super-w\" = \"killactive\"\n")
     t.equal(binding(old, .quit)?.source, "super-shift-q", "quit is bound")
-    t.equal(binding(old, .editConfig)?.source, "super-comma", "editconfig is bound")
     t.equal(binding(old, .reload)?.source, "super-shift-r", "reload is bound")
     t.equal(old.warnings, [], "silently, with no warnings")
+    // Opening the config is not on the list: it is an exec of your own now, and a fallback
+    // would have to pick an editor for you.
+    t.equal(old.bindings.contains { $0.source == "super-comma" }, false,
+            "and SUPER+, is left free rather than bound to somebody's editor")
 
     // Your binding wins, and does not also collect the default.
     let rebound = try Config.parse("[binds]\n\"super-shift-x\" = \"quit\"\n")
@@ -974,14 +979,14 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
 
     // A fallback whose combination you already used for something else is dropped, not
     // registered on top of yours — the system would refuse the duplicate anyway.
-    let clash = try Config.parse("[binds]\n\"super-comma\" = \"killactive\"\n")
-    t.equal(binding(clash, .editConfig), nil, "a taken fallback key is left alone")
-    t.equal(binding(clash, .killActive)?.source, "super-comma", "and stays yours")
-    t.equal(binding(clash, .quit)?.source, "super-shift-q", "the others still land")
+    let clash = try Config.parse("[binds]\n\"super-shift-q\" = \"killactive\"\n")
+    t.equal(binding(clash, .quit), nil, "a taken fallback key is left alone")
+    t.equal(binding(clash, .killActive)?.source, "super-shift-q", "and stays yours")
+    t.equal(binding(clash, .reload)?.source, "super-shift-r", "the others still land")
 
-    // The shipped config binds all three itself, so nothing should be duplicated.
+    // The shipped config binds both itself, so nothing should be duplicated.
     let shipped = try Config.parse(Config.defaultTOML)
-    for command in [Command.quit, .editConfig, .reload] {
+    for command in [Command.quit, .reload] {
         t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
                 "the shipped config binds \(command) exactly once")
     }
@@ -1541,16 +1546,16 @@ h.test("an empty query keeps every item in the order it was written") { t in
 }
 
 h.test("the filter matches a subsequence rather than a substring") { t in
-    t.equal(FuzzyFilter.rank("ecfg", in: ["Edit configuration"]).map(\.index), [0],
+    t.equal(FuzzyFilter.rank("kbnd", in: ["Keybindings"]).map(\.index), [0],
             "letters in order with gaps between them still match, the way walker's does")
-    t.equal(FuzzyFilter.rank("gfce", in: ["Edit configuration"]).count, 0,
+    t.equal(FuzzyFilter.rank("dnbk", in: ["Keybindings"]).count, 0,
             "the same letters out of order do not")
     t.equal(FuzzyFilter.rank("zz", in: ["Setup", "Learn"]).count, 0,
             "and what matches nothing is dropped, not merely ranked last")
 }
 
 h.test("typing puts the selection back at the top") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.move(by: 2)
     t.equal(m.selection, 2, "moved down two")
     m.type("q")
@@ -1559,7 +1564,7 @@ h.test("typing puts the selection back at the top") { t in
 }
 
 h.test("a submenu is entered, backed out of, and clears the query on the way in") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .on), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .on, bindings: []), visibleRows: 10)
     t.equal(m.prompt, "Go…", "walker's placeholder at the root")
     m.type("configure")
     t.equal(m.visible.count, 1, "one row matches 'configure'")
@@ -1567,13 +1572,13 @@ h.test("a submenu is entered, backed out of, and clears the query on the way in"
     t.equal(m.query, "", "the query does not follow you into the submenu")
     t.equal(m.breadcrumb, ["Configure"], "the level is named")
     t.equal(m.prompt, "Configure…", "and the placeholder says where you are")
-    t.equal(m.visible.map(\.title), ["Run on startup", "Edit configuration"], "Omarchy's two rows")
+    t.equal(m.visible.map(\.title), ["Run on startup"], "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
     t.equal(m.pop(), .closed, "and closes at the root")
 }
 
 h.test("backspace eats the query, then leaves the submenu") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.type("learn")
     t.equal(m.activate(), .pushed, "into Learn")
     m.type("ke")
@@ -1611,14 +1616,14 @@ h.test("an empty field is not a match") { t in
 }
 
 h.test("typing searches the whole tree, not the level in front of you") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.type("startup")
     t.equal(m.visible.map(\.title), ["Run on startup"],
             "found two levels down without anyone having to go there")
     t.equal(m.visible.first?.subtitle, "Configure", "and the row says where it lives")
     t.equal(m.activate(), .toggleLoginItem, "acting on it needs no descent either")
 
-    var deep = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var deep = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     deep.type("keyb")
     t.equal(deep.visible.map(\.title), ["Keybindings"], "the same for the other branch")
     t.equal(deep.visible.first?.subtitle, "Learn", "named by its path")
@@ -1626,7 +1631,7 @@ h.test("typing searches the whole tree, not the level in front of you") { t in
 }
 
 h.test("a branch found by searching is still a branch") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.type("learn")
     t.equal(m.visible.map(\.title), ["Learn"], "the branch itself matches, not only its children")
     t.equal(m.visible.first?.subtitle, nil, "a row at the level you are on has no path to show")
@@ -1634,7 +1639,7 @@ h.test("a branch found by searching is still a branch") { t in
 }
 
 h.test("an empty query is one level at a time, with no paths") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.type("z")
     t.equal(m.visible.count, 0, "nothing matches")
     m.backspace()
@@ -1644,13 +1649,13 @@ h.test("an empty query is one level at a time, with no paths") { t in
 }
 
 h.test("the rows lead where the menu says they do") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     t.equal(m.visible.map(\.title), ["Configure", "Learn", "Quit"], "the whole menu, bare minimum")
     t.equal(m.visible.map(\.leadsOn), [true, true, false], "two lead on, Quit acts")
     m.type("quit")
     t.equal(m.activate(), .run(.quit), "and Quit dispatches rather than descending")
 
-    var learn = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var learn = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     learn.type("learn")
     _ = learn.activate()
     t.equal(learn.activate(), .page(.keybindings), "Learn holds the keybindings page")
@@ -1658,28 +1663,66 @@ h.test("the rows lead where the menu says they do") { t in
 
 h.test("the startup row reads the state it is handed") { t in
     func startup(_ state: LoginItemState) -> MenuItem? {
-        guard case .submenu(let setup)? = MenuModel.root(loginItem: state).first?.action else {
-            return nil
-        }
+        let root = MenuModel.root(loginItem: state, bindings: [])
+        // By title rather than by position: Configure is the first row only while it is there
+        // at all, and the case below is the one where it is not.
+        guard case .submenu(let setup)? = root.first(where: { $0.title == "Configure" })?.action
+        else { return nil }
         return setup.first
     }
     t.equal(startup(.on)?.value, "on", "the row shows launchd's answer, not a preference")
     t.equal(startup(.on)?.action, .toggleLoginItem, "and pressing it flips it")
     t.equal(startup(.off)?.value, "off", "the other way round")
-    t.equal(startup(.unavailable("needs /Applications"))?.title, "Edit configuration",
+    t.equal(startup(.unavailable("needs /Applications"))?.title, nil,
             "where it cannot work the row is not there at all — a switch you can see but not "
             + "throw is worse than one you were never offered")
 }
 
-h.test("Configure keeps working with the startup row gone") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications")),
-                      visibleRows: 10)
-    m.type("configure")
-    t.equal(m.activate(), .pushed, "into Configure")
-    t.equal(m.visible.map(\.title), ["Edit configuration"], "one row, and it is the one that works")
-    t.equal(m.activate(), .run(.editConfig), "which still does what it says")
+h.test("the Edit configuration row is your binding, not toe's idea of an editor") { t in
+    func rows(_ toml: String, loginItem: LoginItemState = .off) throws -> [MenuItem] {
+        MenuModel.configure(loginItem: loginItem, bindings: try Config.parse(toml).bindings)
+    }
 
-    var searching = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications")),
+    // The shipped config: the row runs exactly the line the file bound, character for character.
+    let shipped = try rows(Config.defaultTOML)
+    t.equal(shipped.map(\.title), ["Run on startup", "Edit configuration"], "both rows")
+    t.equal(shipped.last?.action,
+            .run(.exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml")),
+            "and it opens the config the way your config says to")
+
+    // Point it at another editor and the row follows — nothing here names one.
+    let zed = try rows("[binds]\n\"super-comma\" = \"exec open -a Zed ~/.config/toe/toe.toml\"\n")
+    t.equal(zed.last?.action, .run(.exec("open -a Zed ~/.config/toe/toe.toml")),
+            "the menu opens Zed because the config does")
+
+    // On another key, too: the row is found by what it does, not by where it is bound.
+    let moved = try rows("[binds]\n\"super-shift-c\" = \"exec open -e ~/.config/toe/toe.toml\"\n")
+    t.equal(moved.last?.action, .run(.exec("open -e ~/.config/toe/toe.toml")),
+            "SUPER+SHIFT+C is as good as SUPER+, — the row follows the binding")
+
+    // An exec that opens something else is not an editor for this file.
+    let unrelated = try rows("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n")
+    t.equal(unrelated.map(\.title), ["Run on startup"],
+            "no binding that opens the config, no row offering to")
+    t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
+                           bindings: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n").bindings)
+                .map(\.title),
+            ["Learn", "Quit"],
+            "and with the startup row gone as well, Configure has nothing left to hold")
+
+    // The row is there even when the startup toggle cannot be.
+    let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
+    t.equal(buildDir.map(\.title), ["Edit configuration"],
+            "the one row that works is still offered")
+}
+
+h.test("Configure goes with the startup row, being all that was left in it") { t in
+    let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
+                      visibleRows: 10)
+    t.equal(m.visible.map(\.title), ["Learn", "Quit"],
+            "a row that leads into an empty level is worse than no row")
+
+    var searching = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
                               visibleRows: 10)
     searching.type("startup")
     t.equal(searching.visible.count, 0, "and the search cannot turn it up either")
@@ -1702,7 +1745,7 @@ h.test("the second column never runs into the title") { t in
 }
 
 h.test("the selection clamps at both ends") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.move(by: -1)
     t.equal(m.selection, 0, "up from the top stays at the top — a list is not a carousel")
     m.move(by: 99)
@@ -1747,7 +1790,7 @@ h.test("every command has a label a reader could use") { t in
         .workspace(.index(3)), .workspace(.next), .workspace(.previous), .workspace(.former),
         .moveToWorkspace(5, follow: true), .moveToWorkspace(5, follow: false),
         .killActive, .toggleFloating, .toggleSplit, .swapSplit,
-        .exec("open -a Safari"), .reload, .editConfig, .quit,
+        .exec("open -a Safari"), .reload, .quit,
         .menu(.root), .menu(.keybindings),
     ]
     for command in all {
@@ -1757,6 +1800,24 @@ h.test("every command has a label a reader could use") { t in
     }
     t.equal(CommandLabel.describe(.moveFocus(.left)), "Move focus left", "a sample of the prose")
     t.equal(CommandLabel.describe(.menu(.keybindings)), "Show the keybindings", "and the new one")
+}
+
+h.test("the binding that opens the config is named rather than spelled out") { t in
+    // It read "Edit the config" while toe owned an `editconfig` command. The label is derived
+    // from the line you bound now, so it survives the command's removal without hardcoding one.
+    t.equal(CommandLabel.describe(.exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml")),
+            "Edit the config", "the shipped binding, named")
+    t.equal(CommandLabel.describe(.exec("open -a Zed ~/.config/toe/toe.toml")),
+            "Edit the config", "and so is yours, whichever editor it names")
+    t.equal(CommandLabel.describe(.exec("open -a Ghostty")), "Run open -a Ghostty",
+            "an exec that opens something else still shows what it runs")
+
+    // The same rule the menu row is found by, so the two can never disagree.
+    let c = try Config.parse(Config.defaultTOML)
+    t.equal(MenuModel.configOpener(in: c.bindings)?.source, "super-comma",
+            "and it is the binding the menu offers as Edit configuration")
+    t.equal(c.bindings.filter { $0.command.opensConfig }.count, 1,
+            "exactly one binding in the shipped config opens it")
 }
 
 h.test("a long exec line cannot set the width of every row") { t in
