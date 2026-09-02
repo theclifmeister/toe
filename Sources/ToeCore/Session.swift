@@ -63,10 +63,16 @@ public struct SessionSnapshot: Codable, Equatable {
 public struct FloatingFrame: Codable, Equatable {
     public var window: WindowID
     public var frame: Box
+    /// Where the window is on `togglefloating`'s cycle, so the next press after a restart
+    /// carries on round it rather than starting over. Absent for a window the app layer
+    /// floated on its own, and for files written before the cycle existed — both of which
+    /// mean the same thing, that the next press tiles the window.
+    public var stage: Int?
 
-    public init(window: WindowID, frame: Box) {
+    public init(window: WindowID, frame: Box, stage: Int? = nil) {
         self.window = window
         self.frame = frame
+        self.stage = stage
     }
 }
 

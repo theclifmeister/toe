@@ -50,6 +50,10 @@ radius       = -1
 # this fraction of the display, so every floating window is the same shape.
 width  = 0.70
 height = 0.80
+# SUPER+T again grows it to this instead of tiling it; the third press puts it back in the
+# tree. Set these to width/height above for a plain two-state toggle.
+large_width  = 0.80
+large_height = 0.90
 # ...except that no floating window is ever wider than this many times its own height. On a
 # 32:9 ultrawide a plain 70% would be a letterbox; on a laptop this never comes into play.
 max_aspect_ratio = 1.6

@@ -352,10 +352,46 @@ h.test("toggling a window out of the tree and back") { t in
                "a drag is not pulled back to the centre on the next render")
 
     wm.toggleFloating(2)
-    t.equal(wm.isFloating(2), false, "w2 is tiled again")
+    t.equal(wm.isFloating(2), true, "the second press keeps w2 floating")
+    t.equalBox(wm.render().floating[2], box(151, 49, 1210, 884),
+               "re-centred at the larger size, 80% wide by 90% tall")
+
+    wm.toggleFloating(2)
+    t.equal(wm.isFloating(2), false, "and the third press tiles it again")
     t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 1), box(0, 0, 756, 982), "w1 back to the left half")
     t.equalBox(wm.workspaces[1]?.layout.idealBox(of: 2), box(756, 0, 756, 982), "w2 back to the right half")
     t.equal(wm.render().floating.isEmpty, true, "nothing floats any more")
+}
+
+h.test("togglefloating cycles through both floating sizes before it tiles") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.noteFocus(2)
+
+    wm.toggleFloating(2)
+    t.equalBox(wm.render().floating[2], box(227, 98, 1058, 786), "first press: 70% by 80%")
+    wm.toggleFloating(2)
+    t.equalBox(wm.render().floating[2], box(151, 49, 1210, 884), "second press: 80% by 90%")
+    wm.toggleFloating(2)
+    t.equal(wm.isFloating(2), false, "third press: back in the tree")
+    wm.toggleFloating(2)
+    t.equalBox(wm.render().floating[2], box(227, 98, 1058, 786),
+               "and round again from the first size")
+
+    // Both sizes are the config's, and setting them the same is the old two-state toggle.
+    wm.floatingSize.largeWidth = 0.70
+    wm.floatingSize.largeHeight = 0.80
+    wm.toggleFloating(2)
+    t.equalBox(wm.render().floating[2], box(227, 98, 1058, 786), "the second size can be the first")
+
+    // A window the app layer floated of its own accord never had a size from toe, so the
+    // first press tiles it rather than resizing it.
+    wm.addWindow(3, floating: true)
+    wm.floatingFrames[3] = box(200, 150, 640, 400)
+    wm.noteFocus(3)
+    wm.toggleFloating(3)
+    t.equal(wm.isFloating(3), false, "an adopted floating window tiles on the first press")
 }
 
 h.test("a floating frame is left alone unless it is stranded") { t in
@@ -414,7 +450,8 @@ h.test("a floating window is not a letterbox on an ultrawide") { t in
 
     wm.floatingSize.maxAspectRatio = 100                 // effectively uncapped
     wm.noteFocus(2)
-    wm.toggleFloating(2); wm.toggleFloating(2)           // re-float to re-centre
+    // Right round the cycle — larger, tiled, floating again — to re-centre at the first size.
+    wm.toggleFloating(2); wm.toggleFloating(2); wm.toggleFloating(2)
     t.equalBox(wm.render().floating[2], box(768, 141, 3584, 1128), "uncapped, it is the full 70%")
 }
 
@@ -600,6 +637,17 @@ h.test("only tiled windows are dragged, and only onto tiles") { t in
 
 // MARK: - Config
 
+h.test("the second floating size is configurable, and a bad one warns") { t in
+    let c = try Config.parse("[floating]\nlarge_width = 0.5\nlarge_height = 0.6\n")
+    t.equal(c.floating.largeWidth, 0.5, "large_width is read")
+    t.equal(c.floating.largeHeight, 0.6, "large_height is read")
+    t.equal(c.warnings, [], "no warnings for a fraction in range")
+
+    let bad = try Config.parse("[floating]\nlarge_height = 1.4\n")
+    t.equal(bad.floating.largeHeight, 0.90, "out of range keeps the default")
+    t.equal(bad.warnings.contains { $0.contains("floating.large_height") }, true, "and says so")
+}
+
 h.test("the shipped default config parses cleanly") { t in
     let c = try Config.parse(Config.defaultTOML)
     t.equal(c.warnings, [], "no warnings")
@@ -613,6 +661,8 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(c.floatRules.count, 5, "float rules")
     t.equal(c.floating.width, 0.70, "floating width fraction")
     t.equal(c.floating.height, 0.80, "floating height fraction")
+    t.equal(c.floating.largeWidth, 0.80, "the cycle's second width fraction")
+    t.equal(c.floating.largeHeight, 0.90, "the cycle's second height fraction")
     t.equal(c.floating.maxAspectRatio, 1.6, "floating max aspect ratio")
     t.equal(c.gestures.swallowDockSwipes, true, "dock swipes are swallowed by default")
     t.equal(c.misc.disableExposeShortcuts, true, "Ctrl+Up and Ctrl+Down are disabled by default")
@@ -984,6 +1034,9 @@ h.test("a restart keeps windows on their own workspaces and monitors") { t in
     t.equal(restored.workspaceIndex(of: 3), 7, "w3 is back on the workspace nothing is showing")
     t.equal(restored.isFloating(2), true, "w2 is still floating")
     t.equalBox(restored.render().floating[2], box(100, 100, 400, 300), "at the frame it was left at")
+    restored.toggleFloating(2)
+    t.equal(restored.isFloating(2), true,
+            "and at the first stage of the cycle, so the next press grows it rather than tiling it")
     t.equal(restored.render().stashed, [3], "and the hidden workspace is still hidden")
     t.equal(restored.activeWorkspace, wm.activeWorkspace, "each monitor shows what it showed")
     t.equal(restored.focusedMonitorID, wm.focusedMonitorID, "on the monitor that had focus")
