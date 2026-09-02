@@ -91,9 +91,8 @@ final class WindowTracker {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               app.processIdentifier != ownPID else { return }
         let element = AX.application(app.processIdentifier)
-        if let focused = element.value(kAXFocusedWindowAttribute) {
-            // swiftlint:disable:next force_cast
-            if let id = (focused as! AXUIElement).windowID, windows[id] != nil {
+        if let focused = element.elementValue(kAXFocusedWindowAttribute) {
+            if let id = focused.windowID, windows[id] != nil {
                 delegate?.windowFocused(id)
             }
         }
@@ -223,9 +222,7 @@ final class WindowTracker {
 
         case kAXApplicationActivatedNotification:
             let app = AX.application(element.pid)
-            if let focused = app.value(kAXFocusedWindowAttribute) {
-                // swiftlint:disable:next force_cast
-                let focusedElement = focused as! AXUIElement
+            if let focusedElement = app.elementValue(kAXFocusedWindowAttribute) {
                 let window = adopt(focusedElement, pid: element.pid)
                 if let id = window?.id ?? focusedElement.windowID, windows[id] != nil {
                     delegate?.windowFocused(id)

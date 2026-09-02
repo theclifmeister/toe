@@ -55,6 +55,34 @@ extension AXUIElement {
     func string(_ attribute: String) -> String? { value(attribute) as? String }
     func bool(_ attribute: String) -> Bool? { value(attribute) as? Bool }
 
+    /// An attribute value, checked against the CoreFoundation type it is supposed to hold.
+    ///
+    /// Every one of these values crosses a process boundary from an application toe does not
+    /// control, and nothing obliges that application to answer `kAXFocusedWindowAttribute`
+    /// with a window, or `kAXPositionAttribute` with a point. `as?` cannot do the checking:
+    /// AX types are CoreFoundation types, Swift's conditional cast to one is unchecked, and
+    /// the compiler rejects it outright as always succeeding. `CFGetTypeID` is the real test,
+    /// so the two casts below are reached only once the type is established — which is what
+    /// keeps a misbehaving application from taking toe down with it.
+    private func checked(_ attribute: String, is typeID: CFTypeID) -> CFTypeRef? {
+        guard let raw = value(attribute), CFGetTypeID(raw) == typeID else { return nil }
+        return raw
+    }
+
+    /// An attribute that is supposed to hold another element.
+    func elementValue(_ attribute: String) -> AXUIElement? {
+        guard let raw = checked(attribute, is: AXUIElementGetTypeID()) else { return nil }
+        // swiftlint:disable:next force_cast
+        return (raw as! AXUIElement)
+    }
+
+    /// An attribute that is supposed to hold a packed `AXValue` — a point, a size, a range.
+    func axValue(_ attribute: String) -> AXValue? {
+        guard let raw = checked(attribute, is: AXValueGetTypeID()) else { return nil }
+        // swiftlint:disable:next force_cast
+        return (raw as! AXValue)
+    }
+
     @discardableResult
     func set(_ attribute: String, _ newValue: CFTypeRef) -> Bool {
         AXUIElementSetAttributeValue(self, attribute as CFString, newValue) == .success
@@ -89,18 +117,18 @@ extension AXUIElement {
     }
 
     var position: CGPoint? {
-        guard let raw = value(kAXPositionAttribute) else { return nil }
+        // AXValueGetValue answers false for an AXValue packing something other than a point,
+        // so the pair of checks covers both a wrong CFType and a wrong payload inside it.
+        guard let raw = axValue(kAXPositionAttribute) else { return nil }
         var point = CGPoint.zero
-        // swiftlint:disable:next force_cast
-        guard AXValueGetValue(raw as! AXValue, .cgPoint, &point) else { return nil }
+        guard AXValueGetValue(raw, .cgPoint, &point) else { return nil }
         return point
     }
 
     var size: CGSize? {
-        guard let raw = value(kAXSizeAttribute) else { return nil }
+        guard let raw = axValue(kAXSizeAttribute) else { return nil }
         var s = CGSize.zero
-        // swiftlint:disable:next force_cast
-        guard AXValueGetValue(raw as! AXValue, .cgSize, &s) else { return nil }
+        guard AXValueGetValue(raw, .cgSize, &s) else { return nil }
         return s
     }
 
