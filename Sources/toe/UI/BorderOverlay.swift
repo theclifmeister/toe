@@ -68,8 +68,11 @@ final class BorderOverlay {
         band.cornerCurve = .continuous              // macOS's squircle, not a circular arc
         panel.contentView = view
 
-        // Resolves the system corner radius here, on the main thread, and records it once.
-        Log.info("system window corner radius: \(SystemCornerRadius.points) pt (\(SystemCornerRadius.source))")
+        // Resolves the fallback corner radius here, on the main thread, and records it once,
+        // along with whether the window server can be asked for per-window radii at all.
+        Log.info("window corner radius: per-window query "
+            + (WindowCornerRadius.isAvailable ? "available" : "unavailable")
+            + ", falling back to \(SystemCornerRadius.points) pt (\(SystemCornerRadius.source))")
     }
 
     func apply(_ newConfig: BorderConfig) {
@@ -86,10 +89,11 @@ final class BorderOverlay {
     }
 
     /// `box` is the window's own frame in AX coordinates; the border is drawn just outside it.
+    /// `id` is the window the border belongs to, which is what the corner radius is asked about.
     ///
     /// `depth` has no default on purpose: both call sites decide it, and a default is how a
     /// future one would silently go back to drawing over whatever is in front of it.
-    func show(around box: Box, depth: Depth) {
+    func show(around box: Box, of id: WindowID, depth: Depth) {
         guard config.enabled, config.width > 0 else { hide(); return }
 
         let w = config.width
@@ -99,8 +103,12 @@ final class BorderOverlay {
         let rect = Coordinates.toCocoa(outer)
         guard rect.width > 0, rect.height > 0 else { hide(); return }
 
+        // The window's own radius, not one number for every window: macOS 26 rounds Safari at
+        // 26 pt and Ghostty at 16, so a system-wide value is wrong for most windows. The system
+        // value is the fallback for the ones that do not report one.
+        let radius = WindowCornerRadius.points(for: id) ?? SystemCornerRadius.points
         let windowRadius = BorderGeometry.effectiveRadius(configured: config.radius,
-                                                          system: Double(SystemCornerRadius.points),
+                                                          system: Double(radius),
                                                           box: box)
 
         CATransaction.begin()

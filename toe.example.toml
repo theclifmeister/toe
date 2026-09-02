@@ -35,7 +35,9 @@ width        = 2
 active_start = "#33ccffee"
 active_end   = "#00ff99ee"
 angle        = 45
-# -1 follows the system window corner radius, 0 is square, or set an explicit value.
+# -1 follows each window's own corner radius, asking the window server for it and falling
+# back to the system value for windows that do not report one. 0 is square, or set an
+# explicit value.
 radius       = -1
 
 [floating]

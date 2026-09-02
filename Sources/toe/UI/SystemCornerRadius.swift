@@ -1,8 +1,13 @@
 import AppKit
 import ObjectiveC
 
-/// The corner radius macOS rounds a window to. No public API reports it, and on macOS 26 no
-/// private one does either, so this is part measurement, part lookup.
+/// The corner radius macOS rounds a window to, system-wide. No public API reports it, and on
+/// macOS 26 no private one does either, so this is part measurement, part lookup.
+///
+/// This is the *fallback*, not the answer. macOS 26 gives every window its own radius, and
+/// `WindowCornerRadius` asks the window server for the one that belongs to the window being
+/// outlined; this value is what the border falls back on when that query has nothing to say —
+/// below macOS 26, where the per-window symbols do not exist, and for windows that report 0.
 ///
 /// On macOS 26 the window server rounds every window itself, and AppKit's own accessors have
 /// not followed: `NSWindow._cornerRadius`, `_effectiveCornerRadius`, `NSThemeFrame._cornerRadius`
