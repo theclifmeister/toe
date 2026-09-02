@@ -82,7 +82,10 @@ public enum DirectionalSearch {
     /// A window stacked right on top of us — a float centred over the single tile it left
     /// behind, the two centres one point — lies in no direction at all. Rather than strand
     /// it, it comes back flagged `stacked`, for the caller to use only where nothing else
-    /// answers: it is a last resort, never something that outranks a real neighbour.
+    /// answers: it is a last resort, never something that outranks a real neighbour. It is
+    /// exactly that degenerate case, the two centres within `STICKS` of each other, and
+    /// nothing wider: a window merely overlapping ours still lies somewhere, and answering
+    /// with one that sits below and to the left of a press of `up` is worse than not moving.
     public static func nearestInDirection(
         from origin: Box,
         ignoring: WindowID?,
@@ -118,7 +121,7 @@ public enum DirectionalSearch {
             let across = (direction == .left || direction == .right) ? abs(dy) : abs(dx)
 
             guard along > 0, along >= across else {
-                if candidate.box.contains(a) || origin.contains(b), recency > stackedRecency {
+                if STICKS(dx, 0), STICKS(dy, 0), recency > stackedRecency {
                     stackedRecency = recency
                     stacked = candidate.id
                 }

@@ -495,6 +495,19 @@ h.test("movefocus reaches a floating window stacked over the only tile left") { 
     t.equal(wm.windowInDirection(.left, from: 2), 1, "and hands focus back")
 }
 
+h.test("a floating window overlapping a tile is not a direction of its own") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3); wm.addWindow(4)
+    wm.noteFocus(4)
+    wm.toggleFloating(4)                    // 70%x80%, centred: it covers all three tiles' centres
+
+    t.equal(wm.windowInDirection(.up, from: 2), nil,
+            "w4's centre is below w2's and to the left; covering w2 does not put it above")
+    t.equal(wm.windowInDirection(.right, from: 2), nil, "nor to its right")
+    t.equal(wm.windowInDirection(.left, from: 2), 4, "it is where it actually is")
+}
+
 h.test("a floating window never outranks the tile a grid step points at") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
