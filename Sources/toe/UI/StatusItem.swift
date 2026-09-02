@@ -33,14 +33,39 @@ final class StatusItem: NSObject {
     // i.e. a ~15px slot per workspace. These are its equivalents at menu bar size.
     private let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     private let gap: CGFloat = 7
-    private let markerSide: CGFloat = 8
-    private let markerRadius: CGFloat = 2.5
-    /// toe's mark, a little taller than the digits' cap height so it reads as a logo rather
-    /// than a letter that has wandered in from the strip.
-    private let markHeight: CGFloat = 11
+    /// Everything on the strip is set to the digits' cap height and stands on the baseline —
+    /// the mark, the markers, and the digits themselves — so the row has one top edge and one
+    /// bottom edge rather than three of each.
+    ///
+    /// Rounded **up** to the half point, never down. Cap height is 9.16pt, which is 18.32 device
+    /// pixels: snapping that down to 9pt throws away the top third of a pixel, and the digits
+    /// keep it — SF's `1` covers that row 62% and its round digits overshoot to 99%, against 50%
+    /// for a shape that stopped at 18. The difference is exactly the one pixel that makes a
+    /// drawn glyph sit visibly lower than the type beside it.
+    private var capBox: CGFloat { (font.capHeight * 2).rounded(.up) / 2 }
+    /// Omarchy's `nf-md-square_rounded`, at that height. It used to be 8pt centred on the cap
+    /// height, which left it floating a pixel clear of the baseline and a pixel short of the
+    /// digits' tops — and made the mark beside it read as sitting low when it was not.
+    private var markerSide: CGFloat { capBox }
+    /// The 2.5-on-8 rounding of the original square, kept in proportion.
+    private var markerRadius: CGFloat { markerSide * 2.5 / 8 }
+    /// The mark is a capital T, so it is set like one: cap height exactly, sitting on the
+    /// baseline. Anything taller has to be centred on something, and centring a letter on the
+    /// cap height of its neighbours puts it above their tops and below their baseline at once —
+    /// which reads as a misalignment however carefully the centring is done.
+    private var markHeight: CGFloat { capBox }
     /// The T's bounding box in `scripts/make-icon.swift` is `tWidth` by `tHeight` of the icon's
     /// shape, so the mark keeps that proportion here rather than being squared off.
-    private var markWidth: CGFloat { (markHeight * 0.52 / 0.60).rounded() }
+    private var markWidth: CGFloat { snap(markHeight * 0.52 / 0.60) }
+    /// Half a point, which is a whole pixel on every display toe supports. Strokes two points
+    /// wide have to land on the grid or they render as three grey ones.
+    private func snap(_ value: CGFloat) -> CGFloat { (value * 2).rounded() / 2 }
+
+    /// AppKit lands a text attachment's image half a device pixel above the baseline. Measured,
+    /// not assumed: without this the mark and the markers rendered with their top and bottom
+    /// rows at half coverage while the digits beside them were solid, which is exactly what
+    /// reads as a drawn glyph sitting a pixel low next to type.
+    private let attachmentNudge: CGFloat = -0.25
 
     /// Omarchy dims empty workspaces with `opacity: 0.5`, and so does toe: the ones you are
     /// using should be the ones your eye lands on, and the rest are there to be counted past
@@ -121,8 +146,8 @@ final class StatusItem: NSObject {
     private var markPiece: NSAttributedString {
         let attachment = NSTextAttachment()
         attachment.image = mark()
-        attachment.bounds = NSRect(x: 0, y: (font.capHeight - markHeight) / 2,
-                                   width: markWidth, height: markHeight)
+        // The baseline, less the half-pixel an attachment is otherwise offset by.
+        attachment.bounds = NSRect(x: 0, y: attachmentNudge, width: markWidth, height: markHeight)
         let piece = NSMutableAttributedString(attachment: attachment)
         piece.append(spacer)
         return piece
@@ -138,8 +163,8 @@ final class StatusItem: NSObject {
         case .focused, .visible:
             let attachment = NSTextAttachment()
             attachment.image = marker(filled: item.marker == .focused, dim: item.dim)
-            // Centre the square on the digits' cap height rather than the baseline.
-            attachment.bounds = NSRect(x: 0, y: (font.capHeight - markerSide) / 2,
+            // Set like the digit it replaces: on the baseline, at the digits' height.
+            attachment.bounds = NSRect(x: 0, y: attachmentNudge,
                                        width: markerSide, height: markerSide)
             return NSAttributedString(attachment: attachment)
         }
@@ -158,9 +183,12 @@ final class StatusItem: NSObject {
     /// it would be a solid blob. And the proportions here are the icon's own, read off
     /// `scripts/make-icon.swift`, so the two stay one design rather than two drawings of it.
     ///
-    /// This is the icon's small-size representation, which that script already defines: under
-    /// 128px it drops the gutter and thickens the stem by 1.22, because a gutter a quarter of a
-    /// pixel wide is grey mud and a stem scaled straight down vanishes beside the crossbar.
+    /// The gutter goes, as it does in that script under 128px: a gap a quarter of a pixel wide
+    /// is grey mud rather than a seam. The stem thickening that goes with it there does *not*,
+    /// though — it exists to hold the stem up against a crossbar sitting on a tile, and here
+    /// there is no tile and the neighbours are light digits, where a stem half again as wide as
+    /// the crossbar reads as a different weight of type. Dropped, the two strokes come out equal,
+    /// which is what the icon's own proportions ask for at every size that can afford them.
     ///
     /// `labelColor` rather than white, resolved at draw time like the workspace markers: macOS
     /// darkens the menu bar to suit the desktop picture, and a hardcoded white goes invisible
@@ -169,12 +197,12 @@ final class StatusItem: NSObject {
         let image = NSImage(size: NSSize(width: markWidth, height: markHeight),
                             flipped: false) { rect in
             NSColor.labelColor.setFill()
-            let crossbarHeight = (rect.height * 0.24).rounded()
-            let stemWidth = (rect.width * 0.28 * 1.22).rounded()
+            let crossbarHeight = self.snap(rect.height * 0.24)
+            let stemWidth = self.snap(rect.width * 0.28)
             let radius: CGFloat = 0.5
             let crossbar = NSRect(x: rect.minX, y: rect.maxY - crossbarHeight,
                                   width: rect.width, height: crossbarHeight)
-            let stem = NSRect(x: (rect.midX - stemWidth / 2).rounded(), y: rect.minY,
+            let stem = NSRect(x: self.snap(rect.midX - stemWidth / 2), y: rect.minY,
                               width: stemWidth, height: rect.height - crossbarHeight)
             NSBezierPath(roundedRect: crossbar, xRadius: radius, yRadius: radius).fill()
             NSBezierPath(roundedRect: stem, xRadius: radius, yRadius: radius).fill()
