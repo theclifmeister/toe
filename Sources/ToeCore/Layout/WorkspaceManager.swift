@@ -52,8 +52,8 @@ public final class WorkspaceManager {
     public private(set) var focusHistory: [WindowID] = []
     /// Previous workspace on the focused monitor, for `workspace previous`.
     private var previousWorkspace: [UInt32: Int] = [:]
-    /// Frames of floating windows, supplied by the app layer so directional search has an
-    /// origin box for them.
+    /// Frames of floating windows, kept current by the app layer so a float stays where the
+    /// user last put it — what `floatingBox` renders, and what the session file remembers.
     public var floatingFrames: [WindowID: Box] = [:]
     /// Where each window is on `togglefloating`'s cycle: 1 is the first floating size, 2 the
     /// larger one, and a window with no entry is either tiled or floating because the app
@@ -240,63 +240,82 @@ public final class WorkspaceManager {
     // MARK: - Commands
 
     /// `movefocus <dir>` — returns the window that should receive focus.
+    ///
+    /// Two different searches, because a workspace holds two different kinds of window.
+    ///
+    /// Tiles are laid out in space, and the walk between them is Hyprland's exactly: edge
+    /// adjacency, most recently focused breaking a tie, crossing monitors.
+    ///
+    /// Detached windows are not in that space at all. `togglefloating` centres every one of
+    /// them, so two of a size land exactly on top of each other and no arrow can mean "the one
+    /// underneath this one" — geometry has nothing left to say about them. They are a list
+    /// instead, in a stable order, walked forward and back, which is reversible by
+    /// construction: whatever a direction does, its opposite undoes.
+    ///
+    /// The two meet at the edge of the grid. A direction with no tile that way lands in the
+    /// list, at whichever end it arrives from, and walking off either end of the list returns
+    /// to the tile the focus came from — so holding down one arrow goes round tile, list,
+    /// tile, and every direction behaves the same way.
     public func windowInDirection(_ dir: Direction, from id: WindowID? = nil) -> WindowID? {
         guard let source = id ?? focusedWindow,
               let index = workspaceIndex(of: source),
-              let ws = workspaces[index],
-              let origin = ws.layout.idealBox(of: source) ?? floatingFrames[source]
+              let ws = workspaces[index]
         else { return nil }
 
-        // Candidates: every window on a *visible* workspace, floating ones included — a
-        // floated window you cannot focus again is a window you have lost. Hyprland's
-        // `window_direction_monitor_fallback` defaults to true, so focus crosses monitors.
+        if ws.floating.contains(source) { return stepThroughDetached(on: ws, from: source, dir) }
+
+        guard let origin = ws.layout.idealBox(of: source) else { return nil }
+
+        // Every tile on a *visible* workspace, and only tiles: Hyprland's
+        // `window_direction_monitor_fallback` defaults to true, so the walk crosses monitors.
         var candidates: [(id: WindowID, box: Box)] = []
-        var floatingCandidates: [(id: WindowID, box: Box)] = []
         for wsIndex in visibleWorkspaceIndices {
             guard let w = workspaces[wsIndex] else { continue }
             candidates.append(contentsOf: w.layout.idealBoxes())
-            for id in w.floating {
-                if let box = floatingFrames[id] { floatingCandidates.append((id: id, box: box)) }
-            }
         }
-        candidates.append(contentsOf: floatingCandidates)
 
-        let onTheGrid = DirectionalSearch.windowInDirection(
+        if let onTheGrid = DirectionalSearch.windowInDirection(
             from: origin,
             ignoring: source,
             candidates: candidates,
             direction: dir,
             focusHistory: focusHistory
-        )
+        ) { return onTheGrid }
 
-        // A floating window is off the grid: `togglefloating` centres it, so its edges land
-        // inside tiles instead of against them and edge adjacency never names it. Left at
-        // that, a detached window is one only the mouse can get back to. So it competes on
-        // proximity instead, and the nearer centre wins — a window floating between two
-        // tiles is a stop on the way across, not a window you have to step over. Tile to
-        // tile stays exactly Hyprland's grid walk; only a floating window takes this route,
-        // in either role.
-        let sourceIsFloating = ws.floating.contains(source)
-        let nearby = DirectionalSearch.nearestInDirection(
-            from: origin,
-            ignoring: source,
-            candidates: sourceIsFloating ? candidates : floatingCandidates,
-            direction: dir,
-            focusHistory: focusHistory
-        )
+        // Nothing that way on the grid. What lies past its edge is this workspace's detached
+        // windows: one you cannot reach with the keyboard is one you have lost.
+        let detached = detachedList(on: ws)
+        return dir.isForward ? detached.first : detached.last
+    }
 
-        guard let nearby else { return onTheGrid }
-        // A window merely stacked over us lies in no direction; it answers only where the
-        // grid has nothing, so that a float centred over the one tile it left behind is
-        // still a keypress away.
-        guard !nearby.stacked else { return onTheGrid ?? nearby.id }
-        guard let onTheGrid, onTheGrid != nearby.id,
-              let box = candidates.first(where: { $0.id == onTheGrid })?.box
-        else { return nearby.id }
+    /// The workspace's detached windows, in a stable order.
+    ///
+    /// By window id, which is the order they were opened in. It needs no bookkeeping of its
+    /// own, it survives a restart — the session file already sorts them the same way — and a
+    /// window keeps its place in it when another is floated or tiled. A list that reshuffled
+    /// under the focus would be no better than the geometry it replaces.
+    private func detachedList(on ws: Workspace) -> [WindowID] { ws.floating.sorted() }
 
-        let dx = box.middle.x - origin.middle.x
-        let dy = box.middle.y - origin.middle.y
-        return (dx * dx + dy * dy).squareRoot() <= nearby.distance ? onTheGrid : nearby.id
+    /// One step along that list.
+    ///
+    /// Off either end is the way back to the tiles, rather than the dead stop the edge of the
+    /// grid is: a list hanging off one tile has no far side to be stranded on, and stopping
+    /// there made the two directions behave differently for no reason the user could see.
+    private func stepThroughDetached(on ws: Workspace,
+                                     from source: WindowID,
+                                     _ dir: Direction) -> WindowID? {
+        let list = detachedList(on: ws)
+        guard let here = list.firstIndex(of: source) else { return nil }
+        let next = dir.isForward ? here + 1 : here - 1
+        guard list.indices.contains(next) else { return tileToComeBackTo(on: ws) }
+        return list[next]
+    }
+
+    /// Where leaving the list puts the focus: the tile it came in from. With nothing in the
+    /// history to go back to — a workspace whose tiles have never held the focus — the first
+    /// tile on it, rather than nowhere.
+    private func tileToComeBackTo(on ws: Workspace) -> WindowID? {
+        focusHistory.first { ws.layout.contains($0) } ?? ws.layout.windowIDs.first
     }
 
     /// `swapwindow <dir>` — exchange the focused window with its neighbour, leaving the

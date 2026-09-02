@@ -115,9 +115,10 @@ by `make test` against hand-computed Hyprland output:
 - Dragging a tiled window swaps it with whichever tile the pointer crosses, live, and keeps
   going for as long as you hold it — Hyprland's `switchWindows` under the pointer, the mouse
   equivalent of `SUPER+SHIFT+arrow`.
-- Directional focus is **edge adjacency**, not nearest-centre: a window qualifies only if its
-  opposing edge lines up with yours within 2px, computed on un-gapped node boxes. Ties go to
-  the most recently focused window.
+- Directional focus between tiles is **edge adjacency**, not nearest-centre: a window qualifies
+  only if its opposing edge lines up with yours within 2px, computed on un-gapped node boxes.
+  Ties go to the most recently focused window. Detached windows are off the grid entirely and
+  are walked as a list — see **Floating windows**.
 
 ## Design notes
 
@@ -250,9 +251,26 @@ so dragging it afterwards sticks: toe writes a
 floating frame only when it actually changes and never re-asserts it, so a floating window is
 never fought the way a tile is. If the display it was last on has been unplugged, it is centred
 on the display that remains rather than clamped against an edge. It is raised when you float it
-and again whenever it is focused, but the Accessibility API offers no persistent always-on-top:
-activate a tiled window afterwards and it can cover the floating one. Floating windows stay
-reachable with `SUPER`+arrows.
+and again whenever it is focused, and it drops behind the tiles it covers the moment the focus
+moves on — so cycling with `SUPER`+arrows never lands you on a tile half-hidden by a window you
+have already left. Hyprland keeps a float above the tiles whatever has the focus; the
+Accessibility API has a raise action and no lower, so the way down is to raise what the float
+covers, and only the tiles it really overlaps are touched. Tiles never overlap each other, so
+re-ordering those among themselves is invisible. Activating an application brings all of its
+windows forward with it, float included, so the stack is checked against the window server
+rather than remembered — a float that comes back up goes straight back down, and one that is
+already at the bottom is left alone. Floating windows stay reachable with
+`SUPER`+arrows, and they are reached as a **list** rather than by where they are. Two of a size
+are centred identically, so they land exactly on top of each other, and no arrow can mean "the
+one underneath this one" — geometry has nothing to say about them. So they are not on the grid
+at all: they are the workspace's detached windows in the order they were opened, and a direction
+with no tile that way lands in that list, at whichever end it arrives from. From there the same
+direction walks along it and the opposite direction walks back, and off either end is the tile
+the focus came in from — so holding one arrow down goes round tile, detached windows, tile, and
+all four directions behave alike. Two detached windows are two presses past the last tile, and
+going back is going out reversed: every step has an exact inverse, which is the thing proximity
+could never give. Tile to tile is untouched by any of this — that is Hyprland's walk, edge
+adjacency and all, and it never answers with a detached window.
 
 **Windows toe leaves alone**: dialogs, sheets, palettes, minimized and natively-fullscreen (see
 **Dock swipes** for the one thing that changes about living in one)

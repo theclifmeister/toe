@@ -499,70 +499,94 @@ h.test("a floating window is not a letterbox on an ultrawide") { t in
     t.equalBox(wm.render().floating[2], box(768, 141, 3584, 1128), "uncapped, it is the full 70%")
 }
 
-h.test("movefocus reaches a floating window") { t in
+/// Two tiles side by side and two detached windows, exactly on top of each other and of
+/// different sizes — the arrangement geometry could never separate.
+private func listWorkspace() -> WorkspaceManager {
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
-    wm.addWindow(1); wm.addWindow(2)                 // left half / right half
+    wm.addWindow(1); wm.addWindow(2)                    // left half | right half
+    wm.addWindow(3, floating: true); wm.addWindow(4, floating: true)
+    wm.floatingFrames[3] = box(227, 98, 1058, 786)
+    wm.floatingFrames[4] = box(151, 49, 1211, 885)      // over w3, larger, centres half a point apart
+    wm.noteFocus(1)
+    return wm
+}
+
+h.test("detached windows are a list past the edge of the grid") { t in
+    let wm = listWorkspace()
+
+    t.equal(wm.windowInDirection(.right), 2, "the grid first: w2 is the tile to w1's right")
+    wm.noteFocus(2)
+    t.equal(wm.windowInDirection(.right), 3, "nothing to w2's right on the grid, so the list")
+    wm.noteFocus(3)
+    t.equal(wm.windowInDirection(.right), 4, "then the next detached window, whatever it looks like")
+    wm.noteFocus(4)
+    t.equal(wm.windowInDirection(.right), 2,
+            "and off the end is back to the tile it came from, so one arrow held down goes round")
+    wm.noteFocus(2)
+    t.equal(wm.windowInDirection(.right), 3, "round again")
+}
+
+h.test("walking the list back is walking it forward, reversed") { t in
+    let wm = listWorkspace()
+    wm.noteFocus(2); wm.noteFocus(3); wm.noteFocus(4)   // out along the list
+
+    t.equal(wm.windowInDirection(.left), 3, "back down the list")
+    wm.noteFocus(3)
+    t.equal(wm.windowInDirection(.left), 2, "and out of it, to the tile the focus came from")
+    wm.noteFocus(2)
+    t.equal(wm.windowInDirection(.left), 1, "the grid again from there")
+}
+
+h.test("the list is entered from whichever end the direction arrives at") { t in
+    let wm = listWorkspace()
+
+    t.equal(wm.windowInDirection(.left), 4,
+            "nothing to the left of the leftmost tile, so the list, from its far end")
+    t.equal(wm.windowInDirection(.up), 4, "up is the same walk backwards; down and right forwards")
+    wm.noteFocus(4)
+    t.equal(wm.windowInDirection(.left), 3, "carrying on the same way")
+    wm.noteFocus(3)
+    t.equal(wm.windowInDirection(.left), 1, "and out where it came in")
+}
+
+h.test("the list is the same walk wherever the detached windows are") { t in
+    let wm = listWorkspace()
+    // Nothing about the geometry is load-bearing any more: put them in opposite corners and
+    // the walk is unchanged, because the order is the order they were opened in.
+    wm.floatingFrames[3] = box(1312, 782, 200, 200)     // bottom right
+    wm.floatingFrames[4] = box(0, 0, 200, 200)          // top left
+    wm.noteFocus(2)
+
+    t.equal(wm.windowInDirection(.right), 3, "the first of the list, though it is the further away")
+    wm.noteFocus(3)
+    t.equal(wm.windowInDirection(.right), 4, "and on to the second")
+    wm.noteFocus(4)
+    t.equal(wm.windowInDirection(.left), 3, "the way back is the same list")
+}
+
+h.test("a detached window is never a step on the grid") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
     wm.addWindow(3, floating: true)
     wm.floatingFrames[3] = box(756, 0, 400, 300)     // over w2, sharing w1's right edge
-    wm.noteFocus(1)
-
-    t.equal(wm.windowInDirection(.right), 3,
-            "w2 and the floating w3 both abut w1; the more recently focused w3 wins")
-    t.equal(wm.windowInDirection(.left, from: 3), 1, "and it hands focus back")
-}
-
-h.test("movefocus reaches a window togglefloating detached from the grid") { t in
-    let wm = WorkspaceManager()
-    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
-    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
-    wm.noteFocus(3)
-    wm.toggleFloating(3)                    // super+t: w3 leaves the tree, centred over w1|w2
-
-    t.equal(wm.isFloating(3), true, "w3 floats")
-    t.equal(wm.windowInDirection(.right, from: 1), 3,
-            "w3 is centred between the two tiles, so it is what lies to w1's right")
-    t.equal(wm.windowInDirection(.left, from: 2), 3, "and to w2's left")
-    t.equal(wm.windowInDirection(.left, from: 3), 1, "from the float, the grid is reachable again")
-    t.equal(wm.windowInDirection(.right, from: 3), 2, "in both directions")
-}
-
-h.test("movefocus reaches a floating window stacked over the only tile left") { t in
-    let wm = WorkspaceManager()
-    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
-    wm.addWindow(1); wm.addWindow(2)
-    wm.noteFocus(2)
-    wm.toggleFloating(2)                    // w1 now fills the display, w2 floats over it
+    wm.noteFocus(3)                                  // and the most recently focused window
 
     t.equal(wm.windowInDirection(.right, from: 1), 2,
-            "the two centres are one point, so no direction holds w2 — it answers anyway")
-    t.equal(wm.windowInDirection(.left, from: 2), 1, "and hands focus back")
+            "w3 abuts w1 and was focused more recently, and is still not a step: the grid is tiles")
+    t.equal(wm.windowInDirection(.right, from: 2), 3, "it is past the edge of the grid instead")
+    t.equal(wm.windowInDirection(.left, from: 3), 2, "and hands the focus back to the tile it came from")
 }
 
-h.test("a floating window overlapping a tile is not a direction of its own") { t in
+h.test("a workspace of nothing but detached windows still walks") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
-    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3); wm.addWindow(4)
-    wm.noteFocus(4)
-    wm.toggleFloating(4)                    // 70%x80%, centred: it covers all three tiles' centres
+    wm.addWindow(1, floating: true); wm.addWindow(2, floating: true)
 
-    t.equal(wm.windowInDirection(.up, from: 2), nil,
-            "w4's centre is below w2's and to the left; covering w2 does not put it above")
-    t.equal(wm.windowInDirection(.right, from: 2), nil, "nor to its right")
-    t.equal(wm.windowInDirection(.left, from: 2), 4, "it is where it actually is")
-}
-
-h.test("a floating window never outranks the tile a grid step points at") { t in
-    let wm = WorkspaceManager()
-    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
-    wm.addWindow(1); wm.addWindow(2)
-    wm.addWindow(3, floating: true)
-    wm.floatingFrames[3] = box(1300, 391, 200, 200)   // tucked against the right edge
-    wm.noteFocus(3)
-
-    t.equal(wm.windowInDirection(.right, from: 1), 2,
-            "w2's centre is nearer than the float's, recent focus notwithstanding")
-    t.equal(wm.windowInDirection(.right, from: 2), 3, "past the last tile, the float is there")
+    t.equal(wm.windowInDirection(.right, from: 1), 2, "the list is the whole workspace")
+    t.equal(wm.windowInDirection(.left, from: 1), nil, "with no tile to come back out to")
+    t.equal(wm.windowInDirection(.right, from: 2), nil, "at either end of it")
 }
 
 h.test("a floating window keeps its frame across a workspace round trip") { t in
@@ -630,6 +654,68 @@ h.test("a workspace follows its monitor") { t in
     // And coming back to workspace 5 returns to its own monitor.
     wm.switchTo(workspace: 5)
     t.equal(wm.focusedMonitorID, home, "workspace 5 pulled focus back to its monitor")
+}
+
+// MARK: - Stacking
+
+h.test("an unfocused float is sunk under the tiles it covers") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)        // left half / right half
+    wm.addWindow(3); wm.noteFocus(3)
+    wm.toggleFloating(3)                    // w3 floats, centred over both halves
+    let plan = wm.render()
+
+    // Focus on the float: it is the window in hand, and nothing moves.
+    t.equal(Stacking.raiseOrder(tiles: plan.frames, floats: plan.floating, focused: 3), [],
+            "the focused float stays where it is")
+
+    // Focus moves to a tile: both halves come up over the float, the focused one last.
+    wm.noteFocus(1)
+    t.equal(Stacking.raiseOrder(tiles: plan.frames, floats: plan.floating, focused: 1), [2, 1],
+            "the tiles it covers are raised, and the focused tile ends up in front")
+    wm.noteFocus(2)
+    t.equal(Stacking.raiseOrder(tiles: plan.frames, floats: plan.floating, focused: 2), [1, 2],
+            "and the other way round when the focus is on w2")
+}
+
+h.test("stacking leaves alone what a float does not cover") { t in
+    let tiles: [WindowID: Box] = [1: box(0, 0, 756, 982), 2: box(756, 0, 756, 982)]
+
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: [:], focused: 1), [],
+            "no float, nothing to raise")
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: [3: box(0, 0, 400, 300)], focused: 1),
+            [1], "a float over one tile only raises that tile")
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: [3: box(1600, 0, 400, 300)], focused: 1),
+            [], "a float over no tile at all — another monitor — raises nothing")
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: [3: box(756, 0, 0, 982)], focused: 1),
+            [], "sharing an edge with a tile is not covering it")
+}
+
+h.test("a float already at the bottom asks for no raises") { t in
+    let tiles: [WindowID: Box] = [1: box(0, 0, 756, 982), 2: box(756, 0, 756, 982)]
+    let floats: [WindowID: Box] = [3: box(200, 100, 1000, 700)]   // over both halves
+
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: floats, focused: 1,
+                                stackedAbove: { _ in [1, 2] }), [],
+            "both tiles are already above the float, so the stack is left alone")
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: floats, focused: 1,
+                                stackedAbove: { _ in [2] }), [2, 1],
+            "w1 has come back up over the float — activating its app brings its windows with "
+            + "it — so both are raised again")
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: floats, focused: 1,
+                                stackedAbove: { _ in [1, 2, 99] }), [],
+            "a window toe knows nothing about, above the float, changes none of this")
+}
+
+h.test("a focused float is raised back over the tiles under a second one") { t in
+    let tiles: [WindowID: Box] = [1: box(0, 0, 1512, 982)]
+    let floats: [WindowID: Box] = [2: box(100, 100, 600, 400), 3: box(400, 300, 600, 400)]
+
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: floats, focused: 2), [1, 2],
+            "w3 sinks under the tile, and the focused w2 is raised over it again")
+    t.equal(Stacking.raiseOrder(tiles: tiles, floats: floats, focused: nil), [1],
+            "with nothing focused the tile is simply lifted over both floats")
 }
 
 // MARK: - Dragging
