@@ -46,9 +46,8 @@ enum WindowMover {
     }
 
     static func close(_ window: ManagedWindow) {
-        guard let button = window.element.value(kAXCloseButtonAttribute) else { return }
-        // swiftlint:disable:next force_cast
-        AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
+        guard let button = window.element.elementValue(kAXCloseButtonAttribute) else { return }
+        AXUIElementPerformAction(button, kAXPressAction as CFString)
     }
 }
 
