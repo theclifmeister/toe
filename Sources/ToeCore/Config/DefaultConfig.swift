@@ -116,9 +116,11 @@ foreground = "#a9b1d6"
 accent     = "#7aa2f7"
 # The window is the background at 95%, as walker's .box-wrapper is. The search line stays solid.
 opacity    = 0.95
-# omarchy-menu asks walker for 295 points, and 800 for a list like the keybindings page. Both
-# are clamped to the display if it is narrower.
-width      = 295
+# omarchy-menu asks walker for 295 points, and 800 for a list like the keybindings page. The list
+# width is walker's; the menu's is not — at 295 the row "Edit configuration" was a point too wide
+# to draw whole, and the column that says on or off beside "Run on startup" was four points too
+# narrow. 400 fits every row. Both are clamped to the display if it is narrower.
+width      = 400
 list_width = 800
 # walker draws at 18px and so does this. The one measurement here worth changing: the padding,
 # the icon size and the gaps are all walker's and are left alone.

@@ -108,9 +108,11 @@ public enum MenuModel {
     }
 
     /// nil where the toggle cannot work — the row is left out rather than shown dimmed beside a
-    /// reason. Walker's menu is 295 points wide and its second column holds about three
-    /// characters, so a row that has to explain itself has nowhere to do it; and a switch you
-    /// can see but not throw is worse than one that is not offered. `LoginItem` logs why.
+    /// reason. Even at the 400 points the menu widened to in #74, the second column beside this
+    /// title is 133 points: enough for `on` or `off` and nowhere near the reason it would have
+    /// to give ("needs /Applications"), so a row that has to explain itself has nowhere to do
+    /// it. And a switch you can see but not throw is worse than one that is not offered.
+    /// `LoginItem` logs why.
     private static func startup(_ state: LoginItemState) -> MenuItem? {
         switch state {
         case .on:
