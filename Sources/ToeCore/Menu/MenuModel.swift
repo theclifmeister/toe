@@ -101,8 +101,16 @@ public struct MenuItem: Equatable {
         self.action = action
     }
 
-    public func with(subtitle: String?) -> MenuItem {
-        MenuItem(title: title, subtitle: subtitle, icon: icon, value: value, progress: progress,
+    /// The same row as a search hit: it gains the path it was found at and loses its icon.
+    ///
+    /// Losing the icon is the point. One level of the tree is a handful of rows that mostly
+    /// carry a glyph, so the icons form a column and the titles start after it. A search mixes
+    /// levels, and most of what it turns up — a theme, a wallpaper, a keybinding — never had an
+    /// icon, so that column is a column no longer: a few rows indent while the rest do not, and
+    /// the eye reads the ragged left edge before it reads any of the titles. Dropping the glyph
+    /// costs a hint that the subtitle now gives better, and buys back the straight edge.
+    public func foundAt(path: String?) -> MenuItem {
+        MenuItem(title: title, subtitle: path, icon: nil, value: value, progress: progress,
                  isDisabled: isDisabled, action: action)
     }
 

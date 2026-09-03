@@ -216,9 +216,9 @@ public struct MenuState: Equatable {
             let fields = flat.map { [$0.item.title, $0.item.value ?? ""] }
             filtered = FuzzyFilter.rank(query, in: fields).map { match in
                 let found = flat[match.index]
-                return found.item.with(subtitle: found.path.isEmpty
-                                       ? nil
-                                       : found.path.joined(separator: " › "))
+                return found.item.foundAt(path: found.path.isEmpty
+                                          ? nil
+                                          : found.path.joined(separator: " › "))
             }
         }
         if resettingSelection {
