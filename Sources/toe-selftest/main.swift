@@ -876,6 +876,8 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-space")?.command, .menu(.root), "SUPER+SPACE opens the quick menu")
     t.equal(binding("super-space")?.keyCode, 0x31, "space key code")
     t.equal(binding("super-k")?.command, .menu(.keybindings), "SUPER+K lists the bindings")
+    t.equal(binding("super-ctrl-space")?.command, .nextBackground,
+            "SUPER+CTRL+SPACE is the key Omarchy gives to backgrounds")
     t.equal(c.menu.background, "#1a1b26", "the menu ships Omarchy's Tokyo Night background")
 
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
@@ -984,12 +986,25 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     t.equal(binding(clash, .killActive)?.source, "super-shift-q", "and stays yours")
     t.equal(binding(clash, .reload)?.source, "super-shift-r", "the others still land")
 
-    // The shipped config binds both itself, so nothing should be duplicated.
+    // The shipped config binds them itself, so nothing should be duplicated.
     let shipped = try Config.parse(Config.defaultTOML)
-    for command in [Command.quit, .reload] {
+    for command in [Command.quit, .reload, .nextBackground] {
         t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
                 "the shipped config binds \(command) exactly once")
     }
+
+    // The one entry on the list that is not an escape hatch. It is there for the same reason the
+    // others are — a config is never rewritten, so a key added later reaches nobody who already
+    // had one — and it obeys the same two rules, which is what makes it something you can take
+    // back rather than something done to you.
+    t.equal(binding(old, .nextBackground)?.source, "super-ctrl-space",
+            "a config written before backgrounds existed still gets the key")
+    let moved = try Config.parse("[binds]\n\"super-b\" = \"nextbackground\"\n")
+    t.equal(binding(moved, .nextBackground)?.source, "super-b", "binding it elsewhere takes the key back")
+    t.equal(moved.bindings.filter { $0.command == .nextBackground }.count, 1, "and not twice")
+    let taken = try Config.parse("[binds]\n\"super-ctrl-space\" = \"killactive\"\n")
+    t.equal(binding(taken, .nextBackground), nil, "and a key you already use is left alone")
+    t.equal(binding(taken, .killActive)?.source, "super-ctrl-space", "still doing what you asked")
 }
 
 h.test("nan and infinity are refused rather than reaching the layout") { t in
@@ -1710,15 +1725,15 @@ h.test("an empty query is one level at a time, with no paths") { t in
     m.type("z")
     t.equal(m.visible.count, 0, "nothing matches")
     m.backspace()
-    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Quit"], "the level comes back")
+    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Style", "Quit"], "the level comes back")
     t.expect(m.visible.allSatisfy { $0.subtitle == nil },
              "and the paths go away with the search that needed them")
 }
 
 h.test("the rows lead where the menu says they do") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Quit"], "the whole menu, bare minimum")
-    t.equal(m.visible.map(\.leadsOn), [true, true, false], "two lead on, Quit acts")
+    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Style", "Quit"], "the whole menu, bare minimum")
+    t.equal(m.visible.map(\.leadsOn), [true, true, true, false], "three lead on, Quit acts")
     m.type("quit")
     t.equal(m.activate(), .run(.quit), "and Quit dispatches rather than descending")
 
@@ -1774,7 +1789,7 @@ h.test("the Edit configuration row is your binding, not toe's idea of an editor"
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
                            bindings: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n").bindings)
                 .map(\.title),
-            ["Learn", "Quit"],
+            ["Learn", "Style", "Quit"],
             "and with the startup row gone as well, Configure has nothing left to hold")
 
     // The row is there even when the startup toggle cannot be.
@@ -1786,7 +1801,7 @@ h.test("the Edit configuration row is your binding, not toe's idea of an editor"
 h.test("Configure goes with the startup row, being all that was left in it") { t in
     let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
                       visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Learn", "Quit"],
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Quit"],
             "a row that leads into an empty level is worse than no row")
 
     var searching = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
@@ -1865,6 +1880,7 @@ h.test("every command has a label a reader could use") { t in
         .killActive, .toggleFloating, .toggleSplit, .swapSplit,
         .exec("open -a Safari"), .reload, .quit,
         .menu(.root), .menu(.keybindings),
+        .theme("gruvbox"), .theme(""), .background("city.jpg"), .nextBackground,
     ]
     for command in all {
         let label = CommandLabel.describe(command)
@@ -1873,6 +1889,13 @@ h.test("every command has a label a reader could use") { t in
     }
     t.equal(CommandLabel.describe(.moveFocus(.left)), "Move focus left", "a sample of the prose")
     t.equal(CommandLabel.describe(.menu(.keybindings)), "Show the keybindings", "and the new one")
+    t.equal(CommandLabel.describe(.theme("gruvbox")), "Theme: Gruvbox",
+            "a theme toe ships is named the way it names itself")
+    t.equal(CommandLabel.describe(.theme("rose-pine")), "Theme: Rose Pine",
+            "and one of yours is titled from its directory, which is all it has")
+    t.equal(CommandLabel.describe(.theme("")), "Use your own colours",
+            "clearing the theme reads as what it does, not as an empty name")
+    t.equal(CommandLabel.describe(.nextBackground), "Next background", "and the cycle")
 }
 
 h.test("the binding that opens the config is named rather than spelled out") { t in
@@ -2029,6 +2052,561 @@ h.test("menu commands parse in both spellings") { t in
     t.equal(try CommandParser.parse("menu keys"), .menu(.keybindings), "and its abbreviation")
     t.expect((try? CommandParser.parse("menu wardrobe")) == nil,
              "an unknown page is an error rather than quietly the root menu")
+}
+
+// MARK: - Themes
+
+/// Omarchy's themes/tokyo-night/colors.toml, verbatim. Pasted rather than summarised, because
+/// what is being asserted is that toe reads *their* file — a paraphrase would pass while the real
+/// thing failed.
+let tokyoNightColors = """
+accent = "#7aa2f7"
+cursor = "#c0caf5"
+foreground = "#a9b1d6"
+background = "#1a1b26"
+selection_foreground = "#c0caf5"
+selection_background = "#7aa2f7"
+
+color0 = "#32344a"
+color1 = "#f7768e"
+color2 = "#9ece6a"
+color3 = "#e0af68"
+color4 = "#7aa2f7"
+color5 = "#ad8ee6"
+color6 = "#449dab"
+color7 = "#787c99"
+color8 = "#444b6a"
+color9 = "#ff7a93"
+color10 = "#b9f27c"
+color11 = "#ff9e64"
+color12 = "#7da6ff"
+color13 = "#bb9af7"
+color14 = "#0db9d7"
+color15 = "#acb0d0"
+"""
+
+/// Two themes to test against, built here rather than taken from toe. toe ships none: a theme is
+/// somebody else's work, and the list you choose from is what you have on disk plus what Omarchy
+/// publishes. So the fixtures below are exactly that — a theme somebody downloaded.
+let tokyoNight = Theme(slug: "tokyo-night", name: "Tokyo Night",
+                       palette: try! Palette.parse(tokyoNightColors))
+let gruvbox = Theme(slug: "gruvbox", name: "Gruvbox",
+                    palette: Palette(accent: "#7daea3", background: "#282828",
+                                     foreground: "#d4be98"))
+
+h.test("an Omarchy colors.toml is read key for key") { t in
+    guard let p = try? Palette.parse(tokyoNightColors) else {
+        return t.expect(false, "the shipped Tokyo Night palette should parse")
+    }
+    t.equal(p.accent, "#7aa2f7", "accent is what the border takes")
+    t.equal(p.background, "#1a1b26", "background is walker's @base")
+    t.equal(p.foreground, "#a9b1d6", "foreground is walker's @text")
+    t.equal(p.cursor, "#c0caf5", "the keys toe does not paint with are kept anyway")
+    t.equal(p.color(6), "#449dab", "color0…color15 land in order")
+    t.equal(p.color(15), "#acb0d0", "including the last one")
+    t.equal(p.color(16), nil, "and nothing past it")
+    t.equal(p.terminal.compactMap { $0 }.count, 16, "all sixteen terminal colours land")
+}
+
+h.test("a theme missing a colour toe paints with is refused rather than guessed at") { t in
+    t.equal(try? Palette.parse("background = \"#000000\"\nforeground = \"#ffffff\"") , nil,
+            "no accent is not a theme")
+    do {
+        _ = try Palette.parse("background = \"#000000\"\nforeground = \"#ffffff\"")
+        t.expect(false, "it should have thrown")
+    } catch {
+        t.equal(error as? PaletteError, .missing("accent"), "and it names the key that is absent")
+    }
+    do {
+        _ = try Palette.parse("accent = \"blue\"\nbackground = \"#000\"\nforeground = \"#fff\"")
+        t.expect(false, "it should have thrown")
+    } catch {
+        t.equal(error as? PaletteError, .notAColour(key: "accent", value: "blue"),
+                "a colour that will not parse is named with what was there, as Hex.rgba's nil intends")
+    }
+}
+
+// MARK: - The catalogue
+
+/// A cut-down GitHub tree listing, in the shape the real one comes back in. Everything awkward is
+/// in here on purpose: a theme with no palette, a directory that is not a slug, a file that is not
+/// a picture, and a name that must never reach the filesystem.
+let treeJSON = Data("""
+{"sha":"x","truncated":false,"tree":[
+  {"path":"themes","mode":"040000","type":"tree","sha":"a"},
+  {"path":"themes/gruvbox","mode":"040000","type":"tree","sha":"b"},
+  {"path":"themes/gruvbox/colors.toml","mode":"100644","type":"blob","sha":"c","size":511},
+  {"path":"themes/gruvbox/backgrounds/1-the-backwater.jpg","mode":"100644","type":"blob","sha":"d","size":4127598},
+  {"path":"themes/gruvbox/backgrounds/5-leaves.jpg","mode":"100644","type":"blob","sha":"e","size":443959},
+  {"path":"themes/gruvbox/README.md","mode":"100644","type":"blob","sha":"f","size":10},
+  {"path":"themes/tokyo-night/colors.toml","mode":"100644","type":"blob","sha":"g","size":500},
+  {"path":"themes/tokyo-night/backgrounds/0-winding-road.webp","mode":"100644","type":"blob","sha":"h","size":653482},
+  {"path":"themes/tokyo-night/backgrounds/.DS_Store","mode":"100644","type":"blob","sha":"i","size":6148},
+  {"path":"themes/tokyo-night/backgrounds/omarchy.webp","mode":"100644","type":"blob","sha":"m","size":716},
+  {"path":"themes/gruvbox/backgrounds/omarchy.png","mode":"100644","type":"blob","sha":"n","size":900},
+  {"path":"themes/no-palette/backgrounds/x.jpg","mode":"100644","type":"blob","sha":"j","size":1},
+  {"path":"themes/Not A Slug/colors.toml","mode":"100644","type":"blob","sha":"k","size":1},
+  {"path":"bin/omarchy-theme-set","mode":"100755","type":"blob","sha":"l","size":900}
+]}
+""".utf8)
+
+h.test("one request describes every theme Omarchy publishes") { t in
+    guard let c = try? Catalogue.parse(treeJSON) else {
+        return t.expect(false, "the tree listing should parse")
+    }
+    // A theme with no colors.toml is not one toe can use: Omarchy has a few that describe
+    // themselves only through per-app templates, and toe renders none of those.
+    t.equal(c.themes.map(\.slug), ["gruvbox", "tokyo-night"],
+            "themes with a palette, in a stable order, and nothing outside themes/")
+    t.equal(c.themes.first?.name, "Gruvbox", "titled from the directory name")
+    t.equal(c.themes.first?.backgrounds.map(\.name), ["1-the-backwater.jpg", "5-leaves.jpg"],
+            "pictures only — a README beside them is not one")
+    t.equal(c.themes.last?.backgrounds.map(\.name), ["0-winding-road.webp"],
+            "and neither is the .DS_Store that every folder collects")
+    // Every theme upstream carries the OMARCHY wordmark in its backgrounds folder, under one of
+    // two extensions. It is not a wallpaper anybody wants on a toe desktop, so it is not fetched
+    // and does not count towards what the row says a theme costs.
+    t.equal(c.themes.flatMap { $0.backgrounds.map(\.name) }.contains { $0.hasPrefix("omarchy.") },
+            false, "and the wordmark is left where it is")
+    // The size is what the menu row shows, and the whole reason this shape was chosen over one
+    // request per theme.
+    t.equal(c.themes.first?.bytes, 4127598 + 443959,
+            "a theme knows what it costs to download, the wordmark excluded")
+    t.equal(ByteSize.describe(c.themes.first?.bytes ?? 0), "4.4 MB", "as the row says it")
+}
+
+h.test("upstream's wordmark is not fetched, but yours is still listed") { t in
+    for name in ["omarchy.png", "omarchy.webp", "OMARCHY.PNG"] {
+        t.equal(Backgrounds.isUpstreamBranding(name), true, "\(name) is branding, not a wallpaper")
+    }
+    for name in ["1-the-backwater.jpg", "omarchy-cityscape.jpg", "my-omarchy.png"] {
+        t.equal(Backgrounds.isUpstreamBranding(name), false, "\(name) is not")
+    }
+    // Filtered where a theme is fetched, not where a folder is listed: declining to download
+    // another project's wordmark is toe's call, and overruling a file you put there yourself is
+    // not.
+    t.equal(Backgrounds.list(["omarchy.png", "a.jpg"]), ["a.jpg", "omarchy.png"],
+            "a folder you assembled by hand is shown whole")
+}
+
+h.test("a directory that is not a slug is not a theme") { t in
+    guard let c = try? Catalogue.parse(treeJSON) else {
+        return t.expect(false, "the tree listing should parse")
+    }
+    // `Not A Slug` has a colors.toml and is still refused. This name would become a directory
+    // under ~/.config/toe/themes, and a path component is the only thing it is allowed to be.
+    t.equal(c.themes.contains { $0.name.contains("Not A Slug") }, false, "refused, not repaired")
+    t.equal(c.themes.count, 2, "and it is not silently slugified into one either")
+}
+
+h.test("a listing that came back incomplete is refused outright") { t in
+    // GitHub truncates a tree too large to serve. Half a catalogue is worse than none: it would
+    // look complete, and the themes missing from it would look as though they did not exist.
+    let truncated = Data(#"{"truncated":true,"tree":[]}"#.utf8)
+    do { _ = try Catalogue.parse(truncated); t.expect(false, "it should have thrown") }
+    catch { t.equal(error as? CatalogueError, .truncated, "and says so") }
+
+    do { _ = try Catalogue.parse(Data("not json".utf8)); t.expect(false, "it should have thrown") }
+    catch { t.equal(error as? CatalogueError, .notJSON, "as does a body that is not JSON at all") }
+
+    do { _ = try Catalogue.parse(Data(#"{"tree":[]}"#.utf8)); t.expect(false, "it should have thrown") }
+    catch { t.equal(error as? CatalogueError, .empty, "and one with no themes in it") }
+}
+
+h.test("a name off the network is checked by shape, not searched for tricks") { t in
+    // A whitelist, because "does not contain .." is the kind of rule that is one encoding trick
+    // away from being wrong. These names are about to be joined onto a directory path.
+    for bad in ["", ".", "..", "../evil", "a/b", "a\\b", ".hidden", String(repeating: "z", count: 200)] {
+        t.equal(Catalogue.isSafeFileName(bad), false, "'\(bad)' is not a name toe will write")
+    }
+    for good in ["1-the-backwater.jpg", "0-winding-road.webp", "a b c.png"] {
+        t.equal(Catalogue.isSafeFileName(good), true, "'\(good)' is")
+    }
+}
+
+h.test("a catalogue goes stale, and a clock that jumped reads as stale too") { t in
+    let now = Date()
+    let fresh = Catalogue(fetchedAt: now.addingTimeInterval(-60), themes: [])
+    t.equal(fresh.isStale(now: now, maxAge: 3600), false, "a minute old is fresh")
+    t.equal(fresh.isStale(now: now, maxAge: 30), true, "and past the age it is not")
+    // A restored machine or a corrected clock can put the stamp in the future. Refetching is the
+    // cheap answer; treating it as fresh would wedge the list until the skew passed.
+    let future = Catalogue(fetchedAt: now.addingTimeInterval(3600), themes: [])
+    t.equal(future.isStale(now: now, maxAge: 86400), true, "a stamp in the future is not fresh")
+}
+
+h.test("a byte count reads the way a menu row needs it to") { t in
+    t.equal(ByteSize.describe(4571557), "4.4 MB", "megabytes to one place")
+    t.equal(ByteSize.describe(330000), "0.3 MB", "including under one")
+    t.equal(ByteSize.describe(511), "1 KB", "and kilobytes below that")
+    t.equal(ByteSize.describe(0), "", "nothing at all for nothing")
+}
+
+// MARK: - Themes
+
+h.test("a theme name is slugified the way Omarchy slugifies it") { t in
+    t.equal(Slug.make("Tokyo Night"), "tokyo-night", "lowercased, spaces to hyphens")
+    t.equal(Slug.make("CATPPUCCIN"), "catppuccin", "however it was shouted")
+    t.equal(Slug.make("rose_pine"), "rose-pine", "an underscore is a hyphen")
+    t.equal(Slug.make("Rose  Pine"), "rose-pine", "and runs collapse")
+    t.equal(Slug.make("  gruvbox  "), "gruvbox", "trimmed at both ends")
+    t.equal(Slug.make(""), "", "nothing stays nothing — that is how a theme is cleared")
+    // The reason the filter exists: this value becomes a path component under
+    // ~/.config/toe/themes AND a string literal inside the user's own config.
+    t.equal(Slug.make("../../.ssh"), "ssh", "a path cannot be walked out of")
+    t.equal(Slug.make("/etc/passwd"), "etcpasswd", "and a leading slash is not a slug character")
+    t.equal(Slug.make("a\" b [x]"), "a-b-x", "nor is a quote or a bracket")
+    t.expect(Slug.make(String(repeating: "z", count: 200)).count <= 64, "and it cannot run away")
+}
+
+h.test("a directory name reads back as a title") { t in
+    t.equal(Slug.title("catppuccin-latte"), "Catppuccin Latte", "hyphens are spaces again")
+    t.equal(Slug.title("gruvbox"), "Gruvbox", "one word is capitalised")
+    t.equal(Slug.title(""), "", "and nothing is nothing")
+}
+
+h.test("a theme you have is not also offered for download") { t in
+    let installed = [ThemeRef(slug: "gruvbox", name: "Gruvbox"),
+                     ThemeRef(slug: "rose-pine", name: "Rose Pine")]
+    let available = [RemoteTheme(slug: "gruvbox", name: "Gruvbox", backgrounds: []),
+                     RemoteTheme(slug: "nord", name: "Nord",
+                                 backgrounds: [RemoteFile(name: "a.jpg", bytes: 4_300_000)])]
+    let (have, offer) = Themes.merged(installed: installed, available: available)
+    t.equal(have.map(\.slug), ["gruvbox", "rose-pine"], "yours, sorted by name")
+    // Otherwise downloading Nord would leave two rows saying Nord, one offering to fetch it again.
+    t.equal(offer.map(\.slug), ["nord"], "and only what you have not got")
+    t.equal(offer.first?.bytes, 4_300_000, "carrying what it would cost")
+
+    let (none, all) = Themes.merged(installed: [], available: available)
+    t.equal(none.isEmpty, true, "a machine that has fetched nothing has nothing installed")
+    t.equal(all.count, 2, "and is offered everything")
+}
+
+h.test("toe's own colours are Tokyo Night already, so that theme only moves the border") { t in
+    guard let c = try? Config.parse(Config.defaultTOML) else {
+        return t.expect(false, "the shipped config parses")
+    }
+    let themed = c.applying(tokyoNight)
+    // The payoff, and the reason a fresh install with no themes at all still looks themed:
+    // MenuConfig's defaults were derived from this very palette through walker's token mapping,
+    // so applying Tokyo Night must be a no-op on the menu. If this fails, one of the two drifted.
+    t.equal(themed.menu, c.menu, "the menu is already Tokyo Night, to the byte")
+    t.equal(themed.border.activeStart, "#7aa2f7", "and the border takes the accent")
+    t.equal(themed.border.activeEnd, "#7aa2f7", "at both stops")
+    t.equal(themed.theme.name, "tokyo-night", "the resolved slug is what the menu marks with")
+}
+
+h.test("a theme takes both border stops, because Omarchy's border is flat") { t in
+    let c = Config()
+    for theme in [tokyoNight, gruvbox] {
+        let themed = c.applying(theme)
+        t.equal(themed.border.activeStart, theme.palette.accent, "\(theme.slug) start")
+        t.equal(themed.border.activeEnd, theme.palette.accent, "\(theme.slug) end")
+        t.equal(themed.menu.background, theme.palette.background, "\(theme.slug) menu background")
+        t.equal(themed.menu.foreground, theme.palette.foreground, "\(theme.slug) menu foreground")
+        t.equal(themed.menu.accent, theme.palette.accent, "\(theme.slug) menu accent")
+        t.equal(themed.menu.border, nil, "\(theme.slug) rejoins the border to the foreground")
+    }
+}
+
+h.test("a theme leaves every size and behaviour alone") { t in
+    guard let c = try? Config.parse(Config.defaultTOML) else {
+        return t.expect(false, "the shipped config parses")
+    }
+    let themed = c.applying(gruvbox)
+    t.equal(themed.border.width, c.border.width, "border width")
+    t.equal(themed.border.angle, c.border.angle, "the sweep angle survives, inert, for when the theme is cleared")
+    t.equal(themed.border.radius, c.border.radius, "corner radius")
+    t.equal(themed.border.enabled, c.border.enabled, "and whether there is a border at all")
+    t.equal(themed.menu.opacity, c.menu.opacity, "menu opacity")
+    t.equal(themed.menu.width, c.menu.width, "menu width")
+    t.equal(themed.menu.listWidth, c.menu.listWidth, "list width")
+    t.equal(themed.menu.fontSize, c.menu.fontSize, "font size")
+    t.equal(themed.bindings.count, c.bindings.count, "and it is not a config reload")
+}
+
+h.test("the theme wins over the colour keys, and says nothing about it") { t in
+    let text = """
+    [theme]
+    name = "gruvbox"
+
+    [border]
+    active_start = "#111111"
+    active_end   = "#222222"
+
+    [menu]
+    background = "#333333"
+    """
+    guard let c = try? Config.parse(text) else { return t.expect(false, "it parses") }
+    t.equal(c.border.activeStart, "#111111", "parse reads the file as written")
+    let themed = c.applying(gruvbox)
+    t.equal(themed.border.activeStart, "#7daea3", "and applying overrules it outright")
+    t.equal(themed.menu.background, "#282828", "menu colours too")
+    // Not a merge and not a warning: the config toe ships sets all of these, so a warning here
+    // would fire for everybody the first time they picked a theme.
+    t.equal(c.warnings, [], "and nothing is warned about")
+}
+
+h.test("no theme is today's behaviour, exactly") { t in
+    guard let c = try? Config.parse(Config.defaultTOML) else {
+        return t.expect(false, "the shipped config parses")
+    }
+    t.equal(c.theme.name, "", "the shipped config names no theme")
+    t.equal(c.border.activeStart, "#33ccffee", "so the gradient is untouched")
+    t.equal(c.border.activeEnd, "#00ff99ee", "at both ends")
+}
+
+h.test("a theme name that is not a name is refused rather than used") { t in
+    guard let c = try? Config.parse("[theme]\nname = 3\n") else {
+        return t.expect(false, "it still parses")
+    }
+    t.equal(c.theme.name, "", "a number is not a theme")
+    t.expect(c.warnings.contains { $0.contains("theme.name") }, "and it is named in the tooltip")
+}
+
+// MARK: - Writing the theme back
+
+h.test("setting a theme moves one line and leaves every other byte") { t in
+    let before = Config.defaultTOML
+    let after = ThemeWriter.settingTheme("gruvbox", in: before)
+    let a = before.components(separatedBy: "\n"), b = after.components(separatedBy: "\n")
+    t.equal(a.count, b.count, "no line is added or removed")
+    let changed = zip(a, b).filter { $0 != $1 }
+    t.equal(changed.count, 1, "and exactly one is different")
+    guard let c = try? Config.parse(after) else { return t.expect(false, "the result parses") }
+    t.equal(c.theme.name, "gruvbox", "as the theme that was asked for")
+    t.equal(c.warnings, [], "with nothing to warn about")
+}
+
+h.test("a config written before themes existed grows the table at the end") { t in
+    for source in ["[general]\ngaps_in = 5\n", "[general]\ngaps_in = 5"] {
+        let after = ThemeWriter.settingTheme("catppuccin", in: source)
+        guard let c = try? Config.parse(after) else {
+            return t.expect(false, "it parses whether or not the file ended in a newline")
+        }
+        t.equal(c.theme.name, "catppuccin", "the theme is set")
+        t.equal(c.gaps.inner, 5, "and what was already there is still there")
+    }
+    t.equal(try? Config.parse(ThemeWriter.settingTheme("gruvbox", in: "")).theme.name, "gruvbox",
+            "an empty file is a config with only a theme in it")
+}
+
+h.test("a name key in another table is not the theme's") { t in
+    let source = """
+    [theme]
+    name = "tokyo-night"
+
+    [[float]]
+    app = "com.apple.finder"
+    title = "Copy"
+    """
+    let after = ThemeWriter.settingTheme("gruvbox", in: source)
+    guard let c = try? Config.parse(after) else { return t.expect(false, "it parses") }
+    t.equal(c.theme.name, "gruvbox", "the theme moved")
+    t.expect(after.contains("app = \"com.apple.finder\""), "and the float rule did not")
+    // A `name` before any header at all is the root table, which is not [theme] either.
+    let rooted = ThemeWriter.settingTheme("gruvbox", in: "name = \"keep me\"\n[theme]\nname = \"x\"\n")
+    t.expect(rooted.hasPrefix("name = \"keep me\""), "a key above every header is left alone")
+}
+
+h.test("a comment beside the theme name survives being retuned") { t in
+    let after = ThemeWriter.settingTheme("gruvbox", in: "[theme]\nname   = \"tokyo-night\"   # mine\n")
+    t.equal(after, "[theme]\nname   = \"gruvbox\"   # mine\n",
+            "the alignment and the comment are both the user's, not ours")
+}
+
+h.test("a theme table with no name in it yet gains one") { t in
+    let after = ThemeWriter.settingTheme("gruvbox", in: "[theme]\n# nothing here yet\n[border]\nwidth = 2\n")
+    guard let c = try? Config.parse(after) else { return t.expect(false, "it parses") }
+    t.equal(c.theme.name, "gruvbox", "inserted under the header it belongs to")
+    t.equal(c.border.width, 2, "and not in the table below it")
+}
+
+h.test("clearing the theme is setting it to nothing") { t in
+    let after = ThemeWriter.settingTheme("", in: "[theme]\nname = \"gruvbox\"\n")
+    t.equal(after, "[theme]\nname = \"\"\n", "which is what hands your own colours back")
+}
+
+h.test("setting the same theme twice writes the same bytes") { t in
+    let once = ThemeWriter.settingTheme("gruvbox", in: Config.defaultTOML)
+    t.equal(ThemeWriter.settingTheme("gruvbox", in: once), once, "so a repeat is not a file change")
+}
+
+h.test("a config saved with Windows line endings keeps them") { t in
+    let source = "[theme]\r\nname = \"tokyo-night\"\r\n[border]\r\nwidth = 2\r\n"
+    let after = ThemeWriter.settingTheme("gruvbox", in: source)
+    t.equal(after, "[theme]\r\nname = \"gruvbox\"\r\n[border]\r\nwidth = 2\r\n",
+            "TOML.parse normalises CRLF on the way in; writing a file back must not")
+    t.equal(try? Config.parse(after).theme.name, "gruvbox", "and it still parses")
+    // Asserted whole rather than with `contains`, which passed while the writer was emitting
+    // "\n\r" — the carriage return landing at the head of the next line instead of the tail of
+    // its own, leaving a stray CR in a file this is meant to preserve byte for byte.
+    t.equal(ThemeWriter.settingTheme("gruvbox", in: "[general]\r\ngaps_in = 5\r\n"),
+            "[general]\r\ngaps_in = 5\r\n\r\n[theme]\r\nname = \"gruvbox\"\r\n",
+            "a table appended to a CRLF file is CRLF throughout, and nothing else is")
+    t.equal(ThemeWriter.settingTheme("gruvbox", in: "[general]\r\ngaps_in = 5"),
+            "[general]\r\ngaps_in = 5\r\n\r\n[theme]\r\nname = \"gruvbox\"\r\n",
+            "including when the file did not end in one")
+    t.equal(ThemeWriter.settingTheme("gruvbox", in: "[general]\ngaps_in = 5\n"),
+            "[general]\ngaps_in = 5\n\n[theme]\nname = \"gruvbox\"\n",
+            "and a Unix file gains no carriage returns from having the option")
+}
+
+h.test("a header is still the theme table however it is spelled") { t in
+    for header in ["[theme]", "[ theme ]", "[\"theme\"]"] {
+        let after = ThemeWriter.settingTheme("gruvbox", in: "\(header)\nname = \"x\"\n")
+        t.equal(try? Config.parse(after).theme.name, "gruvbox", "\(header) is the theme table")
+    }
+    // A header inside a comment is not a header.
+    let commented = ThemeWriter.settingTheme("gruvbox", in: "# [theme]\nname = \"keep\"\n")
+    t.expect(commented.contains("name = \"keep\""), "a commented-out header opens nothing")
+}
+
+h.test("a theme name can never break the file it is written into") { t in
+    let hostile = ThemeWriter.settingTheme("a\" b [x]\nname = \"evil", in: Config.defaultTOML)
+    guard let c = try? Config.parse(hostile) else {
+        return t.expect(false, "whatever went in, what comes out is a config")
+    }
+    t.equal(c.theme.name, "a-b-x-name-evil", "because a slug has no quote, bracket or newline in it")
+}
+
+h.test("the theme commands parse in Omarchy's spellings") { t in
+    t.equal(try? CommandParser.parse("theme gruvbox"), .theme("gruvbox"), "plain")
+    t.equal(try? CommandParser.parse("theme, gruvbox"), .theme("gruvbox"), "Hyprland's comma")
+    t.equal(try? CommandParser.parse("theme Tokyo Night"), .theme("tokyo-night"),
+            "a display name read across from an Omarchy config finds the same directory")
+    // The one verb whose argument may be missing, because clearing the theme has to be sayable
+    // and `theme none` would collide with a directory somebody could name.
+    t.equal(try? CommandParser.parse("theme"), .theme(""), "and bare means your own colours back")
+    t.equal(try? CommandParser.parse("bg city.jpg"), .background("city.jpg"), "a background by name")
+    t.equal(try? CommandParser.parse("background City.JPG"), .background("City.JPG"),
+            "not slugified — it is a file name, with an extension and a case of its own")
+    t.expect((try? CommandParser.parse("background")) == nil, "which does have to be given")
+    for spelling in ["nextbackground", "bgnext", "background-next"] {
+        t.equal(try? CommandParser.parse(spelling), .nextBackground, "\(spelling) cycles")
+    }
+}
+
+h.test("the background cycle is the one Omarchy walks") { t in
+    let files = ["0-a.jpg", "1-b.png", "2-c.webp"]
+    t.equal(Backgrounds.next(after: "0-a.jpg", in: files), "1-b.png", "one step on")
+    t.equal(Backgrounds.next(after: "2-c.webp", in: files), "0-a.jpg", "and it wraps at the end")
+    t.equal(Backgrounds.next(after: nil, in: files), "0-a.jpg", "nothing current starts at the first")
+    t.equal(Backgrounds.next(after: "gone.jpg", in: files), "0-a.jpg",
+            "and so does a name that is no longer there, rather than refusing to cycle")
+    t.equal(Backgrounds.next(after: "only.jpg", in: ["only.jpg"]), "only.jpg", "one file cycles to itself")
+    t.equal(Backgrounds.next(after: nil, in: []), nil, "and an empty folder has no next")
+}
+
+h.test("a backgrounds folder is filtered and sorted the same way twice") { t in
+    let listed = Backgrounds.list([
+        "2-b.PNG", ".DS_Store", "README.md", "0-a.jpg", "1-c.webp", "LICENSE", ".hidden.jpg",
+    ])
+    t.equal(listed, ["0-a.jpg", "1-c.webp", "2-b.PNG"],
+            "pictures only, in codepoint order so two machines agree — and the extension's case "
+            + "does not decide whether it is one")
+    t.equal(Backgrounds.list(listed), listed, "and listing the list again changes nothing")
+    // The order the menu draws and the order the key walks are the same list, by construction.
+    t.equal(Backgrounds.next(after: listed.last, in: listed), listed.first,
+            "so cycling and listing cannot drift apart")
+}
+
+// MARK: - The Style menu
+
+h.test("Style is always at the root, because it is how you get a theme at all") { t in
+    let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"),
+                                           bindings: []), visibleRows: 10)
+    // Unlike Configure, which goes when both its rows are unavailable, Style stays even on a
+    // machine with no themes and no network: it is the level you go to *to* get one, so leaving
+    // it out exactly when it is most needed would be the wrong way round.
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Quit"], "still there with nothing behind it")
+    t.equal(MenuModel.style(StyleMenu()).map(\.title), ["Theme"],
+            "holding the theme list, and no Background row until there are pictures")
+}
+
+h.test("Background is left out when there are no images") { t in
+    // The Configure-when-empty rule, one level down — and the usual case, since toe ships no
+    // pictures of its own.
+    t.equal(MenuModel.style(StyleMenu()).count, 1, "nothing to show, so no row leading to it")
+    let withPictures = StyleMenu(current: "gruvbox", backgrounds: ["a.jpg", "b.jpg"])
+    t.equal(MenuModel.style(withPictures).map(\.title), ["Theme", "Background"], "and it appears with them")
+}
+
+h.test("the theme you are on is marked, and so is having none") { t in
+    let have = [ThemeRef(slug: "tokyo-night", name: "Tokyo Night"),
+                ThemeRef(slug: "gruvbox", name: "Gruvbox")]
+    let themed = MenuModel.themes(StyleMenu(themes: have, current: "gruvbox"))
+    t.equal(themed.map(\.title), ["Tokyo Night", "Gruvbox", "Your own colours"],
+            "what is installed, then the way back out")
+    t.equal(themed.filter { $0.value == "current" }.map(\.title), ["Gruvbox"], "exactly one is marked")
+    t.equal(themed.first?.action, .run(.theme("tokyo-night")), "and a row runs the theme command")
+
+    let bare = MenuModel.themes(StyleMenu(themes: have))
+    t.equal(bare.filter { $0.value == "current" }.map(\.title), ["Your own colours"],
+            "no theme is a state the list can show, not an absence of state")
+    t.equal(bare.last?.action, .run(.theme("")), "and choosing it clears the name")
+}
+
+h.test("what you have leads, what you could have follows, with its price on it") { t in
+    let rows = MenuModel.themes(StyleMenu(
+        themes: [ThemeRef(slug: "rose-pine", name: "Rose Pine")],
+        available: [RemoteTheme(slug: "nord", name: "Nord",
+                                backgrounds: [RemoteFile(name: "a.jpg", bytes: 4_300_000)]),
+                    RemoteTheme(slug: "everforest", name: "Everforest", backgrounds: [])],
+        current: "rose-pine"))
+    t.equal(rows.map(\.title), ["Rose Pine", "Nord", "Everforest", "Your own colours"],
+            "installed first, then what Omarchy publishes")
+    t.equal(rows.first?.value, "current", "the one you are on is marked")
+    // The size is the disclosure: these run from a third of a megabyte to nine, and a row that
+    // fetched nine megabytes without saying so first would be a row that surprised you.
+    t.equal(rows[1].value, "4.1 MB", "and a download says what it costs")
+    t.equal(rows[2].value, "", "one with no pictures costs nothing worth printing")
+    // One command either way: choosing a theme is the same act whether or not you have it yet.
+    t.equal(rows[1].action, .run(.theme("nord")), "and is chosen the same way as one you have")
+}
+
+h.test("an empty list says it is fetching rather than looking short") { t in
+    let rows = MenuModel.themes(StyleMenu(fetching: true))
+    t.equal(rows.map(\.title), ["Fetching Omarchy's themes…", "Your own colours"],
+            "said, not left to be inferred from a list with nothing in it")
+    t.equal(rows.first?.leadsOn, false, "it does not lead anywhere")
+    var m = MenuState(root: rows, visibleRows: 10)
+    t.equal(m.activate(), MenuOutcome.none, "and pressing it does nothing, leaving the menu up")
+    t.equal(MenuModel.themes(StyleMenu()).map(\.title), ["Your own colours"],
+            "and once it is not fetching, a bare list is just bare")
+}
+
+h.test("the Background level is shaped like the Theme level above it") { t in
+    let rows = MenuModel.backgrounds(StyleMenu(current: "gruvbox",
+                                               backgrounds: ["city.jpg", "city.png"],
+                                               currentBackground: "city.png"))
+    t.equal(rows.map(\.title), ["city.jpg", "city.png", "Next background"],
+            "the choices, then the action — as Your own colours comes after the themes")
+    t.equal(rows.last?.action, .run(.nextBackground), "and that last row is the one that cycles")
+    t.equal(rows.compactMap(\.icon).count, 0,
+            "no icons: one icon among four rows indents that row's text past the rest")
+    t.equal(MenuModel.themes(StyleMenu()).compactMap(\.icon).count, 0, "as the theme list has none")
+    t.equal(rows.first { $0.title == "city.png" }?.value, "current", "with the one on screen marked")
+    t.equal(rows.first?.value, nil, "and only that one")
+    t.expect(rows.first?.title.hasSuffix(".jpg") == true,
+             "the extension stays, or two files would give two rows saying the same word")
+}
+
+h.test("a theme can be found by typing its name from the root") { t in
+    let style = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")])
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: style),
+                      visibleRows: 10)
+    m.type("gruv")
+    t.equal(m.visible.map(\.title), ["Gruvbox"], "two levels down, without going there")
+    t.equal(m.visible.first?.subtitle, "Style › Theme", "and it says where it was found")
+    t.equal(m.activate(), .run(.theme("gruvbox")), "ready to act on")
+
+    var picture = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
+                                                 style: StyleMenu(current: "gruvbox",
+                                                                  backgrounds: ["city.jpg"])),
+                            visibleRows: 10)
+    picture.type("city")
+    t.equal(picture.activate(), .run(.background("city.jpg")), "a picture is reachable the same way")
 }
 
 exit(h.report())

@@ -35,6 +35,14 @@ public enum CommandLabel {
             case .root:        return "Open the menu"
             case .keybindings: return "Show the keybindings"
             }
+        case .theme(let slug):
+            // Titled from the slug, because that is all a label has: toe ships no themes, so
+            // there is no table of names to look one up in, and a theme's directory name is the
+            // only thing true of it whether it is installed, merely available, or neither.
+            guard !slug.isEmpty else { return "Use your own colours" }
+            return "Theme: \(Slug.title(slug))"
+        case .background(let file):  return "Background: \(ellipsised(file))"
+        case .nextBackground:        return "Next background"
         }
     }
 

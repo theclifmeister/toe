@@ -57,6 +57,17 @@ public struct GestureConfig: Equatable {
     public init() {}
 }
 
+/// Which theme is in effect, by name.
+///
+/// Empty is toe's own colours — the `[border]` and `[menu]` values below — which is what every
+/// config written before themes existed says, and what it keeps saying.
+public struct ThemeConfig: Equatable {
+    /// Kept exactly as the file spelled it rather than slugified on the way in, so that a name
+    /// which turns out not to exist can be quoted back at the user in the words they used.
+    public var name: String = ""
+    public init() {}
+}
+
 /// The quick menu's colours and size — walker's theme, as config.
 ///
 /// The defaults are Omarchy's default theme (Tokyo Night) resolved through walker's own token
@@ -158,6 +169,7 @@ public struct Config: Equatable {
     public var floating: FloatingSize = FloatingSize()
     public var gestures: GestureConfig = GestureConfig()
     public var menu: MenuConfig = MenuConfig()
+    public var theme: ThemeConfig = ThemeConfig()
     public var misc: MiscConfig = MiscConfig()
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
@@ -174,10 +186,17 @@ public struct Config: Equatable {
     /// before a binding was introduced: their config is never rewritten, so the menu bar item
     /// losing its menu left them with no way to quit toe but `pkill`.
     ///
-    /// Deliberately only the escape hatches. A fallback that covered every binding would be a
-    /// second config competing with yours; these exist so that a config which forgot them
-    /// cannot leave you stuck, in the same spirit as keeping the last good config when a new one
-    /// will not parse.
+    /// Kept short on purpose. A fallback that covered every binding would be a second config
+    /// competing with yours, so the bar is high: either the binding is an escape hatch — a config
+    /// which forgot it leaves you stuck, in the same spirit as keeping the last good config when
+    /// a new one will not parse — or it is a key that has no other way of ever reaching an
+    /// install that predates it *and* is worth that. Four of the five below are the first kind;
+    /// `nextbackground` is the second, and the note beside it says why it cleared the bar.
+    ///
+    /// The bar matters more than the list. Every binding toe adds from here on will have this
+    /// same argument available to it — "existing configs will never see it" is true of all of
+    /// them — and the answer is usually still no, because a key taken from someone who did not
+    /// ask for it is a worse failure than a feature they have to go and bind.
     ///
     /// Editing the config is not one of them, though it used to be. It is an `exec` binding now,
     /// like the ones that open a terminal or a browser, and a fallback would have to name an
@@ -190,6 +209,18 @@ public struct Config: Equatable {
         // list by the same reasoning that put them here.
         ("super-space", .menu(.root)),
         ("super-k", .menu(.keybindings)),
+        // Not an escape hatch, and the one entry here that is not. It is on the list because the
+        // problem this list exists to solve is exactly its problem: a config is never rewritten,
+        // so a binding introduced after you first ran toe reaches nobody who already had one, and
+        // every existing user is in that position for this key. The menu is not a substitute —
+        // Style › Background can pick a picture, but the thing worth having on a key is stepping
+        // through them without stopping to choose, which is the one thing the menu cannot do.
+        //
+        // The cost, stated plainly because it is real: unlike the four above, this is a key you
+        // may not want given away. Binding `nextbackground` anywhere else takes it back — a
+        // fallback applies only when its command is bound nowhere — and if ⌃⌥Space is already
+        // claimed the fallback is dropped rather than registered on top of whatever has it.
+        ("super-ctrl-space", .nextBackground),
     ]
 
     public static let defaultFloatRules: [FloatRule] = [
@@ -383,6 +414,14 @@ public struct Config: Equatable {
             if let v = number(m["font_size"], "menu.font_size", in: 8...72,
                               keeping: config.menu.fontSize, warnings: &config.warnings) {
                 config.menu.fontSize = v
+            }
+        }
+
+        if let t = root["theme"]?.tableValue, let raw = t["name"] {
+            if let v = raw.stringValue {
+                config.theme.name = v.trimmingCharacters(in: .whitespaces)
+            } else {
+                config.warnings.append("theme.name: must be a name in quotes, using no theme")
             }
         }
 

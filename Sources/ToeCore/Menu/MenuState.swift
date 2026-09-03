@@ -121,6 +121,10 @@ public struct MenuState: Equatable {
             return .run(command)
         case .toggleLoginItem:
             return .toggleLoginItem
+        case .note:
+            // Pressing it does nothing, and `.none` is what the menu already does when there is
+            // nothing to do — the panel stays open on the row you are looking at.
+            return .none
         }
     }
 

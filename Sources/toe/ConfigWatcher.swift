@@ -5,20 +5,43 @@ import Foundation
 /// The parent directory is watched as well as the file itself: most editors save atomically
 /// by writing a temporary file and renaming it over the original, which silently kills a
 /// watch bound only to the original file descriptor.
+///
+/// Also pointed at `~/.config/toe/themes`, where the target is a directory rather than a file
+/// and an entry appearing in it is a write to the directory itself — so there the parent watch
+/// is switched off, because the parent is `~/.config/toe` and would fire this watcher on every
+/// save of `toe.toml` as well. That directory's own existence is watched by the config watcher
+/// already, which is what lets a themes folder created after toe started still be picked up.
 final class ConfigWatcher {
 
     private let url: URL
+    private let watchesParent: Bool
+    private let events: DispatchSource.FileSystemEvent
     private var fileSource: DispatchSourceFileSystemObject?
     private var directorySource: DispatchSourceFileSystemObject?
     private var debounce: DispatchWorkItem?
 
     var onChange: (() -> Void)?
 
-    init(url: URL) { self.url = url }
+    /// - Parameter events: what counts as a change. `.attrib` is in the default because the
+    ///   config file is also checked for its permissions, and it is deliberately *out* of the one
+    ///   the theme watches pass: a palette's timestamps are not its colours, and asking to hear
+    ///   about them means hearing about toe's own read of the file it just reloaded for.
+    init(url: URL, watchesParent: Bool = true,
+         events: DispatchSource.FileSystemEvent = [.write, .extend, .attrib, .delete, .rename]) {
+        self.url = url
+        self.watchesParent = watchesParent
+        self.events = events
+    }
 
     func start() {
-        watchDirectory()
+        if watchesParent { watchDirectory() }
         watchFile()
+    }
+
+    func stop() {
+        debounce?.cancel()
+        fileSource?.cancel(); fileSource = nil
+        directorySource?.cancel(); directorySource = nil
     }
 
     private func watchFile() {
@@ -30,7 +53,7 @@ final class ConfigWatcher {
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
-            eventMask: [.write, .extend, .attrib, .delete, .rename],
+            eventMask: events,
             queue: .main)
 
         source.setEventHandler { [weak self] in

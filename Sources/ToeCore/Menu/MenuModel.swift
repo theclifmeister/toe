@@ -15,6 +15,7 @@ public struct MenuItem: Equatable {
     /// moves rather than every test that mentions a row.
     public enum Icon: Equatable, Sendable {
         case gear, book, keyboard, pencil, power, toggleOn, toggleOff
+        case paintbrush, droplet, image
     }
 
     public indirect enum Action: Equatable {
@@ -22,6 +23,10 @@ public struct MenuItem: Equatable {
         case page(MenuPage)
         case run(Command)
         case toggleLoginItem
+        /// A row that says something and does nothing when you press it — "Fetching Omarchy's
+        /// themes…". The alternative was leaving the level looking like a short list rather than
+        /// an unfinished one, which is the sort of thing you stare at wondering if it is broken.
+        case note
     }
 
     public let title: String
@@ -64,13 +69,49 @@ public enum LoginItemState: Equatable, Sendable {
     case unavailable(String)
 }
 
+/// What the Style level needs to draw itself.
+///
+/// A value rather than four parameters, because it is threaded from the Coordinator through
+/// `QuickMenu` to here unchanged, and because it is rebuilt every time the menu opens — that is
+/// what makes a theme folder you created a moment ago appear without a reload.
+///
+/// Every field defaults to empty, and that is not a convenience for tests: it is what a machine
+/// that has never fetched anything actually has. The Theme level still draws — `Your own colours`
+/// is a real row, and it is the one that is current.
+public struct StyleMenu: Equatable {
+    /// Themes on disk — the ones that can be chosen without waiting for anything.
+    public var themes: [ThemeRef]
+    /// Themes Omarchy publishes that this machine does not have. Choosing one downloads it.
+    public var available: [RemoteTheme]
+    /// True while the catalogue is being fetched, so the level can say so rather than looking
+    /// like a list that happens to be short.
+    public var fetching: Bool
+    /// The theme in effect. nil is toe's own colours.
+    public var current: String?
+    /// The current theme's `backgrounds/`, in cycle order.
+    public var backgrounds: [String]
+    public var currentBackground: String?
+
+    public init(themes: [ThemeRef] = [], available: [RemoteTheme] = [], fetching: Bool = false,
+                current: String? = nil,
+                backgrounds: [String] = [], currentBackground: String? = nil) {
+        self.themes = themes
+        self.available = available
+        self.fetching = fetching
+        self.current = current
+        self.backgrounds = backgrounds
+        self.currentBackground = currentBackground
+    }
+}
+
 /// The menu's contents.
 ///
 /// Deliberately a function of the state it displays rather than a constant: a "Run on startup"
 /// row that shows a remembered value instead of launchd's is a row that will eventually lie.
 public enum MenuModel {
 
-    public static func root(loginItem: LoginItemState, bindings: [Binding]) -> [MenuItem] {
+    public static func root(loginItem: LoginItemState, bindings: [Binding],
+                            style: StyleMenu = StyleMenu()) -> [MenuItem] {
         var items: [MenuItem] = []
         // Configure can come out empty — neither of its rows is guaranteed — and a row that
         // leads into an empty level is worse than no row, so the parent goes with it.
@@ -81,8 +122,80 @@ public enum MenuModel {
         items.append(MenuItem(title: "Learn", icon: .book, action: .submenu([
             MenuItem(title: "Keybindings", icon: .keyboard, action: .page(.keybindings)),
         ])))
+        // Omarchy's own order — Learn, then Style — with Quit last by toe's rule. Unlike
+        // Configure, Style is never conditional: three themes ship, so the level it leads to
+        // cannot come out empty.
+        items.append(MenuItem(title: "Style", icon: .paintbrush, action: .submenu(MenuModel.style(style))))
         items.append(MenuItem(title: "Quit", icon: .power, action: .run(.quit)))
         return items
+    }
+
+    /// Omarchy's `Style` level, minus the parts toe has no analogue for.
+    public static func style(_ style: StyleMenu) -> [MenuItem] {
+        var rows = [MenuItem(title: "Theme", icon: .droplet, action: .submenu(themes(style)))]
+        // The Configure rule, one level down: a row that leads into an empty level is worse than
+        // no row. Background appears exactly when the current theme has pictures — which means
+        // when one was downloaded with it, or when you put some there yourself.
+        if !style.backgrounds.isEmpty {
+            rows.append(MenuItem(title: "Background", icon: .image,
+                                 action: .submenu(MenuModel.backgrounds(style))))
+        }
+        return rows
+    }
+
+    /// Every theme toe can see, with the one in effect marked.
+    ///
+    /// Marked with a value rather than by opening the level with the cursor already on it:
+    /// walker preselects, and matching that needs a new mutating entry point on `MenuState`. The
+    /// value column is how the startup toggle already shows its state, so this is the rule the
+    /// menu has rather than a new one.
+    public static func themes(_ style: StyleMenu) -> [MenuItem] {
+        var rows = style.themes.map { theme in
+            MenuItem(title: theme.name,
+                     value: theme.slug == style.current ? "current" : nil,
+                     action: .run(.theme(theme.slug)))
+        }
+
+        // Then what Omarchy publishes and this machine does not have. The size is the disclosure:
+        // these run from a third of a megabyte to nine, and a row that downloaded nine megabytes
+        // without having said so first would be a row that surprised you.
+        rows += style.available.map { theme in
+            MenuItem(title: theme.name,
+                     value: ByteSize.describe(theme.bytes),
+                     action: .run(.theme(theme.slug)))
+        }
+
+        // Said rather than left to be inferred from a short list. Deliberately after the themes
+        // and before the way out, which is where the rows it is waiting for will appear.
+        if style.fetching {
+            rows.append(MenuItem(title: "Fetching Omarchy's themes…", action: .note))
+        }
+
+        // Last rather than first, so the list reads as a list of themes. Short, because a value
+        // in the second column takes its width out of the title's.
+        rows.append(MenuItem(title: "Your own colours",
+                             value: style.current == nil ? "current" : nil,
+                             action: .run(.theme(""))))
+        return rows
+    }
+
+    /// The current theme's pictures, and the row that steps through them.
+    ///
+    /// Shaped exactly like the Theme level above: no icons, and the row that is an *action*
+    /// rather than a choice comes last, the way `Your own colours` does. Both rules are there
+    /// because a level reads as a list only when its rows line up — an icon on one row of four
+    /// indents that row's text past the other three, and it was the only row in the menu that
+    /// did it.
+    public static func backgrounds(_ style: StyleMenu) -> [MenuItem] {
+        var rows = style.backgrounds.map { file in
+            // The whole file name, extension and all: strip it and a folder holding city.jpg
+            // beside city.png gets two rows that say the same thing.
+            MenuItem(title: file,
+                     value: file == style.currentBackground ? "current" : nil,
+                     action: .run(.background(file)))
+        }
+        rows.append(MenuItem(title: "Next background", action: .run(.nextBackground)))
+        return rows
     }
 
     /// The Configure level. Also built on its own, by the menu, when throwing the startup toggle
@@ -149,8 +262,9 @@ public enum MenuModel {
     }
 
     /// The reading order of the README's table: what you do to the focus, then to a window, then
-    /// to a workspace, then to toe itself, and last the bindings that launch something — those
-    /// are the ones a user has replaced with their own, so they belong at the bottom.
+    /// to a workspace, then to how it all looks, then to toe itself, and last the bindings that
+    /// launch something — those are the ones a user has replaced with their own, so they belong
+    /// at the bottom.
     private static func rank(_ command: Command) -> Int {
         switch command {
         case .moveFocus:        return 0
@@ -160,9 +274,10 @@ public enum MenuModel {
         case .moveToWorkspace:  return 4
         case .workspace:        return 5
         case .killActive, .toggleFloating, .toggleSplit, .swapSplit: return 6
-        case .menu:             return 7
-        case .reload, .quit:    return 8
-        case .exec:             return 9
+        case .theme, .background, .nextBackground: return 7
+        case .menu:             return 8
+        case .reload, .quit:    return 9
+        case .exec:             return 10
         }
     }
 }

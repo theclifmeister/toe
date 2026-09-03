@@ -17,8 +17,8 @@ import ToeCore
 enum MenuFont {
 
     private static let familyName = "JetBrainsMono Nerd Font"
-    /// `nf-fa-gear`. Any patch level that has the Font Awesome block has all six below, so one
-    /// probe answers for the set.
+    /// `nf-fa-gear`. Any patch level that has the Font Awesome block has every glyph below, so
+    /// one probe answers for the set.
     private static let probe: Unicode.Scalar = "\u{F013}"
 
     /// nil once resolution has run and found nothing — see `family(size:)`.
@@ -103,6 +103,9 @@ enum MenuFont {
         case .power:     return "\u{F011}"   // nf-fa-power_off
         case .toggleOn:  return "\u{F205}"   // nf-fa-toggle_on
         case .toggleOff: return "\u{F204}"   // nf-fa-toggle_off
+        case .paintbrush: return "\u{F1FC}"  // nf-fa-paint_brush
+        case .droplet:   return "\u{F043}"   // nf-fa-tint
+        case .image:     return "\u{F03E}"   // nf-fa-picture_o
         }
     }
 
@@ -117,6 +120,9 @@ enum MenuFont {
         case .power:     return "power"
         case .toggleOn:  return "switch.2"
         case .toggleOff: return "switch.2"
+        case .paintbrush: return "paintbrush"
+        case .droplet:   return "drop"
+        case .image:     return "photo"
         }
     }
 }
