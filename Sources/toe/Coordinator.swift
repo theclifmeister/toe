@@ -18,6 +18,43 @@ final class Coordinator: WindowTrackerDelegate {
     private let status = StatusItem()
     private let quickMenu = QuickMenu()
     private var watcher: ConfigWatcher?
+    /// Watches `~/.config/toe/themes`, so a theme folder appearing or going away is noticed
+    /// without waiting for anything else to happen. Optional and re-checked on every reload,
+    /// because that directory need not exist — most installs never make one.
+    private var themeWatcher: ConfigWatcher?
+    /// Watches the *current* theme's `colors.toml`, the one file whose contents can change what
+    /// is on screen. Two watchers rather than one because a write inside `themes/rose-pine/` is
+    /// not a write to `themes/` — directory notifications do not travel up — and one watcher per
+    /// installed theme would mean ninety file descriptors to catch edits to eighty-nine palettes
+    /// nothing is drawing with.
+    private var paletteWatcher: ConfigWatcher?
+    private var watchedPalette: String?
+
+    /// Every theme toe can see: the three it ships, merged with whatever is in the themes
+    /// directory. Rebuilt on every reload *and* every time the menu opens, which is what makes a
+    /// folder created a moment ago show up without a reload.
+    private var themes: [ThemeRef] = []
+    /// What Omarchy publishes and this machine has not got. Fetched lazily — see `ThemeCatalogue`.
+    private let available = ThemeCatalogue()
+    /// What a download is doing. Separate from `warnings`, which is replaced wholesale on every
+    /// reload, and from `runtimeWarnings`, which is for things that have gone wrong: this is
+    /// progress, and it clears itself when it finishes.
+    ///
+    /// Two strings because two surfaces show it and they have different room. `bar` goes in the
+    /// menu bar strip, which is where you will actually see it; `note` goes in the tooltip
+    /// behind it, which has room to say it properly.
+    private var progress: (bar: String, note: String)?
+    /// The current theme's pictures, in cycle order, and where in that cycle we are.
+    private var backgrounds: [String] = []
+    private var currentBackground: String?
+    /// The theme whose picture is on screen, so that changing theme puts a matching one up and a
+    /// plain reload does not touch what you are looking at.
+    private var pictureFrom: String?
+    private let wallpaper = Wallpaper()
+    /// The bytes of the config last loaded, so the same file arriving three times over — the
+    /// directory write, the rename, and the reload a theme pick asks for directly — costs one
+    /// reload rather than three. See `loadConfig(force:)`.
+    private var loadedText: String?
 
     private var config = Config.makeDefault()
     private var warnings: [String] = []
@@ -77,8 +114,15 @@ final class Coordinator: WindowTrackerDelegate {
         // Same reasoning, same shape: the reveal-desktop preference is the window server's, not
         // toe's, so a copy that was killed rather than quit may have left it switched off.
         WallpaperClick.repairAfterUncleanExit()
+        // Not the same thing as those two — the desktop picture is not given back on the way out
+        // — but the note of what was there before toe touched it is read at the same point, so a
+        // theme picked in a run that was killed is still reversible in this one. See `Wallpaper`.
+        wallpaper.repairAfterUncleanExit()
         writeDefaultConfigIfMissing()
-        loadConfig()
+        loadConfig(force: true)
+
+        // Starting and finishing both change what the menu bar should say.
+        available.onChange = { [weak self] in self?.refreshStatus() }
 
         watcher = ConfigWatcher(url: Coordinator.configURL)
         watcher?.onChange = { [weak self] in self?.loadConfig() }
@@ -240,18 +284,35 @@ final class Coordinator: WindowTrackerDelegate {
         return nil
     }
 
-    private func loadConfig() {
+    /// - Parameter force: reload even when the file has not changed. The watcher fires two or
+    ///   three times for a single save — once for the directory write, once for the rename — and
+    ///   a theme pick reloads directly as well as being seen by the watcher a beat later. A reload
+    ///   is not free: it clears `desired` and re-writes every window's frame over Accessibility.
+    ///   So the same bytes twice running are ignored, except when something asked for a reload on
+    ///   purpose: `SUPER`+`SHIFT`+`R`, startup, and a palette edit, where `toe.toml` itself has
+    ///   not changed at all.
+    private func loadConfig(force: Bool = false) {
         let text = (try? String(contentsOf: Coordinator.configURL, encoding: .utf8)) ?? Config.defaultTOML
+        guard force || text != loadedText else {
+            // The bytes are the same, so there is nothing to re-apply — but the watches still
+            // have to be re-checked, because *making* `~/.config/toe/themes` is a write to
+            // `~/.config/toe` and changes not one byte of `toe.toml`. Returning above this line
+            // is what left the themes watch unarmed until the next real config edit.
+            applyThemeWatch()
+            return
+        }
         let newConfig: Config
         do {
             newConfig = try Config.parse(text)
         } catch {
             // Keep running on the last good config — a typo must never cost you your keyboard.
             warnings = ["\(Coordinator.configURL.lastPathComponent) \(error)"]
+            loadedText = nil          // so that saving a fix always reloads, unchanged or not
             refreshStatus()
             Log.error("config error, keeping the previous config: \(error)")
             return
         }
+        loadedText = text
 
         config = newConfig
         warnings = newConfig.warnings
@@ -259,25 +320,297 @@ final class Coordinator: WindowTrackerDelegate {
             warnings.append(warning)
         }
 
-        let rejected = hotkeys.register(newConfig.bindings)
+        // The theme is resolved between parsing and the fan-out below, because resolving a name
+        // needs the disk and `Config.parse` is pure text. Everything after this point therefore
+        // reads `config` and not `newConfig` — `newConfig` is the file as written, `config` is
+        // the file with its theme applied, and they differ in exactly the colours. Do not tidy
+        // these back to `newConfig`.
+        applyTheme(to: newConfig)
+        applyThemeWatch()
+
+        let rejected = hotkeys.register(config.bindings)
         warnings += rejected.map { "\($0.source): already claimed by another app" }
 
-        workspaces.options = newConfig.dwindle
-        workspaces.gaps = newConfig.gaps
-        workspaces.floatingSize = newConfig.floating
-        tracker.floatRules = newConfig.floatRules
-        border.apply(newConfig.border)
-        status.persistentWorkspaces = newConfig.bar.persistentWorkspaces
+        workspaces.options = config.dwindle
+        workspaces.gaps = config.gaps
+        workspaces.floatingSize = config.floating
+        tracker.floatRules = config.floatRules
+        border.apply(config.border)
+        status.persistentWorkspaces = config.bar.persistentWorkspaces
         applyDockSwipeSetting()
         applyMiscSettings()
         applySessionSetting()
 
         refreshStatus()
-        Log.info("config loaded: \(newConfig.bindings.count) binding(s), \(warnings.count) warning(s)")
+        Log.info("config loaded: \(config.bindings.count) binding(s), \(warnings.count) warning(s)")
         for warning in warnings { Log.error("config: \(warning)") }
         desired.removeAll()
         corrections.removeAll()          // gaps may have changed; re-write every frame
         apply(refocus: false)
+    }
+
+    // MARK: - Themes
+
+    /// Turns `[theme] name` into colours.
+    ///
+    /// The list is rebuilt here as well as at menu-open time, because it is what the unknown-name
+    /// warning lists as the alternatives, and because a theme directory that appeared since the
+    /// last reload should be resolvable now rather than after another one.
+    private func applyTheme(to parsed: Config) {
+        themes = ThemeStore.installed()
+
+        let wanted = Slug.make(parsed.theme.name)
+        if wanted.isEmpty {
+            // Un-choosing the theme is the moment the picture is actually withdrawn, so it is the
+            // moment it goes back — not on quit. `Wallpaper` says why at length.
+            //
+            // Asked of the disk rather than of `backgrounds`/`currentBackground`, which are both
+            // empty on the first load of every run: pick a theme, quit, clear the name by hand,
+            // start again, and an in-memory test would find nothing to give back and leave the
+            // old theme's picture up for good. The memo on disk is what survives the restart.
+            if BackgroundStore.load() != nil { wallpaper.restore() }
+            backgrounds = []
+            currentBackground = nil
+            pictureFrom = nil
+            BackgroundStore.clear()
+            return
+        }
+
+        switch ThemeStore.theme(named: wanted) {
+        case .success(let theme):
+            config = parsed.applying(theme)
+        case .failure(let error):
+            // The name the *file* spelled goes in the warning, so the tooltip quotes the user's
+            // own words back at them — but it must not survive in `config`, because
+            // `config.theme.name` is joined onto a path in three places below and `Slug.make`
+            // guarantees a safe path component only for the value it returns, not for the raw
+            // text it was given. `name = "../evil"` slugs to `evil`, fails to resolve, and would
+            // otherwise leave the raw `../evil` to be walked out of the themes directory.
+            // What to suggest depends on what there is. "try " followed by nothing is what this
+            // said on a machine with no themes installed — which is every machine that has not
+            // downloaded one yet, and so exactly the machine most in need of being told where to
+            // go. A name that is merely not downloaded yet gets told that specifically, because
+            // it is a different problem from a name that is wrong.
+            let advice: String
+            if available.themes.contains(where: { $0.slug == wanted }) {
+                advice = "Style › Theme can fetch it"
+            } else if !themes.isEmpty {
+                advice = "try " + themes.map(\.slug).joined(separator: ", ")
+            } else {
+                advice = "Style › Theme is where you get one"
+            }
+            warnings.append("theme.name: \(error) — \(advice)")
+            config.theme.name = ""
+            backgrounds = []
+            currentBackground = nil
+            pictureFrom = nil
+            wallpaper.forget()
+            return
+        }
+
+        // `applying` put the *resolved* slug here, so every path built from it below is a
+        // single safe component by construction.
+        backgrounds = ThemeStore.backgrounds(named: config.theme.name)
+        // A remembered name that is no longer in the folder reads as nothing current, which
+        // `Backgrounds.next` turns into starting from the first.
+        currentBackground = BackgroundStore.load().flatMap { backgrounds.contains($0) ? $0 : nil }
+
+        // Changing theme puts up one of the new theme's pictures, as `omarchy-theme-set` does by
+        // calling `omarchy-theme-bg-next` on its way out — a theme that came with backgrounds and
+        // left the old one on screen would be half-applied.
+        //
+        // Only when the theme actually changed, though. This runs on every reload, and re-setting
+        // the picture each time would fight anyone who had cycled to another one, and would put
+        // the wallpaper back every time you saved an unrelated line of your config.
+        //
+        // The one you had is preferred over the first, so a picture you cycled to survives a
+        // restart; setting it again is what primes `Wallpaper` to catch up a Space or a display
+        // that has not seen it, and costs nothing when it is already up — `reapply` reads back
+        // before it writes.
+        let changed = pictureFrom != config.theme.name
+        pictureFrom = config.theme.name
+        guard changed else { return }
+        guard let picture = currentBackground ?? backgrounds.first else {
+            // The new theme brings no pictures, so toe stops having an opinion about the
+            // wallpaper rather than going on catching Spaces up with the last theme's.
+            wallpaper.forget()
+            return
+        }
+        setBackground(picture)
+    }
+
+    /// Arms the two theme watches, and re-points the palette one when the theme changes.
+    ///
+    /// Re-checked on every reload rather than only at startup, because creating
+    /// `~/.config/toe/themes` is itself a write to `~/.config/toe`, which the config watcher
+    /// already sees — so making the folder is enough to arm this without restarting toe.
+    ///
+    /// Both call `loadConfig(force:)`: neither a palette edit nor a theme folder appearing
+    /// changes a byte of `toe.toml`, so the unchanged-bytes early-out would otherwise swallow
+    /// them both.
+    private func applyThemeWatch() {
+        themeWatcher = watch(ThemeStore.directory, existing: themeWatcher)
+
+        // The current theme only. Its palette is the one whose edits can change what is on
+        // screen; the rest are edits to colours nothing is drawing with.
+        // Re-pointed when the theme changes, and also when a theme that had no palette file of
+        // its own grows one, which is why a nil watcher is retried rather than remembered as
+        // absent.
+        let wanted = config.theme.name.isEmpty ? nil : config.theme.name
+        if wanted != watchedPalette {
+            paletteWatcher?.stop()
+            paletteWatcher = nil
+            watchedPalette = wanted
+        }
+        guard let wanted else { return }
+        // The palette *file*, with its directory watched alongside it — the same shape as the
+        // watch on `toe.toml`, and for the same two reasons. A kqueue on a directory reports an
+        // entry being added, removed or renamed, so an editor that saves in place by truncating
+        // `colors.toml` would never be seen by a watch on the folder; and an editor that saves
+        // atomically by renaming a temporary file over it kills a watch bound only to the
+        // original descriptor, which is what the parent watch is for.
+        paletteWatcher = watch(ThemeStore.directory.appendingPathComponent(wanted)
+                                 .appendingPathComponent("colors.toml"),
+                               isDirectory: false, existing: paletteWatcher)
+    }
+
+    /// A watch that is started when its target is there and dropped when it is not.
+    private func watch(_ url: URL, isDirectory wantsDirectory: Bool = true,
+                       existing: ConfigWatcher?) -> ConfigWatcher? {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        guard exists, isDirectory.boolValue == wantsDirectory else {
+            existing?.stop()
+            return nil
+        }
+        if let existing { return existing }
+        let watcher = ConfigWatcher(url: url, watchesParent: !wantsDirectory,
+                                    events: [.write, .extend, .delete, .rename])
+        watcher.onChange = { [weak self] in self?.loadConfig(force: true) }
+        watcher.start()
+        return watcher
+    }
+
+    /// What the Style level of the menu is looking at, read fresh every time it opens.
+    ///
+    /// This is also the only place toe ever reaches the network, and it does not wait for it: the
+    /// level draws from the catalogue already on disk, the request runs behind it, and what it
+    /// finds is there the next time you look. `refreshIfStale` does nothing unless the list is
+    /// missing or a day old.
+    private func styleMenu() -> StyleMenu {
+        available.refreshIfStale()
+        let (installed, offer) = Themes.merged(installed: ThemeStore.installed(),
+                                               available: available.themes)
+        themes = installed
+        let current = config.theme.name.isEmpty ? nil : config.theme.name
+        if let current { backgrounds = ThemeStore.backgrounds(named: current) }
+        return StyleMenu(themes: installed, available: offer,
+                         fetching: available.isFetching,
+                         current: current,
+                         backgrounds: backgrounds, currentBackground: currentBackground)
+    }
+
+    /// Writes the theme into your config rather than holding it in memory, so it survives a
+    /// restart and turns up in the file you version — and so that picking one here and editing
+    /// the line by hand are the same act, producing the same reload.
+    private func setTheme(_ slug: String) {
+        // A theme you have not got is fetched first and set when it arrives, so choosing one from
+        // the list does the same thing whether or not it happens to be on this machine already.
+        // That is the only way one list of themes makes sense rather than two.
+        if !slug.isEmpty, !themes.contains(where: { $0.slug == slug }),
+           let remote = available.themes.first(where: { $0.slug == slug }) {
+            return download(remote)
+        }
+        guard slug.isEmpty || themes.contains(where: { $0.slug == slug }) else {
+            // Refused rather than written: putting a name that resolves to nothing into somebody
+            // else's file, on their behalf, is worse than a log line they can go and read.
+            Log.error("theme: there is no theme called '\(slug)'")
+            return
+        }
+        guard let text = try? String(contentsOf: Coordinator.configURL, encoding: .utf8) else {
+            Log.error("theme: \(Coordinator.configURL.lastPathComponent) could not be read")
+            return
+        }
+        let proposed = ThemeWriter.settingTheme(slug, in: text)
+        guard proposed != text else { return }
+
+        // The writer works a line at a time and cannot see everything a parser can — `["theme"]`
+        // is the same table as `[theme]`, and a header inside a string is not a header at all. So
+        // its own output is parsed back before it is committed, which turns every case it gets
+        // wrong from a config that will not load into a config that was left alone.
+        guard let check = try? Config.parse(proposed), Slug.make(check.theme.name) == slug else {
+            Log.error("theme: declined to edit \(Coordinator.configURL.lastPathComponent) — "
+                      + "the result would not have said what it was asked to say")
+            return
+        }
+        guard ConfigFile.write(proposed, to: Coordinator.configURL) else { return }
+        // Immediately, so the screen changes now; the watcher's echo 150 ms later sees the same
+        // bytes and early-outs.
+        loadConfig(force: true)
+    }
+
+    /// Fetches a theme, then sets it — the menu having already closed, as it does for any row.
+    ///
+    /// The progress goes to the menu bar item's tooltip, which is the only surface toe has for
+    /// saying something while nothing is on screen. Nine megabytes over a slow connection is long
+    /// enough that silence would read as nothing having happened.
+    private func download(_ theme: RemoteTheme) {
+        guard progress == nil else {
+            Log.error("themes: already fetching something")
+            return
+        }
+        progress = (bar: theme.name, note: "Fetching \(theme.name)…")
+        refreshStatus()
+
+        ThemeDownloader.fetch(theme, into: ThemeStore.directory,
+                              progress: { [weak self] step in
+                                  self?.progress = Coordinator.describe(step)
+                                  self?.refreshStatus()
+                              },
+                              completion: { [weak self] result in
+            guard let self else { return }
+            self.progress = nil
+            switch result {
+            case .success:
+                Log.info("themes: fetched \(theme.slug)")
+                // Into `setTheme` rather than straight into the config: the download is a step on
+                // the way to the same act, so it ends up in the same place, with the same write
+                // and the same reload.
+                self.themes = ThemeStore.installed()
+                self.setTheme(theme.slug)
+            case .failure(let why):
+                self.runtimeWarnings.append("\(theme.name) could not be fetched: \(why)")
+                Log.error("themes: \(theme.slug): \(why)")
+                self.refreshStatus()
+            }
+        })
+    }
+
+    /// A download step as the two surfaces want it.
+    ///
+    /// The fraction is left off while the palette is being fetched — one small file, before there
+    /// is a count worth showing — so the bar reads `⟳ Gruvbox` for a moment and then starts
+    /// counting. A theme with no pictures never gets a fraction at all, which is right: there is
+    /// nothing to count.
+    private static func describe(_ step: ThemeDownloader.Progress)
+    -> (bar: String, note: String) {
+        guard step.total > 0, step.done > 0 else {
+            return (bar: step.theme, note: "Fetching \(step.theme)…")
+        }
+        return (bar: "\(step.theme) \(step.done)/\(step.total)",
+                note: "Fetching \(step.theme) — picture \(step.done) of \(step.total)…")
+    }
+
+    private func setBackground(_ file: String) {
+        // Only ever a name out of the enumerated list, so a string from a config file cannot be
+        // joined onto a directory as a path of its own.
+        guard backgrounds.contains(file), !config.theme.name.isEmpty else {
+            Log.error("background: '\(file)' is not one of the current theme's")
+            return
+        }
+        wallpaper.set(ThemeStore.background(named: file, in: config.theme.name))
+        currentBackground = file
+        BackgroundStore.save(file)
     }
 
     /// Starts and stops the dock swipe tap as the config flips, on every reload as well as at
@@ -346,9 +679,18 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func refreshStatus() {
+        // `progress` leads, because it is the thing happening now and the other two are things
+        // that have already gone wrong. It is the only line here that goes away by itself.
+        // A download wins the strip if both are happening: it is the long one, and the one you
+        // asked for. The catalogue is kept out of `progress` itself because that doubles as the
+        // one-download-at-a-time latch, and a list refresh must not hold it.
+        let showing = progress ?? (available.isFetching
+                                   ? (bar: "themes", note: "Fetching Omarchy's themes…")
+                                   : nil)
         status.update(workspaces: workspaceStates(),
-                      warnings: warnings + runtimeWarnings,
-                      accessibilityGranted: AXIsProcessTrusted())
+                      warnings: [showing?.note].compactMap { $0 } + warnings + runtimeWarnings,
+                      accessibilityGranted: AXIsProcessTrusted(),
+                      progress: showing?.bar)
     }
 
     /// What the strip in the menu bar title draws. This runs on every focus change and every
@@ -478,6 +820,10 @@ final class Coordinator: WindowTrackerDelegate {
         desired.removeAll()
         corrections.removeAll()
         apply(refocus: false)
+        // After the layout, never before: a display appearing is a moment the windows have to be
+        // put somewhere, and the desktop picture is cosmetic. `reapply` is a no-op unless a
+        // screen is actually showing something else.
+        wallpaper.reapply()
     }
 
     /// Nothing about the layout has changed — only what is stacked over the focused window,
@@ -496,6 +842,11 @@ final class Coordinator: WindowTrackerDelegate {
     /// because the window now in front may be a fullscreen one it must not draw over.
     func activeSpaceChanged() {
         updateBorder()
+        // With *Displays have separate Spaces* on — the macOS default — a desktop picture is set
+        // per Space and not per screen, so a Space that has not been visited since the theme
+        // changed is still showing the old one. `reapply` checks before it writes, which is what
+        // makes this affordable on a callback that fires every time you change Space.
+        wallpaper.reapply()
     }
 
     // MARK: - Applying the layout
@@ -862,15 +1213,34 @@ final class Coordinator: WindowTrackerDelegate {
             try? process.run()
 
         case .reload:
-            loadConfig()
+            // Forced: this key is pressed precisely when something needs to happen — most often
+            // to re-tile a window an app has pushed out of place — and `toe.toml` will not have
+            // changed, so the unchanged-bytes early-out would make it do nothing at all.
+            loadConfig(force: true)
 
         case .menu(let page):
+            // `styleMenu()` re-reads the themes directory here rather than relying on the last
+            // reload, which is what makes a theme folder you created a moment ago appear the
+            // first time you look. It is a directory listing; nothing is opened.
             quickMenu.toggle(page: page, config: config,
-                             usable: workspaces.monitor(id: workspaces.focusedMonitorID)?.usable)
+                             usable: workspaces.monitor(id: workspaces.focusedMonitorID)?.usable,
+                             style: styleMenu())
 
         case .quit:
             shutDown()
             NSApp.terminate(nil)
+
+        case .theme(let slug):
+            setTheme(slug)
+
+        case .background(let file):
+            setBackground(file)
+
+        case .nextBackground:
+            guard let next = Backgrounds.next(after: currentBackground, in: backgrounds) else {
+                return
+            }
+            setBackground(next)
         }
     }
 }

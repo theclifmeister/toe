@@ -30,7 +30,8 @@ as the defaults.
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
-| `SUPER` + `SPACE` | The quick menu — Configure, Learn, Quit |
+| `SUPER` + `SPACE` | The quick menu — Configure, Learn, Style, Quit |
+| `SUPER` + `CTRL` + `SPACE` | Next background, when the theme has any |
 | `SUPER` + `K` | Every binding, in a list |
 | `SUPER` + `,` | Edit the config — a VS Code window |
 | `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
@@ -130,6 +131,11 @@ toe creates the directory `0700` and the file `0600` on first run, so nothing el
 machine can write it by default. If the file is later found writable by other users, or owned
 by someone else, the menu bar item says so. Symlinking it into a dotfiles repository still
 works, and is checked at the far end of the link.
+
+toe writes this file in exactly one place: the `[theme] name` line, when you pick a theme from
+the quick menu. Every other byte is preserved, the symlink is followed rather than replaced, the
+mode is left as it was, and the result is parsed before it is committed — if it would not say
+what it was asked to say, nothing is written and the log says why.
 
 ### From source
 
@@ -262,6 +268,102 @@ never trap you.
 The costs, plainly: `SUPER`+`SPACE` and `SUPER`+`K` are ⌥Space and ⌥K, and Carbon claims them
 system-wide while toe runs, so neither types ` ` or `˚` any more. Neither collides with a system
 shortcut — Spotlight is ⌘Space — and both are ordinary bindings you can move.
+
+**Themes.** Omarchy's menu has a `Style` › `Theme` level, and it is the surface toe was missing:
+the border and the menu were six hex strings you edited by hand. toe ports it, and the mapping
+turned out to be exact — `[menu]`'s shipped `#1a1b26` / `#a9b1d6` / `#7aa2f7` *are* Tokyo Night's
+`colors.toml`, resolved through walker's tokens. So with no theme set toe already looks like one,
+which is why an install that has never been online does not look unthemed.
+
+**toe ships no themes.** A theme is somebody else's work — palettes and photographs with no stated
+licence — and bundling them inside a notarised app distributed through a Homebrew cask would be
+toe redistributing them rather than Omarchy. So the list you choose from is what is in
+`~/.config/toe/themes` plus what Omarchy publishes, and choosing one you have not got downloads it
+from Omarchy for you. All nineteen of them, rather than a chosen three, and 79 MB of pictures that
+never ship.
+
+`Style` › `Theme` lists what you have first, then what you could have, each with what it would
+cost to fetch:
+
+```
+Tokyo Night           current
+Rose Pine
+Everforest            0.3 MB
+Kanagawa              2.1 MB
+Gruvbox               9.2 MB
+Your own colours
+```
+
+The size is the disclosure — they run from a third of a megabyte to nine, and a row that fetched
+nine without saying so would be a row that surprised you. Choosing one is the same act either way:
+if you have it, it is applied; if you do not, it is fetched and then applied.
+
+**The network, stated plainly.** toe asks for Accessibility and nothing else, and it makes exactly
+two kinds of request, both to github.com and both because you did something: the list of themes
+when you open `Style` › `Theme`, cached and refreshed at most once a day, and a theme when you
+choose one. Nothing at launch, no update check, no telemetry. A machine that has never been online
+has no themes to choose from and toe's own colours, which is the cost of not shipping other
+people's work.
+
+While either is running the menu bar item says so — `⟳ Gruvbox 3/6` after the workspaces, never
+instead of them — because a nine-megabyte download happens with the menu closed and the tooltip
+behind it needs you to already suspect something is happening.
+
+A theme is a folder: `~/.config/toe/themes/<name>/colors.toml` in Omarchy's own format, plus an
+optional `backgrounds/`. That is the same shape a theme directory copied straight out of an
+Omarchy install has, and the same shape the downloader writes, so a theme you fetched and one you
+put there yourself are the same thing afterwards with nothing that treats them differently.
+Nothing is registered: a folder you add appears the moment you next open the menu, and saving its
+palette recolours the screen within about 150 ms the way saving `toe.toml` does.
+
+Pictures come only from that folder. `Style` › `Background` appears exactly when the current theme
+has some, and `SUPER`+`CTRL`+`SPACE` steps through them — the key Omarchy gives to backgrounds,
+where it opens the picker, which here is the menu's job.
+
+The focused border goes **flat** under a theme. That is Omarchy's, not a simplification:
+`hyprland.conf.tpl` renders `col.active_border = rgb({{ accent_strip }})` — one opaque colour,
+`rgb` and not `rgba`. toe's gradient is what you get when you have *not* chosen a theme, and it
+stays exactly as it was for that case, angle and all, so clearing the theme brings the sweep back
+the way you left it.
+
+A theme wins outright: with `[theme] name` set, the colour keys in `[border]` and `[menu]` are not
+consulted, and the sizes still are. Not a merge, because a merge would mean a theme that
+recoloured your border but not your menu depending on which keys you happened to have written.
+And no warning about the shadowed keys either, deliberately — the config toe ships sets every one
+of them, so that warning would fire for everybody the first time they picked a theme, five deep in
+a tooltip. The comment blocks in the file say it instead, where there is room to say it once.
+
+Picking a theme **writes one line of your config** — the `[theme] name` line, with every other
+byte preserved, comments and alignment included — and the existing watcher reloads it. So picking
+one in the menu and editing the line by hand are the same act, with the same result, and the theme
+is in the file you version rather than in a state directory that can disagree with it. The write
+follows a symlink rather than replacing it, since keeping the config in a dotfiles repository is
+supported and an ordinary atomic write would quietly turn the link into a regular file; it keeps
+the mode the file already had, since a config checked out of a repository is often `0644` and a
+silent `chmod` is a diff you did not make. And it parses its own output before committing it: a
+line-based edit cannot see everything a parser can — `["theme"]` is the same table as `[theme]` —
+so anything it would get wrong becomes *toe declined to edit your config* rather than a config
+that will not load.
+
+Everything that arrives over the network is treated as hostile, because it is being written next
+to a file that runs shell commands. The directory is `Slug.make`'s output, so it is one path
+component and cannot be anything else; every filename is checked by shape rather than searched for
+tricks, since "does not contain `..`" is one encoding trick away from being wrong; the palette is
+parsed before anything is moved into place; and a theme is assembled in a temporary directory and
+moved in one step, so a download that fails halfway leaves nothing behind.
+
+The desktop picture is the one piece of this that is not toe's own window. It is set per
+`NSScreen` — and with *Displays have separate Spaces* on, which is the macOS default, that means
+per Space rather than per screen, so a Space you have not visited since the theme changed is
+still showing the old one until toe catches it up on the next switch. Same underlying fact as
+toe's workspaces not being macOS Spaces, one API over — see **Workspaces** above.
+
+It is also the one setting toe changes that it does **not** hand back on quit. The symbolic
+hotkeys and the reveal-desktop preference are given back in `shutDown()` because toe *borrows*
+those — you never asked for `Ctrl`+`↑` to stop working — and it owes them. A wallpaper you chose
+from a menu is the other kind. So it is written down before it is first changed, the way
+CLAUDE.md asks of anything that outlives the process, and given back when you *clear* the theme,
+which is the moment the choice is actually withdrawn rather than the moment toe stops running.
 
 **Hiding.** `⌘H` and `⌘⌥H` take an application's windows out of the layout without closing them:
 the tree reflows around the gap, and `SUPER`+arrows cannot reach them again because they are no
@@ -399,19 +501,33 @@ menu bar item's tooltip — a typo can never leave you without a keyboard. See
 Binding specs parse in both the dash spelling and Omarchy's, so you can paste from either:
 `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
-`reload`, `quit` and the quick menu are bound in code as well as in the file —
-`SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE` and `SUPER`+`K` — so the
-ways out exist whether or not your config mentions them. Your config is never rewritten once it is there, so a binding introduced after you
+`reload`, `quit`, the quick menu and `nextbackground` are bound in code as well as in the file —
+`SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE`, `SUPER`+`K` and
+`SUPER`+`CTRL`+`SPACE` — so they exist whether or not your config mentions them. Your config is never rewritten once it is there, so a binding introduced after you
 first ran toe would otherwise never reach you: that is how the menu bar item losing its menu left
 anyone upgrading with no way to quit but `pkill`. A fallback applies only when the command is
 bound nowhere, so rebinding `quit` keeps your key and does not also collect the default, and a
 fallback whose own combination you have already used for something else is dropped rather than
-registered on top of yours. Opening the config is not on that list: it is an `exec` like any
+registered on top of yours.
+
+The first four are escape hatches — a config that forgot them leaves you stuck. `nextbackground`
+is not, and is the only entry on that list which isn't: it is there because it is a key that
+could otherwise never reach an install that predates it, and because stepping through a theme's
+pictures is the one thing the menu cannot do for you. Those same two rules are how you take it
+back: bind `nextbackground` to another key and `SUPER`+`CTRL`+`SPACE` is yours again, and if you
+already use that combination it is left alone. Opening the config is not on that list: it is an `exec` like any
 other now, and a fallback would have to name an editor toe has no business choosing.
 
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
-`reload`, `menu`, `keybindings`, `quit`.
+`reload`, `menu`, `keybindings`, `theme`, `background`, `nextbackground`, `quit`.
+
+`[theme] name` names a folder in `~/.config/toe/themes` — one you put there, or one the menu
+downloaded from Omarchy; empty is toe's own colours. toe ships none. `theme` takes a name in either spelling (`theme gruvbox`, `theme Tokyo Night`) and,
+alone, clears it. Only `nextbackground` is bound by default, on `SUPER`+`CTRL`+`SPACE`. That is
+the one binding with a macOS shortcut behind it: ⌃⌥Space is *select next input source*, a
+symbolic hotkey the window server resolves ahead of anything toe can register — but one that is
+switched off unless you have two or more input sources.
 
 The TOML parser is a dependency-free subset: tables, arrays of tables, bare and quoted keys,
 basic and literal strings, numbers, booleans, arrays and inline tables. No multi-line strings

@@ -25,6 +25,15 @@ public enum Command: Equatable {
     /// keys — so two cases would give `dispatch` two arms with one body between them.
     case menu(MenuPage)
     case quit
+    /// An Omarchy theme, by slug — `omarchy-theme-set`. Empty clears it and hands your own
+    /// `[border]` and `[menu]` colours back, which is why the argument is the one in the parser
+    /// that may be missing: `theme none` would be wrong, since `none` is a directory somebody
+    /// could legitimately name.
+    case theme(String)
+    /// A picture from the current theme's `backgrounds/`, by file name.
+    case background(String)
+    /// `omarchy-theme-bg-next`.
+    case nextBackground
 }
 
 public extension Command {
@@ -97,6 +106,22 @@ public enum CommandParser {
         case "swapsplit":                   return .swapSplit
         case "reload":                      return .reload
         case "quit", "exit":                return .quit
+
+        // Spelled after `omarchy-theme-set` and `omarchy-theme-bg-next`.
+        //
+        // `theme` is the one verb here whose argument may be absent, and it means *clear the
+        // theme* rather than being an error — see `Command.theme`. It is also the one that
+        // slugifies its argument at the door rather than at the far end, so that `theme "Tokyo
+        // Night"` copied out of an Omarchy config finds the same directory, and so that no
+        // un-slugified string can reach the code that writes this name back into your config.
+        case "theme":                       return .theme(Slug.make(argument))
+        // Not slugified: a background is a file name, with an extension and whatever case the
+        // photographer gave it.
+        case "background", "bg":
+            guard !argument.isEmpty else { throw CommandError.missingArgument(name) }
+            return .background(argument)
+        case "nextbackground", "bgnext", "background-next":
+            return .nextBackground
 
         // Spelled the way `omarchy-menu` and `omarchy-menu keybindings` are invoked, so a
         // binding can be read across from an Omarchy config without translating it.

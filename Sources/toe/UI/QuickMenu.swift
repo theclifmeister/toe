@@ -35,6 +35,10 @@ final class QuickMenu {
     private var state: MenuState?
     private var page: MenuPage = .root
     private var config = Config()
+    /// Handed in at every open rather than held, for the same reason `LoginItem.state()` is read
+    /// there: the menu is a function of what is true when you look at it, and a theme folder that
+    /// appeared a second ago should be in the list.
+    private var style = StyleMenu()
     private var usable: Box?
     private var metrics = MenuMetrics(lineHeight: 22)
     /// Guards the close path against itself: ordering the panel out resigns key, which is one of
@@ -81,13 +85,14 @@ final class QuickMenu {
 
     /// The hotkey. A second press closes: `RegisterEventHotKey` intercepts ahead of the key
     /// window, so `SUPER`+`SPACE` reaches this rather than typing a space into the filter.
-    func toggle(page: MenuPage, config: Config, usable: Box?) {
+    func toggle(page: MenuPage, config: Config, usable: Box?, style: StyleMenu = StyleMenu()) {
         if isVisible, page == self.page {
             close()
             return
         }
         self.config = config
         self.usable = usable
+        self.style = style
         open(page: page)
     }
 
@@ -106,7 +111,7 @@ final class QuickMenu {
 
         let items = page == .keybindings
             ? MenuModel.keybindings(config.bindings, superKey: config.superKey)
-            : MenuModel.root(loginItem: LoginItem.state(), bindings: config.bindings)
+            : MenuModel.root(loginItem: LoginItem.state(), bindings: config.bindings, style: style)
         state = MenuState(root: items, visibleRows: 10)
 
         frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier

@@ -33,8 +33,43 @@ default_split_ratio    = 1.0
 # 0 = even, 1 = favour the new window, 2 = favour the existing one.
 split_bias             = 0
 
+[theme]
+# An Omarchy theme, by name. Empty is toe's own colours — the [border] and [menu] values below —
+# which is what this file has always been, and what it stays until you choose otherwise. Those
+# defaults are Tokyo Night's palette already, resolved the way walker resolves it, so nothing
+# looks unthemed while this is empty.
+#
+# A theme wins outright. With a name set here, the *colour* keys in [border] and [menu] are not
+# consulted at all; the sizes still are — width, angle, radius, opacity, font_size. Omarchy's own
+# theme template sets col.active_border and nothing else, so a theme is exactly that much: the
+# focused border takes the accent, flat, and the quick menu takes the background, the foreground
+# and the accent.
+#
+# SUPER+SPACE > Style > Theme is where you get one. toe ships no themes: a theme is somebody
+# else's work, and the list you choose from is what is in ~/.config/toe/themes plus what Omarchy
+# publishes. Choosing one you have not got downloads it from Omarchy into that folder — palette
+# and pictures — and then sets it, so a theme you fetched and a theme you copied in by hand are
+# the same thing afterwards.
+#
+# That download is the only time toe touches the network, along with the list of themes it fetches
+# when you open Style > Theme, at most once a day. Nothing at launch, no update check, no
+# telemetry; the only host it talks to is github.com. A machine that has never been online has no
+# themes to choose from, and the colours below.
+#
+# The menu rewrites this one line and leaves every other byte of this file alone, so picking a
+# theme there and editing it here are the same act. It refuses to write at all if the result would
+# not parse.
+#
+# A theme is a folder: ~/.config/toe/themes/<name>/colors.toml, in Omarchy's own format, plus an
+# optional backgrounds/ beside it. Nothing has to be registered — one appears in the menu the
+# moment you next open it, and saving its palette recolours the screen the way saving this file
+# does. Style > Background appears exactly when that theme has pictures, and SUPER+CTRL+SPACE
+# steps through them.
+name = ""
+
 [border]
-# Highlights the focused window. Omarchy's col.active_border gradient.
+# Highlights the focused window. Omarchy's col.active_border gradient — and what you see when no
+# theme is set above, since a theme replaces both stops with one flat accent.
 enabled      = true
 width        = 2
 active_start = "#33ccffee"
@@ -89,7 +124,9 @@ prevent_hiding = true
 # ~/.local/state/toe/session.json and put back when toe starts again, so restarting it costs you
 # nothing. Windows are matched on the id the window server gave them, so this is exact rather
 # than a guess; a reboot voids those ids and the file is discarded unread. Set false to start
-# from an empty workspace every time and keep toe off disk.
+# from an empty workspace every time and keep the *layout* off disk. It is not a blanket switch:
+# the theme's current background is remembered in the same directory either way, since that is a
+# choice you made rather than a window arrangement toe worked out for you.
 restore_session = true
 
 [bar]
@@ -103,7 +140,9 @@ persistent_workspaces = 5
 # tree rather than the level you are on, and each hit says which submenu it came from.
 # These are its theme's tokens: Omarchy's default (Tokyo Night) resolved the way walker's
 # stylesheet resolves them — background, foreground (which is also the border), and the accent
-# the selected row's text takes.
+# the selected row's text takes. Which is to say these three are already a theme: setting
+# [theme] name = "tokyo-night" above leaves this block looking exactly as it does now, and only
+# the border moves. The three are ignored while a theme is set; the sizes below are not.
 background = "#1a1b26"
 foreground = "#a9b1d6"
 accent     = "#7aa2f7"
@@ -190,6 +229,17 @@ font_size  = 18
 # takes ⌥Space and ⌥K away from typing ` ` and ˚ for as long as toe runs.
 "super-space"   = "menu"
 "super-k"       = "keybindings"
+# Omarchy's background key. SUPER+CTRL+SPACE is what its bindings.conf gives to backgrounds —
+# there it opens the picker, which here is Style › Background in the menu above, so the key does
+# the thing the menu cannot: step to the next picture without stopping to choose one. Does
+# nothing until the current theme has a backgrounds/ folder with something in it.
+#
+# The one binding here with a macOS shortcut behind it: ⌃⌥Space is "select next input source",
+# and while that is a symbolic hotkey — resolved inside the window server, ahead of anything toe
+# can register — it is switched off unless you have two or more input sources. If you do, and
+# this key changes your keyboard instead of your wallpaper, that is why; move it, or turn the
+# shortcut off in System Settings › Keyboard › Keyboard Shortcuts › Input Sources.
+"super-ctrl-space" = "nextbackground"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current
