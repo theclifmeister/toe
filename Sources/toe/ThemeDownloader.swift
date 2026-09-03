@@ -24,6 +24,14 @@ enum ThemeDownloader {
     /// wallpaper may be; it is a ceiling so a redirect to something enormous cannot fill a disk.
     private static let fileLimit = 64 << 20
     private static let paletteLimit = 64 << 10
+    /// How often a transfer in flight says how much of it has arrived.
+    ///
+    /// Every report rebuilds the menu's tree and redraws the panel, so this is a rate rather than
+    /// a resolution: six a second is smooth to the eye and nowhere near the cost of a keystroke,
+    /// which does the same work. It is also why `Coordinator.refreshMenu` stopped re-reading the
+    /// themes directory — at this rate that was twelve directory listings a second for a list
+    /// that cannot change while a download is running.
+    private static let progressInterval: TimeInterval = 1.0 / 6
     private static let timeout: TimeInterval = 60
 
     enum Failure: Error, CustomStringConvertible {
@@ -40,23 +48,16 @@ enum ThemeDownloader {
         }
     }
 
-    /// How far along a download is.
-    ///
-    /// A name and two numbers rather than a sentence, because two surfaces show this and they
-    /// want different lengths: the menu bar has room for `Gruvbox 3/6` and the tooltip behind it
-    /// has room to say it properly. Building the sentence here would have forced both to use it.
-    struct Progress {
-        let theme: String
-        /// Files finished. Zero while the palette is being fetched — the step that has no
-        /// meaningful fraction, being one small file before the count is even known to matter.
-        let done: Int
-        let total: Int
-    }
-
     /// Downloads `theme` and calls back on the main queue with where it landed.
+    ///
+    /// `progress` reports `ThemeDownload` — ToeCore's own type — rather than a shape of this
+    /// file's. It used to be a local struct carrying the theme's *name* as well, for the menu bar
+    /// strip that built `⟳ Gruvbox 3/6` out of it; the strip is gone, the row that fills instead
+    /// is identified by slug, and what was left was two numbers being copied into a type that
+    /// already held two numbers. This reports the one that has the arithmetic on it.
     static func fetch(_ theme: RemoteTheme,
                       into directory: URL,
-                      progress: @escaping (Progress) -> Void,
+                      progress: @escaping (ThemeDownload) -> Void,
                       completion: @escaping (Result<Void, Failure>) -> Void) {
         let slug = Slug.make(theme.slug)
         guard slug == theme.slug, !slug.isEmpty else {
@@ -70,7 +71,7 @@ enum ThemeDownloader {
     }
 
     private static func fetchSynchronously(_ theme: RemoteTheme, slug: String, into directory: URL,
-                                           progress: @escaping (Progress) -> Void)
+                                           progress: @escaping (ThemeDownload) -> Void)
     -> Result<Void, Failure> {
         let staging = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("toe-theme-\(slug)-\(UUID().uuidString)")
@@ -84,12 +85,25 @@ enum ThemeDownloader {
             return .failure(.couldNotWrite(error.localizedDescription))
         }
 
-        // The palette first: if it will not parse there is no point fetching nine megabytes of
-        // photographs to go with it.
         let total = theme.backgrounds.count
-        DispatchQueue.main.async {
-            progress(Progress(theme: theme.name, done: 0, total: total))
+        let bytesTotal = theme.bytes
+        // Bytes of the pictures finished with. Advanced by the catalogue's figure for each
+        // picture rather than by what actually arrived, so that it lands exactly on `bytesTotal`
+        // at the end however much the two disagreed on the way — the bar reaching its end is
+        // worth more than it being faithful to a size somebody else's repository reported.
+        var landed = 0
+
+        func report(_ fetching: Int, _ bytesDone: Int) {
+            DispatchQueue.main.async {
+                progress(ThemeDownload(slug: slug, fetching: fetching, total: total,
+                                       bytesDone: bytesDone, bytesTotal: bytesTotal))
+            }
         }
+
+        // The palette first: if it will not parse there is no point fetching nine megabytes of
+        // photographs to go with it. `fetching: 0` says so — no picture is in flight yet, so the
+        // row keeps showing what the theme costs until there is a count to put there instead.
+        report(0, 0)
         let paletteData: Data
         switch get(Upstream.file(theme: slug, "colors.toml"), limit: paletteLimit) {
         case .success(let data): paletteData = data
@@ -110,20 +124,30 @@ enum ThemeDownloader {
         }
 
         for (index, picture) in theme.backgrounds.enumerated() {
-            // Checked again here rather than trusted from the catalogue. The catalogue is a cache
-            // — it is a file on disk that something else could have written — and this is the
-            // moment a name becomes a path.
-            guard Catalogue.isSafeFileName(picture.name),
-                  !Backgrounds.isUpstreamBranding(picture.name),
-                  Backgrounds.list([picture.name]).count == 1 else { continue }
-
             // `index + 1`, and reported before the fetch rather than after: the number names the
             // picture being fetched, so it reads as "picture 1 of 2" while that is what is
             // happening, and ends on 2 of 2 rather than stopping at 1.
-            DispatchQueue.main.async {
-                progress(Progress(theme: theme.name, done: index + 1, total: total))
+            report(index + 1, landed)
+
+            // Checked again here rather than trusted from the catalogue. The catalogue is a cache
+            // — it is a file on disk that something else could have written — and this is the
+            // moment a name becomes a path.
+            //
+            // A skipped picture still takes its share of the bar on the way past. It is work
+            // accounted for, and the alternative is a bar that can never reach its end because
+            // one name in the listing was not a name.
+            guard Catalogue.isSafeFileName(picture.name),
+                  !Backgrounds.isUpstreamBranding(picture.name),
+                  Backgrounds.list([picture.name]).count == 1 else {
+                landed += picture.bytes
+                continue
             }
-            switch get(Upstream.file(theme: slug, "backgrounds/\(picture.name)"), limit: fileLimit) {
+
+            switch get(Upstream.file(theme: slug, "backgrounds/\(picture.name)"), limit: fileLimit,
+                       // Capped at what the catalogue said this picture weighs, so a transfer
+                       // that comes in heavier than advertised cannot push the bar past the
+                       // pictures still to come.
+                       received: { received in report(index + 1, landed + min(received, picture.bytes)) }) {
             case .success(let data):
                 // `appendingPathComponent` on a name that has been through both filters above:
                 // no separator, no leading dot, a known image extension.
@@ -133,7 +157,14 @@ enum ThemeDownloader {
                 // part that changes what you see.
                 Log.error("themes: \(theme.slug)/\(picture.name): \(why)")
             }
+            landed += picture.bytes
         }
+
+        // The last word, and the reason the bar reaches its end rather than stopping just short
+        // of it. Every other report is sent before or during a transfer, so without this one the
+        // final state the row ever draws is however much of the last picture had arrived when it
+        // was last asked — which is what "it stops at the last end" looked like.
+        report(total, bytesTotal)
 
         // Into place in one move, so a theme is either there whole or not there.
         let destination = directory.appendingPathComponent(slug)
@@ -154,7 +185,16 @@ enum ThemeDownloader {
     }
 
     /// One synchronous GET, on a queue where blocking is the point.
-    private static func get(_ url: URL, limit: Int) -> Result<Data, Failure> {
+    ///
+    /// - Parameter received: called with the bytes taken in so far, every `progressInterval`,
+    ///   while the transfer is still running. This is why the wait below is a loop rather than the
+    ///   single `semaphore.wait` it used to be: a four-megabyte photograph is the longest thing
+    ///   toe does, and a bar that could only move when a whole file landed sat still for the
+    ///   whole of it. Polling `countOfBytesReceived` rather than a delegate or KVO because this
+    ///   function is already blocking on a semaphore with a deadline — the loop is the wait it
+    ///   was doing anyway, cut into slices.
+    private static func get(_ url: URL, limit: Int,
+                            received: ((Int) -> Void)? = nil) -> Result<Data, Failure> {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
         request.setValue("toe (macOS window manager)", forHTTPHeaderField: "User-Agent")
@@ -162,7 +202,7 @@ enum ThemeDownloader {
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: Result<Data, Failure> = .failure(.network("no answer"))
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
             if let error { return outcome = .failure(.network(error.localizedDescription)) }
             guard let http = response as? HTTPURLResponse else {
@@ -179,9 +219,17 @@ enum ThemeDownloader {
                 return outcome = .failure(.network("the answer was too large"))
             }
             outcome = .success(data)
-        }.resume()
+        }
+        task.resume()
 
-        _ = semaphore.wait(timeout: .now() + timeout + 5)
+        // The same deadline as before, waited out in slices. Reporting between them rather than
+        // after the wait returns, because by then the transfer is over and there is nothing left
+        // to say about it.
+        let deadline = Date().addingTimeInterval(timeout + 5)
+        while semaphore.wait(timeout: .now() + progressInterval) == .timedOut {
+            if Date() >= deadline { break }
+            received?(Int(task.countOfBytesReceived))
+        }
         return outcome
     }
 }

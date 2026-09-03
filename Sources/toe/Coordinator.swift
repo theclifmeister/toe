@@ -40,10 +40,11 @@ final class Coordinator: WindowTrackerDelegate {
     /// reload, and from `runtimeWarnings`, which is for things that have gone wrong: this is
     /// progress, and it clears itself when it finishes.
     ///
-    /// Two strings because two surfaces show it and they have different room. `bar` goes in the
-    /// menu bar strip, which is where you will actually see it; `note` goes in the tooltip
-    /// behind it, which has room to say it properly.
-    private var progress: (bar: String, note: String)?
+    /// One value rather than the pair of pre-built strings this used to hold. Both of those were
+    /// for the menu bar — the strip and the tooltip behind it — and the menu bar has stopped
+    /// saying anything about a download: the quick menu fills the row instead, and a row wants
+    /// the numbers, not a sentence. It doubles as the one-download-at-a-time latch.
+    private var downloading: ThemeDownload?
     /// The current theme's pictures, in cycle order, and where in that cycle we are.
     private var backgrounds: [String] = []
     private var currentBackground: String?
@@ -125,8 +126,10 @@ final class Coordinator: WindowTrackerDelegate {
         writeDefaultConfigIfMissing()
         loadConfig(force: true)
 
-        // Starting and finishing both change what the menu bar should say.
-        available.onChange = { [weak self] in self?.refreshStatus() }
+        // Starting and finishing both change what the Theme level says — the note row appears
+        // and then gives way to the themes it was waiting for, without the menu having to be
+        // closed and opened again to notice.
+        available.onChange = { [weak self] in self?.refreshMenu() }
 
         watcher = ConfigWatcher(url: Coordinator.configURL)
         watcher?.onChange = { [weak self] in self?.loadConfig() }
@@ -346,6 +349,10 @@ final class Coordinator: WindowTrackerDelegate {
         applySessionSetting()
 
         refreshStatus()
+        // The theme may have changed under an open menu — most often because a download just
+        // finished and `setTheme` wrote it — so the row that is now `current` says so without
+        // waiting for the menu to be reopened.
+        refreshMenu()
         Log.info("config loaded: \(config.bindings.count) binding(s), \(warnings.count) warning(s)")
         for warning in warnings { Log.error("config: \(warning)") }
         desired.removeAll()
@@ -501,17 +508,27 @@ final class Coordinator: WindowTrackerDelegate {
     /// level draws from the catalogue already on disk, the request runs behind it, and what it
     /// finds is there the next time you look. `refreshIfStale` does nothing unless the list is
     /// missing or a day old.
-    private func styleMenu() -> StyleMenu {
-        available.refreshIfStale()
-        let (installed, offer) = Themes.merged(installed: ThemeStore.installed(),
-                                               available: available.themes)
-        themes = installed
+    /// - Parameter opening: true when the menu is being opened — the act that asks for a
+    ///   catalogue and for a fresh look at the themes directory. False when this is being rebuilt
+    ///   underneath an *open* menu, where it runs six times a second for as long as a download
+    ///   lasts: neither the directory nor the catalogue can change under it in that time, and two
+    ///   directory listings at that rate is work for nothing. The stored `themes` and
+    ///   `backgrounds` are what the last real look found, and `download`'s completion sets
+    ///   `themes` itself before asking for a reload, so a theme that has just landed is in them.
+    private func styleMenu(opening: Bool = true) -> StyleMenu {
         let current = config.theme.name.isEmpty ? nil : config.theme.name
-        if let current { backgrounds = ThemeStore.backgrounds(named: current) }
+        if opening {
+            available.refreshIfStale()
+            themes = ThemeStore.installed()
+            if let current { backgrounds = ThemeStore.backgrounds(named: current) }
+        }
+        let (installed, offer) = Themes.merged(installed: themes, available: available.themes)
+        themes = installed
         return StyleMenu(themes: installed, available: offer,
                          fetching: available.isFetching,
                          current: current,
-                         backgrounds: backgrounds, currentBackground: currentBackground)
+                         backgrounds: backgrounds, currentBackground: currentBackground,
+                         downloading: downloading)
     }
 
     /// Writes the theme into your config rather than holding it in memory, so it survives a
@@ -553,27 +570,36 @@ final class Coordinator: WindowTrackerDelegate {
         loadConfig(force: true)
     }
 
-    /// Fetches a theme, then sets it — the menu having already closed, as it does for any row.
+    /// Fetches a theme, then sets it.
     ///
-    /// The progress goes to the menu bar item's tooltip, which is the only surface toe has for
-    /// saying something while nothing is on screen. Nine megabytes over a slow connection is long
-    /// enough that silence would read as nothing having happened.
+    /// The menu is still up — `Command.keepsMenuOpen` is true for every theme row — and the
+    /// theme's own row fills as the pictures arrive. That is the only thing toe says about a
+    /// download now: nine megabytes over a slow connection is long enough that silence would
+    /// read as nothing having happened, and the row is where the spending was described in the
+    /// first place, so it is where the eye already is.
+    ///
+    /// Dismissing the menu does not cancel anything — the fetch is on a utility queue and knows
+    /// nothing about the panel. What it costs is the progress: close the menu and the download
+    /// finishes unwatched, announcing itself by the screen changing colour. That is the accepted
+    /// price of taking the strip out of the menu bar.
     private func download(_ theme: RemoteTheme) {
-        guard progress == nil else {
+        guard downloading == nil else {
             Log.error("themes: already fetching something")
             return
         }
-        progress = (bar: theme.name, note: "Fetching \(theme.name)…")
-        refreshStatus()
+        downloading = ThemeDownload(slug: theme.slug, fetching: 0,
+                                    total: theme.backgrounds.count,
+                                    bytesDone: 0, bytesTotal: theme.bytes)
+        refreshMenu()
 
         ThemeDownloader.fetch(theme, into: ThemeStore.directory,
                               progress: { [weak self] step in
-                                  self?.progress = Coordinator.describe(step)
-                                  self?.refreshStatus()
+                                  self?.downloading = step
+                                  self?.refreshMenu()
                               },
                               completion: { [weak self] result in
             guard let self else { return }
-            self.progress = nil
+            self.downloading = nil
             switch result {
             case .success:
                 Log.info("themes: fetched \(theme.slug)")
@@ -582,27 +608,27 @@ final class Coordinator: WindowTrackerDelegate {
                 // and the same reload.
                 self.themes = ThemeStore.installed()
                 self.setTheme(theme.slug)
+                // And then unconditionally, rather than trusting the reload inside `setTheme` to
+                // have happened. It has five early returns — no such theme, the config
+                // unreadable, the line already naming this theme, the rewritten file failing its
+                // own parse, the write refused — and on every one of them there is no reload and
+                // so no refresh. `downloading` is nil by here, so a menu that went unrefreshed
+                // would keep drawing the last progress it was handed: a row stopped part-filled,
+                // which is the one thing a finished download must not look like.
+                //
+                // The third of those returns is not hypothetical. Delete a theme's folder while
+                // your config still names it, then fetch it again from the menu — a normal thing
+                // to do to replace a theme — and the line needs no change, so nothing reloads.
+                self.refreshMenu()
             case .failure(let why):
                 self.runtimeWarnings.append("\(theme.name) could not be fetched: \(why)")
                 Log.error("themes: \(theme.slug): \(why)")
+                // The tooltip still carries a failure — that is a thing that went wrong rather
+                // than progress, and the row it happened on has gone back to saying its size.
                 self.refreshStatus()
+                self.refreshMenu()
             }
         })
-    }
-
-    /// A download step as the two surfaces want it.
-    ///
-    /// The fraction is left off while the palette is being fetched — one small file, before there
-    /// is a count worth showing — so the bar reads `⟳ Gruvbox` for a moment and then starts
-    /// counting. A theme with no pictures never gets a fraction at all, which is right: there is
-    /// nothing to count.
-    private static func describe(_ step: ThemeDownloader.Progress)
-    -> (bar: String, note: String) {
-        guard step.total > 0, step.done > 0 else {
-            return (bar: step.theme, note: "Fetching \(step.theme)…")
-        }
-        return (bar: "\(step.theme) \(step.done)/\(step.total)",
-                note: "Fetching \(step.theme) — picture \(step.done) of \(step.total)…")
     }
 
     private func setBackground(_ file: String) {
@@ -689,18 +715,27 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func refreshStatus() {
-        // `progress` leads, because it is the thing happening now and the other two are things
-        // that have already gone wrong. It is the only line here that goes away by itself.
-        // A download wins the strip if both are happening: it is the long one, and the one you
-        // asked for. The catalogue is kept out of `progress` itself because that doubles as the
-        // one-download-at-a-time latch, and a list refresh must not hold it.
-        let showing = progress ?? (available.isFetching
-                                   ? (bar: "themes", note: "Fetching Omarchy's themes…")
-                                   : nil)
+        // No progress line any more. Both things that used to put one here — a theme downloading
+        // and the catalogue being fetched — are said in the quick menu now, the first by the
+        // theme's own row filling and the second by the note row that was always there. The strip
+        // is back to workspaces and the tooltip to things that have gone wrong, which is what the
+        // menu bar is for: `⟳ Gruvbox 3/6` was a second, worse copy of a list the menu draws
+        // properly, and it was on screen at the moment the user was looking at the menu anyway.
         status.update(workspaces: workspaceStates(),
-                      warnings: [showing?.note].compactMap { $0 } + warnings + runtimeWarnings,
-                      accessibilityGranted: AXIsProcessTrusted(),
-                      progress: showing?.bar)
+                      warnings: warnings + runtimeWarnings,
+                      accessibilityGranted: AXIsProcessTrusted())
+    }
+
+    /// Pushes the theme state into the menu, if it is open.
+    ///
+    /// Separate from `refreshStatus` and deliberately not called from it: `refreshStatus` runs on
+    /// every focus change, and this rebuilds the menu's whole tree and re-lays the panel out.
+    /// Called only where what the menu draws has actually changed — a download starting,
+    /// stepping on, finishing or failing; the catalogue arriving; and a reload, which is what
+    /// carries a newly applied theme's colours into the panel as well as its `current` marker.
+    private func refreshMenu() {
+        guard quickMenu.isVisible else { return }
+        quickMenu.update(config: config, style: styleMenu(opening: false))
     }
 
     /// What the strip in the menu bar title draws. This runs on every focus change and every

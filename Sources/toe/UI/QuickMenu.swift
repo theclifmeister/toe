@@ -39,6 +39,13 @@ final class QuickMenu {
     /// there: the menu is a function of what is true when you look at it, and a theme folder that
     /// appeared a second ago should be in the list.
     private var style = StyleMenu()
+    /// launchd's answer, read once when the menu opened.
+    ///
+    /// Held rather than re-read by `update(config:style:)`, because that runs six times a second
+    /// for as long as a download lasts and `LoginItem.state()` shells out to `launchctl`. Nothing can change it
+    /// while the menu is up except the toggle itself, which rebuilds its own level with the fresh
+    /// answer and does not come through here.
+    private var loginItem: LoginItemState = .off
     private var usable: Box?
     private var metrics = MenuMetrics(lineHeight: 22)
     /// Guards the close path against itself: ordering the panel out resigns key, which is one of
@@ -100,18 +107,12 @@ final class QuickMenu {
         self.page = page
         MenuFont.register()
 
-        let font = MenuFont.text(size: config.menu.fontSize)
-        // Measured rather than assumed: `MenuLayout` cannot ask a font how tall a line is, and
-        // every metric below it is derived from this one.
-        metrics = MenuMetrics(fontSize: config.menu.fontSize,
-                              lineHeight: ceil(Double(font.ascender - font.descender + font.leading)))
-        let subtitle = MenuFont.text(size: config.menu.fontSize * Self.subtitleScale)
-        metrics.subtitleLineHeight =
-            ceil(Double(subtitle.ascender - subtitle.descender + subtitle.leading))
+        measure()
 
+        loginItem = LoginItem.state()
         let items = page == .keybindings
             ? MenuModel.keybindings(config.bindings, superKey: config.superKey)
-            : MenuModel.root(loginItem: LoginItem.state(), bindings: config.bindings, style: style)
+            : MenuModel.root(loginItem: loginItem, bindings: config.bindings, style: style)
         state = MenuState(root: items, visibleRows: 10)
 
         frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -119,6 +120,56 @@ final class QuickMenu {
         layoutAndRender()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(view)
+    }
+
+    /// Line heights, measured from the font the config asks for.
+    ///
+    /// Measured rather than assumed: `MenuLayout` cannot ask a font how tall a line is, and every
+    /// metric below it is derived from this one. Its own function rather than part of `open`
+    /// because `update` needs it too — a config arriving while the menu is up can have changed
+    /// `font_size`, and every row height and the panel's own height come from here.
+    private func measure() {
+        let font = MenuFont.text(size: config.menu.fontSize)
+        metrics = MenuMetrics(fontSize: config.menu.fontSize,
+                              lineHeight: ceil(Double(font.ascender - font.descender + font.leading)))
+        let subtitle = MenuFont.text(size: config.menu.fontSize * Self.subtitleScale)
+        metrics.subtitleLineHeight =
+            ceil(Double(subtitle.ascender - subtitle.descender + subtitle.leading))
+    }
+
+    /// New theme state, into a menu that is already open.
+    ///
+    /// The catalogue arriving and a download getting a picture further both change what the rows
+    /// in front of you say, and until now neither reached them: `style` was handed in at open and
+    /// held, so the list was whatever was true when you pressed the key. That was survivable
+    /// while a download had the menu bar to talk through and is not now that the row is the only
+    /// surface it has.
+    ///
+    /// The config comes with it, and that is not incidental. Finishing a download *applies* the
+    /// theme, which is to say it rewrites `[menu]` — so a panel still drawing from the config it
+    /// was opened with would sit there in the old theme's colours while its own rows announced
+    /// the new one as `current`. The picker has to restyle itself, because it is the one surface
+    /// on screen at the moment a theme changes.
+    ///
+    /// Only the root page is rebuilt: the keybindings page is a different tree with no theme rows
+    /// in it, and rebuilding it from `MenuModel.root` would replace the page under the user. It
+    /// still gets the new colours, which is why the re-render is outside that branch.
+    func update(config: Config, style: StyleMenu) {
+        // Row heights only change when the font does, and this runs six times a second for as
+        // long as a download lasts.
+        let fontChanged = config.menu.fontSize != self.config.menu.fontSize
+        self.config = config
+        self.style = style
+        guard panel.isVisible, state != nil else { return }
+        if fontChanged { measure() }
+        if page == .root {
+            state?.rebuild(root: MenuModel.root(loginItem: loginItem, bindings: config.bindings,
+                                                style: style))
+        }
+        // Through the full path rather than straight to `render()`: a level that gained or lost
+        // rows — the fetching note going away, a downloaded theme moving up into the installed
+        // list — changes how tall the panel wants to be, and so does a new `font_size`.
+        layoutAndRender()
     }
 
     func close() {
@@ -202,10 +253,14 @@ final class QuickMenu {
             if !setup.isEmpty { state?.replaceLevel(with: setup) }
             layoutAndRender()
         case .run(let command):
-            // Closed first, and dispatched a turn later: an `exec` brings another application
-            // forward and `quit` tears the process down, and both want the panel gone and the
-            // keyboard handed back before they begin.
-            close()
+            // Theme rows stay — `Command.keepsMenuOpen` says why at length. Everything else
+            // goes: an `exec` brings another application forward and `quit` tears the process
+            // down, and both want the panel gone and the keyboard handed back before they begin.
+            //
+            // Still dispatched a turn later either way, so the two paths differ in one thing
+            // only. Escape or a click elsewhere closes the menu as it always did, and anything
+            // it started carries on behind it; what it does not do is close by itself.
+            if !command.keepsMenuOpen { close() }
             DispatchQueue.main.async { [weak self] in self?.onCommand?(command) }
         }
     }

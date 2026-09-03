@@ -112,6 +112,20 @@ public enum MenuLayout {
             w: width - contentInset(m) * 2, h: rowHeight(m))
     }
 
+    /// The filled part of a row that is showing progress — the whole row, cut off at `fraction`.
+    ///
+    /// The whole row and not an inset bar inside it, deliberately: at walker's row height there
+    /// is no room for a bar that is a control in its own right without the row becoming two
+    /// things stacked, and the row already has a shape the eye knows. So the row *is* the bar,
+    /// the way `child:selected` is already a wash across the whole of it.
+    ///
+    /// Clamped both ends, because the fraction arrives from arithmetic over a count that comes
+    /// off the network: a catalogue claiming a theme has -1 pictures should draw nothing, not a
+    /// rectangle running the other way out of the panel.
+    public static func progressFrame(inRow row: Box, fraction: Double) -> Box {
+        Box(x: row.x, y: row.y, w: row.w * min(1, max(0, fraction)), h: row.h)
+    }
+
     public static func iconFrame(inRow row: Box, _ m: MenuMetrics) -> Box {
         // Centred on the row as a whole, which is where the eye puts it when the row is two
         // lines tall — Omarchy's menu sets its icons the same way.

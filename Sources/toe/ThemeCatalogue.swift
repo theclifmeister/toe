@@ -8,17 +8,29 @@ import ToeCore
 /// catalogue is fetched when you open `Style › Theme` and at most once a day, and a theme is
 /// downloaded only when you choose it.
 enum Upstream {
-    /// The numeric id rather than `basecamp/omarchy`, because the repository has been renamed
-    /// once already and an id does not move.
+    /// The numeric id rather than `omacom/omarchy`, because the repository has now been renamed
+    /// twice — `basecamp` to `omacom` — and an id does not move. The owner still has to be spelled
+    /// out for `raw.githubusercontent.com`, which takes a path and not an id; that one is the
+    /// current name, and GitHub keeps serving the old one, so a rename shows up as a stale
+    /// string here rather than as a broken download.
     static let repository = "994093166"
-    static let branch = "master"
+
+    /// Omarchy 4's branch, and the repository's default. Not `master`, which is where toe looked
+    /// first and which stopped moving at Omarchy 3.8.5 in August 2026: every release from
+    /// v3.8.4 onwards has been cut from `quattro`, and the three themes added since — Last
+    /// Horizon, Lupine, Solitude — exist only here. The catalogue and the palette both had to
+    /// learn something for this: the backgrounds were mostly re-encoded to webp and renumbered,
+    /// which is why `Catalogue.currentVersion` went up rather than letting a cached listing point
+    /// at files that are no longer there, and `colors.toml` was rewritten, which `Palette.parse`
+    /// now reads in both spellings.
+    static let branch = "quattro"
 
     static var tree: URL {
         URL(string: "https://api.github.com/repositories/\(repository)/git/trees/\(branch)?recursive=1")!
     }
 
     static func file(theme slug: String, _ path: String) -> URL {
-        URL(string: "https://raw.githubusercontent.com/basecamp/omarchy/\(branch)/themes/\(slug)/\(path)")!
+        URL(string: "https://raw.githubusercontent.com/omacom/omarchy/\(branch)/themes/\(slug)/\(path)")!
     }
 
     /// Every host toe is allowed to end up talking to. Checked after redirects rather than

@@ -36,19 +36,29 @@ public struct MenuItem: Equatable {
     public let icon: Icon?
     /// The second column: `on`/`off` for the login toggle, what it does for a keybinding row.
     public let value: String?
+    /// How full to draw the row, 0…1, or nil for the ordinary case of a row that is not doing
+    /// anything. Set on the theme being downloaded, and the reason a download is visible at all
+    /// now that the menu bar has stopped saying so.
+    ///
+    /// On `MenuItem` rather than on the theme rows specifically, because the drawing is generic:
+    /// `MenuView` fills whatever row carries this, so the next thing that takes time — and there
+    /// will be one — does not need a second way of showing it.
+    public let progress: Double?
     public let action: Action
 
     public init(title: String, subtitle: String? = nil, icon: Icon? = nil,
-                value: String? = nil, action: Action) {
+                value: String? = nil, progress: Double? = nil, action: Action) {
         self.title = title
         self.subtitle = subtitle
         self.icon = icon
         self.value = value
+        self.progress = progress
         self.action = action
     }
 
     public func with(subtitle: String?) -> MenuItem {
-        MenuItem(title: title, subtitle: subtitle, icon: icon, value: value, action: action)
+        MenuItem(title: title, subtitle: subtitle, icon: icon, value: value, progress: progress,
+                 action: action)
     }
 
     /// walker marks the rows that lead somewhere with a trailing `›`, right-aligned.
@@ -91,16 +101,21 @@ public struct StyleMenu: Equatable {
     /// The current theme's `backgrounds/`, in cycle order.
     public var backgrounds: [String]
     public var currentBackground: String?
+    /// The theme being fetched right now, if one is. Its row fills as the pictures arrive, which
+    /// is the whole of what toe says about a download since the menu bar stopped saying it.
+    public var downloading: ThemeDownload?
 
     public init(themes: [ThemeRef] = [], available: [RemoteTheme] = [], fetching: Bool = false,
                 current: String? = nil,
-                backgrounds: [String] = [], currentBackground: String? = nil) {
+                backgrounds: [String] = [], currentBackground: String? = nil,
+                downloading: ThemeDownload? = nil) {
         self.themes = themes
         self.available = available
         self.fetching = fetching
         self.current = current
         self.backgrounds = backgrounds
         self.currentBackground = currentBackground
+        self.downloading = downloading
     }
 }
 
@@ -160,9 +175,14 @@ public enum MenuModel {
         // these run from a third of a megabyte to nine, and a row that downloaded nine megabytes
         // without having said so first would be a row that surprised you.
         rows += style.available.map { theme in
-            MenuItem(title: theme.name,
-                     value: ByteSize.describe(theme.bytes),
-                     action: .run(.theme(theme.slug)))
+            // The one being fetched trades its size for a count and starts filling: the size was
+            // there to tell you what you were about to spend, and once you have spent it the
+            // question has become how much longer.
+            let download = style.downloading?.slug == theme.slug ? style.downloading : nil
+            return MenuItem(title: theme.name,
+                            value: download?.label ?? ByteSize.describe(theme.bytes),
+                            progress: download?.fraction,
+                            action: .run(.theme(theme.slug)))
         }
 
         // Said rather than left to be inferred from a short list. Deliberately after the themes

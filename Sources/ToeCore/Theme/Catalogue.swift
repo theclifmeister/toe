@@ -31,7 +31,15 @@ public struct RemoteTheme: Codable, Equatable, Sendable {
 
 /// Every theme Omarchy publishes, as of the last time toe asked.
 public struct Catalogue: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    /// Bumped to 2 when toe moved from Omarchy's `master` branch to `quattro`, which is a change
+    /// a cached listing cannot survive: Omarchy 4 re-encoded most of the backgrounds to webp and
+    /// renumbered them, and only nine of the fifty-nine filenames on `master` still exist. A
+    /// `catalogue.json` written against the old branch therefore names pictures that are gone,
+    /// and choosing one of those themes would 404 partway through the download rather than fail
+    /// in any way the menu could explain. `load()` discards a catalogue whose version is not this
+    /// one, so the bump is what makes that cache miss happen at once rather than whenever the
+    /// 24-hour staleness window next comes round.
+    public static let currentVersion = 2
 
     public var version: Int
     public var fetchedAt: Date
