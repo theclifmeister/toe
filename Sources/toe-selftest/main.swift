@@ -876,8 +876,10 @@ h.test("the shipped default config parses cleanly") { t in
     t.equal(binding("super-space")?.command, .menu(.root), "SUPER+SPACE opens the quick menu")
     t.equal(binding("super-space")?.keyCode, 0x31, "space key code")
     t.equal(binding("super-k")?.command, .menu(.keybindings), "SUPER+K lists the bindings")
-    t.equal(binding("super-ctrl-space")?.command, .nextBackground,
-            "SUPER+CTRL+SPACE is the key Omarchy gives to backgrounds")
+    t.equal(binding("super-ctrl-space")?.command, .menu(.background),
+            "SUPER+CTRL+SPACE opens the background picker, as it does in Omarchy")
+    t.equal(binding("super-shift-ctrl-space")?.command, .menu(.theme),
+            "and SUPER+SHIFT+CTRL+SPACE the theme one, the same key upstream binds")
     t.equal(c.menu.background, "#1a1b26", "the menu ships Omarchy's Tokyo Night background")
 
     let arrows = ["super-left", "super-right", "super-up", "super-down"]
@@ -993,7 +995,7 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
 
     // The shipped config binds them itself, so nothing should be duplicated.
     let shipped = try Config.parse(Config.defaultTOML)
-    for command in [Command.quit, .reload, .nextBackground] {
+    for command in [Command.quit, .reload, .menu(.background), .menu(.theme)] {
         t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
                 "the shipped config binds \(command) exactly once")
     }
@@ -1002,13 +1004,21 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     // others are — a config is never rewritten, so a key added later reaches nobody who already
     // had one — and it obeys the same two rules, which is what makes it something you can take
     // back rather than something done to you.
-    t.equal(binding(old, .nextBackground)?.source, "super-ctrl-space",
-            "a config written before backgrounds existed still gets the key")
-    let moved = try Config.parse("[binds]\n\"super-b\" = \"nextbackground\"\n")
-    t.equal(binding(moved, .nextBackground)?.source, "super-b", "binding it elsewhere takes the key back")
-    t.equal(moved.bindings.filter { $0.command == .nextBackground }.count, 1, "and not twice")
+    t.equal(binding(old, .menu(.background))?.source, "super-ctrl-space",
+            "a config written before backgrounds existed still gets Omarchy's key for them")
+    t.equal(binding(old, .menu(.theme))?.source, "super-shift-ctrl-space", "and the theme one")
+    let moved = try Config.parse("[binds]\n\"super-b\" = \"menu background\"\n")
+    t.equal(binding(moved, .menu(.background))?.source, "super-b",
+            "binding it elsewhere takes the key back")
+    // The key changed hands in the release that followed Omarchy onto quattro. A config that
+    // still names the old command keeps it, because a fallback never lands on a taken key.
+    let stepping = try Config.parse("[binds]\n\"super-ctrl-space\" = \"nextbackground\"\n")
+    t.equal(binding(stepping, .nextBackground)?.source, "super-ctrl-space",
+            "an upgrader who had the old line goes on stepping through pictures")
+    t.equal(binding(stepping, .menu(.background)), nil, "and is not given the picker on top of it")
+    t.equal(moved.bindings.filter { $0.command == .menu(.background) }.count, 1, "and not twice")
     let taken = try Config.parse("[binds]\n\"super-ctrl-space\" = \"killactive\"\n")
-    t.equal(binding(taken, .nextBackground), nil, "and a key you already use is left alone")
+    t.equal(binding(taken, .menu(.background)), nil, "and a key you already use is left alone")
     t.equal(binding(taken, .killActive)?.source, "super-ctrl-space", "still doing what you asked")
 }
 
@@ -1653,12 +1663,12 @@ h.test("typing puts the selection back at the top") { t in
 h.test("a submenu is entered, backed out of, and clears the query on the way in") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .on, bindings: []), visibleRows: 10)
     t.equal(m.prompt, "Go…", "walker's placeholder at the root")
-    m.type("configure")
-    t.equal(m.visible.count, 1, "one row matches 'configure'")
-    t.equal(m.activate(), .pushed, "Configure descends rather than dispatching")
+    m.type("setup")
+    t.equal(m.visible.count, 1, "one row matches 'setup'")
+    t.equal(m.activate(), .pushed, "Setup descends rather than dispatching")
     t.equal(m.query, "", "the query does not follow you into the submenu")
-    t.equal(m.breadcrumb, ["Configure"], "the level is named")
-    t.equal(m.prompt, "Configure…", "and the placeholder says where you are")
+    t.equal(m.breadcrumb, ["Setup"], "the level is named")
+    t.equal(m.prompt, "Setup…", "and the placeholder says where you are")
     t.equal(m.visible.map(\.title), ["Run on startup"], "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
     t.equal(m.pop(), .closed, "and closes at the root")
@@ -1707,7 +1717,7 @@ h.test("typing searches the whole tree, not the level in front of you") { t in
     m.type("startup")
     t.equal(m.visible.map(\.title), ["Run on startup"],
             "found two levels down without anyone having to go there")
-    t.equal(m.visible.first?.subtitle, "Configure", "and the row says where it lives")
+    t.equal(m.visible.first?.subtitle, "Setup", "and the row says where it lives")
     t.equal(m.activate(), .toggleLoginItem, "acting on it needs no descent either")
 
     var deep = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
@@ -1730,14 +1740,14 @@ h.test("an empty query is one level at a time, with no paths") { t in
     m.type("z")
     t.equal(m.visible.count, 0, "nothing matches")
     m.backspace()
-    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Style", "Quit"], "the level comes back")
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "the level comes back")
     t.expect(m.visible.allSatisfy { $0.subtitle == nil },
              "and the paths go away with the search that needed them")
 }
 
 h.test("the rows lead where the menu says they do") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Configure", "Learn", "Style", "Quit"], "the whole menu, bare minimum")
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "the whole menu, bare minimum")
     t.equal(m.visible.map(\.leadsOn), [true, true, true, false], "three lead on, Quit acts")
     m.type("quit")
     t.equal(m.activate(), .run(.quit), "and Quit dispatches rather than descending")
@@ -1751,9 +1761,9 @@ h.test("the rows lead where the menu says they do") { t in
 h.test("the startup row reads the state it is handed") { t in
     func startup(_ state: LoginItemState) -> MenuItem? {
         let root = MenuModel.root(loginItem: state, bindings: [])
-        // By title rather than by position: Configure is the first row only while it is there
-        // at all, and the case below is the one where it is not.
-        guard case .submenu(let setup)? = root.first(where: { $0.title == "Configure" })?.action
+        // By title rather than by position: Setup moves as Install and Remove come and go with
+        // the catalogue, and in the case below it is not there at all.
+        guard case .submenu(let setup)? = root.first(where: { $0.title == "Setup" })?.action
         else { return nil }
         return setup.first
     }
@@ -1765,26 +1775,27 @@ h.test("the startup row reads the state it is handed") { t in
             + "throw is worse than one you were never offered")
 }
 
-h.test("the Edit configuration row is your binding, not toe's idea of an editor") { t in
+h.test("the Config row is your binding, not toe's idea of an editor") { t in
     func rows(_ toml: String, loginItem: LoginItemState = .off) throws -> [MenuItem] {
-        MenuModel.configure(loginItem: loginItem, bindings: try Config.parse(toml).bindings)
+        MenuModel.setup(loginItem: loginItem, bindings: try Config.parse(toml).bindings)
     }
 
     // The shipped config: the row runs exactly the line the file bound, character for character.
+    // Omarchy's `setup.config` first, then toe's own row — the ported rows lead.
     let shipped = try rows(Config.defaultTOML)
-    t.equal(shipped.map(\.title), ["Run on startup", "Edit configuration"], "both rows")
-    t.equal(shipped.last?.action,
+    t.equal(shipped.map(\.title), ["Config", "Run on startup"], "both rows, Omarchy's leading")
+    t.equal(shipped.first?.action,
             .run(.exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml")),
             "and it opens the config the way your config says to")
 
     // Point it at another editor and the row follows — nothing here names one.
     let zed = try rows("[binds]\n\"super-comma\" = \"exec open -a Zed ~/.config/toe/toe.toml\"\n")
-    t.equal(zed.last?.action, .run(.exec("open -a Zed ~/.config/toe/toe.toml")),
+    t.equal(zed.first?.action, .run(.exec("open -a Zed ~/.config/toe/toe.toml")),
             "the menu opens Zed because the config does")
 
     // On another key, too: the row is found by what it does, not by where it is bound.
     let moved = try rows("[binds]\n\"super-shift-c\" = \"exec open -e ~/.config/toe/toe.toml\"\n")
-    t.equal(moved.last?.action, .run(.exec("open -e ~/.config/toe/toe.toml")),
+    t.equal(moved.first?.action, .run(.exec("open -e ~/.config/toe/toe.toml")),
             "SUPER+SHIFT+C is as good as SUPER+, — the row follows the binding")
 
     // An exec that opens something else is not an editor for this file.
@@ -1795,15 +1806,14 @@ h.test("the Edit configuration row is your binding, not toe's idea of an editor"
                            bindings: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n").bindings)
                 .map(\.title),
             ["Learn", "Style", "Quit"],
-            "and with the startup row gone as well, Configure has nothing left to hold")
+            "and with the startup row gone as well, Setup has nothing left to hold")
 
     // The row is there even when the startup toggle cannot be.
     let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
-    t.equal(buildDir.map(\.title), ["Edit configuration"],
-            "the one row that works is still offered")
+    t.equal(buildDir.map(\.title), ["Config"], "the one row that works is still offered")
 }
 
-h.test("Configure goes with the startup row, being all that was left in it") { t in
+h.test("Setup goes with the startup row, being all that was left in it") { t in
     let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
                       visibleRows: 10)
     t.equal(m.visible.map(\.title), ["Learn", "Style", "Quit"],
@@ -1917,10 +1927,14 @@ h.test("a download's label names the picture in flight, not the last one finishe
 }
 
 h.test("the theme being downloaded is the row that fills") { t in
-    let rows = MenuModel.themes(downloadingStyle(fetching: 3, bytesDone: 200_000))
+    let style = downloadingStyle(fetching: 3, bytesDone: 200_000)
+    // Install lists what Omarchy publishes; Style lists what is on the disk. A download happens
+    // in the first and lands in the second, which is why the fill is asserted on Install's rows
+    // and the `✓` on Style's.
+    let rows = MenuModel.installableThemes(style)
     guard let solitude = rows.first(where: { $0.title == "Solitude" }),
           let lupine = rows.first(where: { $0.title == "Lupine" }),
-          let gruvbox = rows.first(where: { $0.title == "Gruvbox" }) else {
+          let gruvbox = MenuModel.themes(style).first(where: { $0.title == "Gruvbox" }) else {
         return t.expect(false, "all three themes should have rows")
     }
     t.equal(solitude.progress, 200_000.0 / 4_400_000,
@@ -1931,10 +1945,10 @@ h.test("the theme being downloaded is the row that fills") { t in
     t.equal(lupine.progress, nil, "the other themes on offer are untouched")
     t.equal(lupine.value, "0.4 MB", "and still say what they cost")
     t.equal(gruvbox.progress, nil, "as is the one already on disk")
-    t.equal(gruvbox.value, "current", "which still says it is the one in effect")
+    t.equal(gruvbox.value, MenuModel.checkmark, "which still says it is the one in effect")
 
     // Nothing downloading is the ordinary case, and no row should carry a fraction in it.
-    let idle = MenuModel.themes(StyleMenu(themes: [], available: [
+    let idle = MenuModel.installableThemes(StyleMenu(themes: [], available: [
         RemoteTheme(slug: "solitude", name: "Solitude", backgrounds: []),
     ]))
     t.equal(idle.compactMap { $0.progress }.count, 0, "with nothing being fetched, no row fills")
@@ -1981,7 +1995,9 @@ h.test("a filling row is the row cut off at the fraction") { t in
 h.test("rebuilding under an open menu leaves you where you were standing") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
                                            style: downloadingStyle(fetching: 1, bytesDone: 0)), visibleRows: 10)
-    // Down into Style › Theme, the way a user gets there.
+    // Down into Install › Style › Theme, the way a user gets to a theme they have not got.
+    while m.selectedItem?.title != "Install" { m.move(by: 1) }
+    t.equal(m.activate(), .pushed, "into Install")
     while m.selectedItem?.title != "Style" { m.move(by: 1) }
     t.equal(m.activate(), .pushed, "into Style")
     while m.selectedItem?.title != "Theme" { m.move(by: 1) }
@@ -1994,7 +2010,7 @@ h.test("rebuilding under an open menu leaves you where you were standing") { t i
     // rungs down and the menu cannot know which of MenuModel's builders made it.
     m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [],
                                    style: downloadingStyle(fetching: 5, bytesDone: 2_400_000)))
-    t.equal(m.breadcrumb, ["Style", "Theme"], "still on the level it was on")
+    t.equal(m.breadcrumb, ["Install", "Style", "Theme"], "still on the level it was on")
     t.equal(m.selection, standingOn, "still on the row it was on")
     t.equal(m.selectedItem?.title, "Solitude", "which is still the same row")
     t.equal(m.selectedItem?.progress, 2_400_000.0 / 4_400_000, "and it has filled further")
@@ -2026,18 +2042,15 @@ h.test("a rebuild that cannot re-enter a level surfaces one rung up") { t in
 
 h.test("the fetching note appears and goes away without the menu being reopened") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
-                                           style: StyleMenu(fetching: true)), visibleRows: 10)
-    while m.selectedItem?.title != "Style" { m.move(by: 1) }
-    _ = m.activate()
-    while m.selectedItem?.title != "Theme" { m.move(by: 1) }
-    _ = m.activate()
-    t.equal(m.visible.map(\.title), ["Fetching Omarchy's themes…", "Your own colours"],
+                                           style: StyleMenu(fetching: true)),
+                      visibleRows: 10, path: ["Install", "Style", "Theme"])
+    t.equal(m.visible.map(\.title), ["Fetching Omarchy's themes…"],
             "a machine with nothing yet, mid-fetch")
 
     // The catalogue arrives. This is what `ThemeCatalogue.onChange` now reaches.
     m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [], style: StyleMenu(
         available: [RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])], fetching: false)))
-    t.equal(m.visible.map(\.title), ["Nord", "Your own colours"],
+    t.equal(m.visible.map(\.title), ["Nord"],
             "the note gives way to the themes it was waiting for")
 }
 
@@ -2088,8 +2101,9 @@ h.test("every command has a label a reader could use") { t in
         .moveToWorkspace(5, follow: true), .moveToWorkspace(5, follow: false),
         .killActive, .toggleFloating, .toggleSplit, .swapSplit,
         .exec("open -a Safari"), .reload, .quit,
-        .menu(.root), .menu(.keybindings),
-        .theme("gruvbox"), .theme(""), .background("city.jpg"), .nextBackground,
+        .menu(.root), .menu(.keybindings), .menu(.theme), .menu(.background),
+        .theme("gruvbox"), .theme(""), .removeTheme("gruvbox"),
+        .background("city.jpg"), .nextBackground,
     ]
     for command in all {
         let label = CommandLabel.describe(command)
@@ -2098,6 +2112,10 @@ h.test("every command has a label a reader could use") { t in
     }
     t.equal(CommandLabel.describe(.moveFocus(.left)), "Move focus left", "a sample of the prose")
     t.equal(CommandLabel.describe(.menu(.keybindings)), "Show the keybindings", "and the new one")
+    t.equal(CommandLabel.describe(.menu(.theme)), "Open Style › Theme",
+            "a route is named by the level it opens, so the label cannot drift from the menu")
+    t.equal(CommandLabel.describe(.removeTheme("rose-pine")), "Remove the theme Rose Pine",
+            "and removing one reads as what it does to the disk")
     t.equal(CommandLabel.describe(.theme("gruvbox")), "Theme: Gruvbox",
             "a theme toe ships is named the way it names itself")
     t.equal(CommandLabel.describe(.theme("rose-pine")), "Theme: Rose Pine",
@@ -2120,7 +2138,7 @@ h.test("the binding that opens the config is named rather than spelled out") { t
     // The same rule the menu row is found by, so the two can never disagree.
     let c = try Config.parse(Config.defaultTOML)
     t.equal(MenuModel.configOpener(in: c.bindings)?.source, "super-comma",
-            "and it is the binding the menu offers as Edit configuration")
+            "and it is the binding the menu offers as Config")
     t.equal(c.bindings.filter { $0.command.opensConfig }.count, 1,
             "exactly one binding in the shipped config opens it")
 }
@@ -2260,7 +2278,28 @@ h.test("menu commands parse in both spellings") { t in
     t.equal(try CommandParser.parse("keybindings"), .menu(.keybindings), "the shorthand")
     t.equal(try CommandParser.parse("menu keys"), .menu(.keybindings), "and its abbreviation")
     t.expect((try? CommandParser.parse("menu wardrobe")) == nil,
-             "an unknown page is an error rather than quietly the root menu")
+             "an unknown route is an error rather than quietly the root menu")
+}
+
+h.test("a menu binding opens the level Omarchy's own key opens") { t in
+    // The routes are `omarchy-menu toggle <route>`, aliases included, so a line copied out of
+    // Omarchy's bindings opens the same level here.
+    t.equal(try CommandParser.parse("menu theme"), .menu(.theme), "SUPER+SHIFT+CTRL+SPACE's")
+    t.equal(try CommandParser.parse("menu themes"), .menu(.theme), "and upstream's plural alias")
+    t.equal(try CommandParser.parse("menu background"), .menu(.background), "SUPER+CTRL+SPACE's")
+    t.equal(try CommandParser.parse("menu wallpaper"), .menu(.background), "by its other name")
+    t.equal(try CommandParser.parse("menu settings"), .menu(.setup),
+            "Omarchy's alias for Setup, which is the name it gives the level")
+    t.equal(try CommandParser.parse("menu uninstall"), .menu(.remove), "and for Remove")
+    t.equal(try CommandParser.parse("menu install"), .menu(.install), "the level itself")
+    t.equal(MenuRoute.theme.path, ["Style", "Theme"], "a route is a path through the tree")
+
+    t.equal(try CommandParser.parse("removetheme gruvbox"), .removeTheme("gruvbox"),
+            "removing one is a command like any other")
+    t.equal(try CommandParser.parse("removetheme \"Rose Pine\""), .removeTheme("rose-pine"),
+            "slugified at the door, because the name is about to be joined onto a path")
+    t.expect((try? CommandParser.parse("removetheme")) == nil,
+             "and it needs an argument — there is no theme called nothing to delete")
 }
 
 // MARK: - Themes
@@ -2654,21 +2693,26 @@ h.test("a directory name reads back as a title") { t in
     t.equal(Slug.title(""), "", "and nothing is nothing")
 }
 
-h.test("a theme you have is not also offered for download") { t in
-    let installed = [ThemeRef(slug: "gruvbox", name: "Gruvbox"),
-                     ThemeRef(slug: "rose-pine", name: "Rose Pine")]
+h.test("a theme you have is listed and dimmed rather than offered twice") { t in
+    let installed = [ThemeRef(slug: "rose-pine", name: "Rose Pine"),
+                     ThemeRef(slug: "gruvbox", name: "Gruvbox")]
     let available = [RemoteTheme(slug: "gruvbox", name: "Gruvbox", backgrounds: []),
                      RemoteTheme(slug: "nord", name: "Nord",
                                  backgrounds: [RemoteFile(name: "a.jpg", bytes: 4_300_000)])]
-    let (have, offer) = Themes.merged(installed: installed, available: available)
-    t.equal(have.map(\.slug), ["gruvbox", "rose-pine"], "yours, sorted by name")
-    // Otherwise downloading Nord would leave two rows saying Nord, one offering to fetch it again.
-    t.equal(offer.map(\.slug), ["nord"], "and only what you have not got")
-    t.equal(offer.first?.bytes, 4_300_000, "carrying what it would cost")
+    t.equal(Themes.ordered(installed).map(\.slug), ["gruvbox", "rose-pine"],
+            "yours, sorted by name — the order every level that lists them draws")
 
-    let (none, all) = Themes.merged(installed: [], available: available)
-    t.equal(none.isEmpty, true, "a machine that has fetched nothing has nothing installed")
-    t.equal(all.count, 2, "and is offered everything")
+    // Omarchy's `disabled` guard: Install stays a catalogue of everything it can fetch rather
+    // than a list that gets shorter every time you use it.
+    let rows = MenuModel.installableThemes(StyleMenu(themes: installed, available: available))
+    t.equal(rows.map(\.title), ["Gruvbox", "Nord"], "the whole catalogue, in its own order")
+    t.equal(rows.map(\.isDisabled), [true, false], "and the one you have cannot be fetched again")
+    t.equal(rows.first?.value, MenuModel.checkmark, "which is what the tick says")
+    t.equal(rows.last?.value, "4.1 MB", "while the one you could have says what it costs")
+
+    let fresh = MenuModel.installableThemes(StyleMenu(themes: [], available: available))
+    t.equal(fresh.map(\.isDisabled), [false, false],
+            "a machine that has fetched nothing is offered everything")
 }
 
 h.test("toe's own colours are Tokyo Night already, so that theme only moves the border") { t in
@@ -2905,7 +2949,7 @@ h.test("a backgrounds folder is filtered and sorted the same way twice") { t in
 h.test("Style is always at the root, because it is how you get a theme at all") { t in
     let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"),
                                            bindings: []), visibleRows: 10)
-    // Unlike Configure, which goes when both its rows are unavailable, Style stays even on a
+    // Unlike Setup, which goes when both its rows are unavailable, Style stays even on a
     // machine with no themes and no network: it is the level you go to *to* get one, so leaving
     // it out exactly when it is most needed would be the wrong way round.
     t.equal(m.visible.map(\.title), ["Learn", "Style", "Quit"], "still there with nothing behind it")
@@ -2914,7 +2958,7 @@ h.test("Style is always at the root, because it is how you get a theme at all") 
 }
 
 h.test("Background is left out when there are no images") { t in
-    // The Configure-when-empty rule, one level down — and the usual case, since toe ships no
+    // The Setup-when-empty rule, one level down — and the usual case, since toe ships no
     // pictures of its own.
     t.equal(MenuModel.style(StyleMenu()).count, 1, "nothing to show, so no row leading to it")
     let withPictures = StyleMenu(current: "gruvbox", backgrounds: ["a.jpg", "b.jpg"])
@@ -2927,42 +2971,78 @@ h.test("the theme you are on is marked, and so is having none") { t in
     let themed = MenuModel.themes(StyleMenu(themes: have, current: "gruvbox"))
     t.equal(themed.map(\.title), ["Tokyo Night", "Gruvbox", "Your own colours"],
             "what is installed, then the way back out")
-    t.equal(themed.filter { $0.value == "current" }.map(\.title), ["Gruvbox"], "exactly one is marked")
+    t.equal(themed.filter { $0.value == MenuModel.checkmark }.map(\.title), ["Gruvbox"],
+            "exactly one is marked, with the tick Omarchy marks a current choice with")
     t.equal(themed.first?.action, .run(.theme("tokyo-night")), "and a row runs the theme command")
 
     let bare = MenuModel.themes(StyleMenu(themes: have))
-    t.equal(bare.filter { $0.value == "current" }.map(\.title), ["Your own colours"],
+    t.equal(bare.filter { $0.value == MenuModel.checkmark }.map(\.title), ["Your own colours"],
             "no theme is a state the list can show, not an absence of state")
     t.equal(bare.last?.action, .run(.theme("")), "and choosing it clears the name")
 }
 
-h.test("what you have leads, what you could have follows, with its price on it") { t in
-    let rows = MenuModel.themes(StyleMenu(
+h.test("Style lists what is instant, Install what has to be fetched") { t in
+    // Omarchy's split, and what it buys: nothing in Style › Theme can start a nine-megabyte
+    // download, and Install stays a catalogue rather than a list that empties as you use it.
+    let style = StyleMenu(
         themes: [ThemeRef(slug: "rose-pine", name: "Rose Pine")],
         available: [RemoteTheme(slug: "nord", name: "Nord",
                                 backgrounds: [RemoteFile(name: "a.jpg", bytes: 4_300_000)]),
                     RemoteTheme(slug: "everforest", name: "Everforest", backgrounds: [])],
-        current: "rose-pine"))
-    t.equal(rows.map(\.title), ["Rose Pine", "Nord", "Everforest", "Your own colours"],
-            "installed first, then what Omarchy publishes")
-    t.equal(rows.first?.value, "current", "the one you are on is marked")
+        current: "rose-pine")
+
+    let mine = MenuModel.themes(style)
+    t.equal(mine.map(\.title), ["Rose Pine", "Your own colours"],
+            "what is on the disk, then the way back out — and nothing that would download")
+    t.equal(mine.first?.value, MenuModel.checkmark, "the one you are on is marked")
+
+    let catalogue = MenuModel.installableThemes(style)
+    t.equal(catalogue.map(\.title), ["Nord", "Everforest"], "everything Omarchy publishes")
     // The size is the disclosure: these run from a third of a megabyte to nine, and a row that
     // fetched nine megabytes without saying so first would be a row that surprised you.
-    t.equal(rows[1].value, "4.1 MB", "and a download says what it costs")
-    t.equal(rows[2].value, "", "one with no pictures costs nothing worth printing")
-    // One command either way: choosing a theme is the same act whether or not you have it yet.
-    t.equal(rows[1].action, .run(.theme("nord")), "and is chosen the same way as one you have")
+    t.equal(catalogue.first?.value, "4.1 MB", "and a download says what it costs")
+    t.equal(catalogue.last?.value, "", "one with no pictures costs nothing worth printing")
+    // One command either way: choosing a theme is the same act wherever the row lives.
+    t.equal(catalogue.first?.action, .run(.theme("nord")),
+            "and is chosen the same way as one you have")
+
+    // Install is a row at the root only while there is something behind it.
+    t.equal(MenuModel.install(StyleMenu()).isEmpty, true,
+            "a machine that has never fetched the catalogue is offered no Install at all")
+    guard case .submenu(let inner)? = MenuModel.install(style).first?.action else {
+        return t.expect(false, "Install holds Omarchy's Style level")
+    }
+    t.equal(MenuModel.install(style).map(\.title), ["Style"], "Omarchy's own depth, kept")
+    t.equal(inner.map(\.title), ["Theme"], "with Theme under it")
+}
+
+h.test("Remove lists the themes on the disk, and nothing when there are none") { t in
+    let style = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox"),
+                                   ThemeRef(slug: "nord", name: "Nord")],
+                          current: "gruvbox")
+    guard case .submenu(let themes)? = MenuModel.remove(style).first?.action else {
+        return t.expect(false, "Remove holds a Theme level")
+    }
+    t.equal(MenuModel.remove(style).map(\.title), ["Theme"], "one kind of thing to remove")
+    t.equal(themes.map(\.title), ["Gruvbox", "Nord"], "every folder, fetched or hand-written")
+    t.equal(themes.first?.action, .run(.removeTheme("gruvbox")),
+            "including the one in effect, which hands your own colours back on the way out")
+    t.equal(themes.compactMap(\.value).count, 0,
+            "and no tick: in a list called Remove one would read as `already gone`")
+    t.equal(MenuModel.remove(StyleMenu()).isEmpty, true, "nothing to remove, no row offering to")
 }
 
 h.test("an empty list says it is fetching rather than looking short") { t in
-    let rows = MenuModel.themes(StyleMenu(fetching: true))
-    t.equal(rows.map(\.title), ["Fetching Omarchy's themes…", "Your own colours"],
+    let rows = MenuModel.installableThemes(StyleMenu(fetching: true))
+    t.equal(rows.map(\.title), ["Fetching Omarchy's themes…"],
             "said, not left to be inferred from a list with nothing in it")
     t.equal(rows.first?.leadsOn, false, "it does not lead anywhere")
     var m = MenuState(root: rows, visibleRows: 10)
     t.equal(m.activate(), MenuOutcome.none, "and pressing it does nothing, leaving the menu up")
+    t.equal(MenuModel.installableThemes(StyleMenu()).isEmpty, true,
+            "and once it is not fetching, a bare list is bare enough to take Install with it")
     t.equal(MenuModel.themes(StyleMenu()).map(\.title), ["Your own colours"],
-            "and once it is not fetching, a bare list is just bare")
+            "while Style always has the way back out")
 }
 
 h.test("the Background level is shaped like the Theme level above it") { t in
@@ -2975,7 +3055,8 @@ h.test("the Background level is shaped like the Theme level above it") { t in
     t.equal(rows.compactMap(\.icon).count, 0,
             "no icons: one icon among four rows indents that row's text past the rest")
     t.equal(MenuModel.themes(StyleMenu()).compactMap(\.icon).count, 0, "as the theme list has none")
-    t.equal(rows.first { $0.title == "city.png" }?.value, "current", "with the one on screen marked")
+    t.equal(rows.first { $0.title == "city.png" }?.value, MenuModel.checkmark,
+            "with the one on screen marked")
     t.equal(rows.first?.value, nil, "and only that one")
     t.expect(rows.first?.title.hasSuffix(".jpg") == true,
              "the extension stays, or two files would give two rows saying the same word")
@@ -2986,9 +3067,13 @@ h.test("a theme can be found by typing its name from the root") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: style),
                       visibleRows: 10)
     m.type("gruv")
-    t.equal(m.visible.map(\.title), ["Gruvbox"], "two levels down, without going there")
-    t.equal(m.visible.first?.subtitle, "Style › Theme", "and it says where it was found")
-    t.equal(m.activate(), .run(.theme("gruvbox")), "ready to act on")
+    // Twice, because a theme on the disk is two rows now: the one that wears it and the one that
+    // deletes it. That is upstream's answer too — searching Omarchy's menu for a theme finds its
+    // Install row beside its Remove row — and the path under each is what tells them apart.
+    t.equal(m.visible.map(\.title), ["Gruvbox", "Gruvbox"], "two levels down, without going there")
+    t.equal(m.visible.map(\.subtitle), ["Style › Theme", "Remove › Theme"],
+            "and each says where it was found")
+    t.equal(m.activate(), .run(.theme("gruvbox")), "the first is the one that wears it")
 
     var picture = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
                                                  style: StyleMenu(current: "gruvbox",
@@ -2996,6 +3081,89 @@ h.test("a theme can be found by typing its name from the root") { t in
                             visibleRows: 10)
     picture.type("city")
     t.equal(picture.activate(), .run(.background("city.jpg")), "a picture is reachable the same way")
+}
+
+// MARK: - Following Omarchy's tree
+
+h.test("the root is Omarchy's root, with what a Mac cannot do left out") { t in
+    // Upstream's order is Apps, Learn, Trigger, Style, Setup, Install, Remove, Update, About,
+    // System. Every row toe has an analogue for, in that order, and Quit — which has no
+    // counterpart, Omarchy's System being a power menu for the machine — last.
+    let full = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
+                         available: [RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])],
+                         current: "gruvbox", backgrounds: ["a.jpg"])
+    let c = try Config.parse(Config.defaultTOML)
+    let rows = MenuModel.root(loginItem: .off, bindings: c.bindings, style: full, version: "0.9.7")
+    t.equal(rows.map(\.title),
+            ["Learn", "Style", "Setup", "Install", "Remove", "About", "Quit"],
+            "the same names at the same depth, in the same order")
+    t.equal(rows.first { $0.title == "About" }?.value, "0.9.7",
+            "About is the one fact toe can report about itself, in the second column")
+    t.equal(rows.first { $0.title == "About" }?.action, .note, "and nothing to press")
+    t.expect(MenuModel.root(loginItem: .off, bindings: c.bindings, style: full)
+                .allSatisfy { $0.title != "About" },
+             "a build with no stamped version leaves the row out rather than saying `unknown`")
+}
+
+h.test("Learn is the keybindings and the three manuals that are about this machine") { t in
+    let rows = MenuModel.learn()
+    t.equal(rows.map(\.title), ["Keybindings", "toe", "Omarchy", "Hyprland"],
+            "toe stands where learn.omarchy does — the system's own manual")
+    t.equal(rows.first?.action, .page(.keybindings), "the first row is still the page")
+    t.expect(rows.dropFirst().allSatisfy {
+        if case .run(.exec(let line)) = $0.action { return line.hasPrefix("open https://") }
+        return false
+    }, "and the rest open a URL, which is all upstream's links do")
+}
+
+h.test("a binding can open the menu at a level, the way omarchy-menu toggle does") { t in
+    let style = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
+                          current: "gruvbox", backgrounds: ["city.jpg", "coast.jpg"])
+    let root = MenuModel.root(loginItem: .off, bindings: [], style: style)
+
+    var m = MenuState(root: root, visibleRows: 10, path: MenuRoute.background.path)
+    t.equal(m.breadcrumb, ["Style", "Background"], "opened three rows in")
+    t.equal(m.prompt, "Background…", "and the placeholder says so")
+    t.equal(m.visible.map(\.title), ["city.jpg", "coast.jpg", "Next background"], "at the pictures")
+    t.equal(m.pop(), .popped, "Escape still climbs out of it")
+    t.equal(m.breadcrumb, ["Style"], "one rung at a time, into the tree it was opened inside")
+
+    // A route that does not resolve stops where it can rather than failing: Background exists
+    // only while the current theme has pictures, and the key is bound whether it does or not.
+    let bare = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: StyleMenu()),
+                         visibleRows: 10, path: MenuRoute.background.path)
+    t.equal(bare.breadcrumb, ["Style"], "as deep as the tree goes, and no error")
+    t.equal(MenuState(root: root, visibleRows: 10).breadcrumb, [],
+            "and no path at all is the root, which is every other way the menu opens")
+}
+
+h.test("a disabled row is listed, ticked, and cannot be reached") { t in
+    // Omarchy's `disabled`: the cursor steps over it, the pointer does not take it, Return does
+    // nothing to it, and a search does not turn it up.
+    let style = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
+                          available: [RemoteTheme(slug: "gruvbox", name: "Gruvbox", backgrounds: []),
+                                      RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])])
+    var m = MenuState(root: MenuModel.installableThemes(style), visibleRows: 10)
+    t.equal(m.visible.map(\.title), ["Gruvbox", "Nord"], "both rows are listed")
+    t.equal(m.selection, 1, "but the cursor opens on the first one it could act on")
+    m.move(by: -1)
+    t.equal(m.selection, 1, "and moving up cannot land on the one above it")
+    m.select(row: 0)
+    t.equal(m.selection, 1, "a click does not take it either")
+    m.moveToTop()
+    t.equal(m.selection, 1, "nor does Home")
+
+    m.type("gruv")
+    t.equal(m.visible.count, 0, "and a search that would find it does not offer it")
+    m.backspace(); m.backspace(); m.backspace(); m.backspace()
+    t.equal(m.visible.count, 2, "the level comes back whole")
+
+    // The one way the cursor can end up on one: it was selectable when you arrived, and a
+    // download finishing turned it into an installed row under your hand.
+    var landed = MenuState(root: [MenuItem(title: "Gruvbox", isDisabled: true,
+                                           action: .run(.theme("gruvbox")))],
+                           visibleRows: 10)
+    t.equal(landed.activate(), MenuOutcome.none, "pressing it does nothing, leaving the menu up")
 }
 
 exit(h.report())

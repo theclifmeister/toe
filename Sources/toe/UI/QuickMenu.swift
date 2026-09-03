@@ -30,10 +30,20 @@ final class QuickMenu {
     /// Where a chosen row goes. `Coordinator` hands these straight to `dispatch`.
     var onCommand: ((Command) -> Void)?
 
+    /// What the bundle was stamped with, for the `About` row. nil for a binary run straight out
+    /// of `.build`, which has no Info.plist to have been stamped — and the row is then left out
+    /// rather than reporting a version toe does not know.
+    private static let version =
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+
     private let panel: MenuPanel
     private let view = MenuView()
     private var state: MenuState?
-    private var page: MenuPage = .root
+    /// Which door the menu was opened by — the page, and the level within it. Held because the
+    /// hotkey toggles: pressing `SUPER`+`CTRL`+`SPACE` twice closes the background level, while
+    /// pressing it with the *root* menu up switches to that level rather than closing, which is
+    /// what `omarchy-menu toggle <route>` does.
+    private var route: MenuRoute = .root
     private var config = Config()
     /// Handed in at every open rather than held, for the same reason `LoginItem.state()` is read
     /// there: the menu is a function of what is true when you look at it, and a theme folder that
@@ -92,28 +102,29 @@ final class QuickMenu {
 
     /// The hotkey. A second press closes: `RegisterEventHotKey` intercepts ahead of the key
     /// window, so `SUPER`+`SPACE` reaches this rather than typing a space into the filter.
-    func toggle(page: MenuPage, config: Config, usable: Box?, style: StyleMenu = StyleMenu()) {
-        if isVisible, page == self.page {
+    func toggle(route: MenuRoute, config: Config, usable: Box?, style: StyleMenu = StyleMenu()) {
+        if isVisible, route == self.route {
             close()
             return
         }
         self.config = config
         self.usable = usable
         self.style = style
-        open(page: page)
+        open(route: route)
     }
 
-    private func open(page: MenuPage) {
-        self.page = page
+    private func open(route: MenuRoute) {
+        self.route = route
         MenuFont.register()
 
         measure()
 
         loginItem = LoginItem.state()
-        let items = page == .keybindings
+        let items = route.page == .keybindings
             ? MenuModel.keybindings(config.bindings, superKey: config.superKey)
-            : MenuModel.root(loginItem: loginItem, bindings: config.bindings, style: style)
-        state = MenuState(root: items, visibleRows: 10)
+            : MenuModel.root(loginItem: loginItem, bindings: config.bindings, style: style,
+                             version: QuickMenu.version)
+        state = MenuState(root: items, visibleRows: 10, path: route.path)
 
         frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
         observe()
@@ -162,9 +173,9 @@ final class QuickMenu {
         self.style = style
         guard panel.isVisible, state != nil else { return }
         if fontChanged { measure() }
-        if page == .root {
+        if route.page == .root {
             state?.rebuild(root: MenuModel.root(loginItem: loginItem, bindings: config.bindings,
-                                                style: style))
+                                                style: style, version: QuickMenu.version))
         }
         // Through the full path rather than straight to `render()`: a level that gained or lost
         // rows — the fetching note going away, a downloaded theme moving up into the installed
@@ -242,14 +253,15 @@ final class QuickMenu {
         case .none:
             render()
         case .page(let page):
-            open(page: page)
+            open(route: MenuRoute(page: page))
         case .toggleLoginItem:
             // Deliberately does not close: the value flips under the cursor, as omarchy-menu's
             // toggles do, so you can see what you just did.
-            let setup = MenuModel.configure(loginItem: LoginItem.toggle(),
-                                            bindings: config.bindings)
-            // The level itself rather than the root's first row: Configure is not always the
-            // first row, and on the day the toggle answers `unavailable` it is not there at all.
+            let setup = MenuModel.setup(loginItem: LoginItem.toggle(),
+                                        bindings: config.bindings)
+            // The level itself rather than a row of the root: Setup is not always in the same
+            // place — Install and Remove come and go with the catalogue — and on the day the
+            // toggle answers `unavailable` it is not there at all.
             if !setup.isEmpty { state?.replaceLevel(with: setup) }
             layoutAndRender()
         case .run(let command):
@@ -277,7 +289,7 @@ final class QuickMenu {
         // would be a ragged one.
         metrics.showsSubtitles = !current.query.isEmpty
         let area = usable ?? Coordinates.toAX(NSScreen.main?.visibleFrame ?? .zero)
-        let wanted = page == .keybindings ? config.menu.listWidth : config.menu.width
+        let wanted = route.page == .keybindings ? config.menu.listWidth : config.menu.width
         // Clamped, so `list_width = 800` on a laptop is a wide menu rather than one with its
         // ends off the screen.
         let width = min(wanted, area.w - MenuLayout.contentInset(metrics) * 2)
@@ -300,7 +312,7 @@ final class QuickMenu {
             rows: Array(state.window),
             selectedRow: state.selection - state.scroll,
             metrics: metrics,
-            valueColumn: page == .keybindings ? 0.5 : nil,
+            valueColumn: route.page == .keybindings ? 0.5 : nil,
             background: Colors.rgba(menu.background, or: RGBA(r: 0.10, g: 0.11, b: 0.15, a: 1)),
             foreground: Colors.rgba(menu.foreground, or: RGBA(r: 0.66, g: 0.69, b: 0.84, a: 1)),
             accent: Colors.rgba(menu.accent, or: RGBA(r: 0.48, g: 0.64, b: 0.97, a: 1)),

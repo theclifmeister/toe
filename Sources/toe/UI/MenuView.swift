@@ -118,7 +118,13 @@ final class MenuView: NSView {
             }
             // `child:selected .item-box * { color: @selected-text }` — the whole row, icon
             // included, takes the accent when it is the one under the cursor.
-            let colour = selected ? s.accent : s.foreground
+            //
+            // A disabled row takes neither: Omarchy dims one to say "you already have this", and
+            // half alpha is the same signal the subtitle already uses for a line that is context
+            // rather than choice. It can never be the selected row — `MenuState` steps the cursor
+            // over it — so the two cases do not have to compose.
+            let colour = item.isDisabled ? s.foreground.withAlpha(0.4)
+                                         : (selected ? s.accent : s.foreground)
 
             if let icon = item.icon {
                 let box = MenuLayout.iconFrame(inRow: row, m)

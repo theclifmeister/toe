@@ -47,17 +47,14 @@ public struct Theme: Equatable, Sendable {
 /// unthemed.
 public enum Themes {
 
-    /// Everything the menu can offer: what is installed, then what is merely available.
+    /// Yours, in the order every level that lists them draws them: by name, ignoring case.
     ///
-    /// A theme you have beats the same theme upstream, and only appears once — otherwise
-    /// downloading Nord would leave you with two rows saying Nord, one of which would offer to
-    /// download it again. Installed themes keep the order the disk gave them (sorted by name);
-    /// the rest follow, so the list reads as "yours, then everything else".
-    public static func merged(installed: [ThemeRef],
-                              available: [RemoteTheme]) -> (installed: [ThemeRef],
-                                                            available: [RemoteTheme]) {
-        let have = Set(installed.map(\.slug))
-        return (installed.sorted { $0.name.lowercased() < $1.name.lowercased() },
-                available.filter { !have.contains($0.slug) })
+    /// The dedupe that used to live beside this has moved into `MenuModel.installableThemes`,
+    /// where a theme you already have is now *listed and dimmed* rather than dropped from the
+    /// catalogue — Omarchy's `disabled` guard, and what lets `Install › Style › Theme` stay a
+    /// list of everything Omarchy publishes rather than a list that gets shorter every time you
+    /// use it.
+    public static func ordered(_ installed: [ThemeRef]) -> [ThemeRef] {
+        installed.sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 }

@@ -30,17 +30,21 @@ public enum CommandLabel {
             return command.opensConfig ? "Edit the config" : "Run \(ellipsised(line))"
         case .reload:               return "Reload the config"
         case .quit:                 return "Quit toe"
-        case .menu(let page):
-            switch page {
-            case .root:        return "Open the menu"
-            case .keybindings: return "Show the keybindings"
-            }
+        case .menu(let route):
+            if route == .root { return "Open the menu" }
+            if route == .keybindings { return "Show the keybindings" }
+            // The path, not a name for it: a route names the level it opens, and that level's own
+            // breadcrumb is what the user sees a moment later. A table saying "Choose a theme"
+            // for `Style › Theme` would be a second name for one place, and the day the level is
+            // renamed only one of the two would follow.
+            return "Open " + route.path.joined(separator: " › ")
         case .theme(let slug):
             // Titled from the slug, because that is all a label has: toe ships no themes, so
             // there is no table of names to look one up in, and a theme's directory name is the
             // only thing true of it whether it is installed, merely available, or neither.
             guard !slug.isEmpty else { return "Use your own colours" }
             return "Theme: \(Slug.title(slug))"
+        case .removeTheme(let slug): return "Remove the theme \(Slug.title(slug))"
         case .background(let file):  return "Background: \(ellipsised(file))"
         case .nextBackground:        return "Next background"
         }

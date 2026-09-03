@@ -7,6 +7,38 @@ public enum MenuPage: String, Equatable, Sendable {
     case keybindings
 }
 
+/// Where a `menu` binding opens the quick menu.
+///
+/// Omarchy's menu is one tree with many doors into it — `omarchy-menu toggle background` opens
+/// at `style.background`, `toggle system` at the power rows — and its default bindings use four
+/// of them. toe had two doors, `root` and `keybindings`, so the two keys an Omarchy user reaches
+/// for to change how their desktop looks did not open the menu at all.
+///
+/// The path is titles rather than ids because toe's rows have no ids: `MenuState.rebuild` already
+/// walks the tree by title, for the menu that changes while you are looking at it, so opening at
+/// a level is that same walk with the titles handed in rather than remembered. A path that no
+/// longer resolves — `Style › Background` on a theme with no pictures — stops where it can and
+/// leaves you one rung up, which is the behaviour `rebuild` already had to have.
+public struct MenuRoute: Equatable, Sendable {
+    public let page: MenuPage
+    public let path: [String]
+
+    public init(page: MenuPage = .root, path: [String] = []) {
+        self.page = page
+        self.path = path
+    }
+
+    public static let root = MenuRoute()
+    public static let keybindings = MenuRoute(page: .keybindings)
+    public static let learn = MenuRoute(path: ["Learn"])
+    public static let style = MenuRoute(path: ["Style"])
+    public static let theme = MenuRoute(path: ["Style", "Theme"])
+    public static let background = MenuRoute(path: ["Style", "Background"])
+    public static let setup = MenuRoute(path: ["Setup"])
+    public static let install = MenuRoute(path: ["Install"])
+    public static let remove = MenuRoute(path: ["Remove"])
+}
+
 /// One row.
 public struct MenuItem: Equatable {
 
@@ -16,6 +48,7 @@ public struct MenuItem: Equatable {
     public enum Icon: Equatable, Sendable {
         case gear, book, keyboard, pencil, power, toggleOn, toggleOff
         case paintbrush, droplet, image
+        case download, trash, info, globe
     }
 
     public indirect enum Action: Equatable {
@@ -34,7 +67,8 @@ public struct MenuItem: Equatable {
     /// Only a filtered list sets this: see `MenuState`.
     public let subtitle: String?
     public let icon: Icon?
-    /// The second column: `on`/`off` for the login toggle, what it does for a keybinding row.
+    /// The second column: `on`/`off` for the login toggle, what it does for a keybinding row, a
+    /// `✓` on the choice already in effect.
     public let value: String?
     /// How full to draw the row, 0…1, or nil for the ordinary case of a row that is not doing
     /// anything. Set on the theme being downloaded, and the reason a download is visible at all
@@ -44,21 +78,32 @@ public struct MenuItem: Equatable {
     /// `MenuView` fills whatever row carries this, so the next thing that takes time — and there
     /// will be one — does not need a second way of showing it.
     public let progress: Double?
+    /// Omarchy's `disabled` guard: the row stays listed but goes dim, takes a `✓`, and can no
+    /// longer be selected — the cursor steps over it, a click does not take it, Return does
+    /// nothing, and a search omits it.
+    ///
+    /// It exists for one job, and the job is the reason the Install level is worth having:
+    /// software you already have reads as *installed* rather than vanishing from the list it was
+    /// installed from, so the list stays a catalogue of what toe can fetch rather than a list
+    /// that gets shorter every time you use it.
+    public let isDisabled: Bool
     public let action: Action
 
     public init(title: String, subtitle: String? = nil, icon: Icon? = nil,
-                value: String? = nil, progress: Double? = nil, action: Action) {
+                value: String? = nil, progress: Double? = nil, isDisabled: Bool = false,
+                action: Action) {
         self.title = title
         self.subtitle = subtitle
         self.icon = icon
         self.value = value
         self.progress = progress
+        self.isDisabled = isDisabled
         self.action = action
     }
 
     public func with(subtitle: String?) -> MenuItem {
         MenuItem(title: title, subtitle: subtitle, icon: icon, value: value, progress: progress,
-                 action: action)
+                 isDisabled: isDisabled, action: action)
     }
 
     /// walker marks the rows that lead somewhere with a trailing `›`, right-aligned.
@@ -79,7 +124,7 @@ public enum LoginItemState: Equatable, Sendable {
     case unavailable(String)
 }
 
-/// What the Style level needs to draw itself.
+/// What the Style, Install and Remove levels need to draw themselves.
 ///
 /// A value rather than four parameters, because it is threaded from the Coordinator through
 /// `QuickMenu` to here unchanged, and because it is rebuilt every time the menu opens — that is
@@ -91,7 +136,10 @@ public enum LoginItemState: Equatable, Sendable {
 public struct StyleMenu: Equatable {
     /// Themes on disk — the ones that can be chosen without waiting for anything.
     public var themes: [ThemeRef]
-    /// Themes Omarchy publishes that this machine does not have. Choosing one downloads it.
+    /// Omarchy's published catalogue, whole: the ones this machine has as well as the ones it
+    /// does not. Filtering it is the menu's job rather than the Coordinator's, because the two
+    /// levels that read it want opposite halves — `Style › Theme` offers what is here, and
+    /// `Install › Style › Theme` lists everything and dims what is here.
     public var available: [RemoteTheme]
     /// True while the catalogue is being fetched, so the level can say so rather than looking
     /// like a list that happens to be short.
@@ -123,34 +171,84 @@ public struct StyleMenu: Equatable {
 ///
 /// Deliberately a function of the state it displays rather than a constant: a "Run on startup"
 /// row that shows a remembered value instead of launchd's is a row that will eventually lie.
+///
+/// The tree follows Omarchy's — the same names at the same depth, in the same order — and the
+/// rule for what is missing is Omarchy's own `when` guard: a row whose condition fails is not
+/// listed, and a submenu whose visible descendants have all gone goes with them. That is why
+/// there is no `Style › Menu Bar` (its two rows upstream are Position, which macOS fixes, and
+/// Transparency, which is not toe's menu bar to style) and no `System` (Omarchy's is a power
+/// menu for the machine). What is left should read to an Omarchy user as their own menu with the
+/// Linux taken out, rather than as a different menu that borrowed some names.
 public enum MenuModel {
 
+    /// Omarchy's "this is the current choice" marker: a `✓` appended to the label. toe puts it in
+    /// the second column instead, because that column already exists and right-aligning it keeps
+    /// the titles lined up — but the glyph is the same one, and it means the same thing on a
+    /// theme, a background and an already-installed row.
+    public static let checkmark = "✓"
+
     public static func root(loginItem: LoginItemState, bindings: [Binding],
-                            style: StyleMenu = StyleMenu()) -> [MenuItem] {
-        var items: [MenuItem] = []
-        // Configure can come out empty — neither of its rows is guaranteed — and a row that
-        // leads into an empty level is worse than no row, so the parent goes with it.
-        let configure = configure(loginItem: loginItem, bindings: bindings)
-        if !configure.isEmpty {
-            items.append(MenuItem(title: "Configure", icon: .gear, action: .submenu(configure)))
+                            style: StyleMenu = StyleMenu(),
+                            version: String? = nil) -> [MenuItem] {
+        // Omarchy's root order, with the rows toe has no analogue for left out: Apps, **Learn**,
+        // Trigger, **Style**, **Setup**, **Install**, **Remove**, Update, **About**, System.
+        // Quit is toe's own and goes last, after everything ported.
+        var items: [MenuItem] = [
+            MenuItem(title: "Learn", icon: .book, action: .submenu(learn())),
+            MenuItem(title: "Style", icon: .paintbrush, action: .submenu(MenuModel.style(style))),
+        ]
+        // Setup can come out empty — neither of its rows is guaranteed — and a row that leads
+        // into an empty level is worse than no row, so the parent goes with it. That is Omarchy's
+        // rule for a submenu whose children have all failed their `when`, applied here by hand
+        // because toe's levels are built rather than filtered.
+        let setupRows = setup(loginItem: loginItem, bindings: bindings)
+        if !setupRows.isEmpty {
+            items.append(MenuItem(title: "Setup", icon: .gear, action: .submenu(setupRows)))
         }
-        items.append(MenuItem(title: "Learn", icon: .book, action: .submenu([
-            MenuItem(title: "Keybindings", icon: .keyboard, action: .page(.keybindings)),
-        ])))
-        // Omarchy's own order — Learn, then Style — with Quit last by toe's rule. Unlike
-        // Configure, Style is never conditional: three themes ship, so the level it leads to
-        // cannot come out empty.
-        items.append(MenuItem(title: "Style", icon: .paintbrush, action: .submenu(MenuModel.style(style))))
+        let installRows = install(style)
+        if !installRows.isEmpty {
+            items.append(MenuItem(title: "Install", icon: .download, action: .submenu(installRows)))
+        }
+        let removeRows = remove(style)
+        if !removeRows.isEmpty {
+            items.append(MenuItem(title: "Remove", icon: .trash, action: .submenu(removeRows)))
+        }
+        // Omarchy's About opens a window with the branding in it; toe has no window to open and
+        // one fact to report, so the row *is* the fact — the version in the second column, and
+        // nothing to press. Left out entirely when there is no version to show, which is what a
+        // debug build run straight out of `.build` has.
+        if let version {
+            items.append(MenuItem(title: "About", icon: .info, value: version, action: .note))
+        }
         items.append(MenuItem(title: "Quit", icon: .power, action: .run(.quit)))
         return items
+    }
+
+    /// Omarchy's `Learn` level: the keybindings, then the manuals.
+    ///
+    /// Three of upstream's nine links survive. `toe` stands where `learn.omarchy` does — the
+    /// system's own manual — and Omarchy's is kept because toe ships its defaults and fetches
+    /// its themes, Hyprland's because the layout in the middle of toe is a port of theirs and
+    /// `dwindle`, `preserve_split` and `force_split` are documented there and nowhere else. Arch,
+    /// Neovim, Bash, Tmux, Herdr and the Discord are about a machine this is not running on.
+    public static func learn() -> [MenuItem] {
+        [
+            MenuItem(title: "Keybindings", icon: .keyboard, action: .page(.keybindings)),
+            MenuItem(title: "toe", icon: .globe,
+                     action: .run(.exec("open https://github.com/theclifmeister/toe"))),
+            MenuItem(title: "Omarchy", icon: .globe,
+                     action: .run(.exec("open https://omarchy.org/manual/"))),
+            MenuItem(title: "Hyprland", icon: .globe,
+                     action: .run(.exec("open https://wiki.hypr.land/"))),
+        ]
     }
 
     /// Omarchy's `Style` level, minus the parts toe has no analogue for.
     public static func style(_ style: StyleMenu) -> [MenuItem] {
         var rows = [MenuItem(title: "Theme", icon: .droplet, action: .submenu(themes(style)))]
-        // The Configure rule, one level down: a row that leads into an empty level is worse than
-        // no row. Background appears exactly when the current theme has pictures — which means
-        // when one was downloaded with it, or when you put some there yourself.
+        // The Setup rule, one level down: a row that leads into an empty level is worse than no
+        // row. Background appears exactly when the current theme has pictures — which means when
+        // one was downloaded with it, or when you put some there yourself.
         if !style.backgrounds.isEmpty {
             rows.append(MenuItem(title: "Background", icon: .image,
                                  action: .submenu(MenuModel.backgrounds(style))))
@@ -158,7 +256,12 @@ public enum MenuModel {
         return rows
     }
 
-    /// Every theme toe can see, with the one in effect marked.
+    /// The themes on this machine, with the one in effect marked.
+    ///
+    /// Installed only. A theme that has to be fetched first is under `Install › Style › Theme`,
+    /// where Omarchy keeps it — the split costs toe the one list it used to have and buys the
+    /// thing the split is for: `Style › Theme` is a list of things that happen instantly, and
+    /// nothing in it can start a nine-megabyte download.
     ///
     /// Marked with a value rather than by opening the level with the cursor already on it:
     /// walker preselects, and matching that needs a new mutating entry point on `MenuState`. The
@@ -167,14 +270,46 @@ public enum MenuModel {
     public static func themes(_ style: StyleMenu) -> [MenuItem] {
         var rows = style.themes.map { theme in
             MenuItem(title: theme.name,
-                     value: theme.slug == style.current ? "current" : nil,
+                     value: theme.slug == style.current ? checkmark : nil,
                      action: .run(.theme(theme.slug)))
         }
 
-        // Then what Omarchy publishes and this machine does not have. The size is the disclosure:
-        // these run from a third of a megabyte to nine, and a row that downloaded nine megabytes
-        // without having said so first would be a row that surprised you.
-        rows += style.available.map { theme in
+        // Last rather than first, so the list reads as a list of themes. Short, because a value
+        // in the second column takes its width out of the title's.
+        rows.append(MenuItem(title: "Your own colours",
+                             value: style.current == nil ? checkmark : nil,
+                             action: .run(.theme(""))))
+        return rows
+    }
+
+    /// Omarchy's `Install` level. Upstream it holds sixteen submenus; toe can fetch one kind of
+    /// thing, so it holds `Style › Theme` and the two levels above it exist to put that row
+    /// where an Omarchy user's hands expect to find it.
+    ///
+    /// Empty — and so absent from the root — until the catalogue has been fetched once. A
+    /// machine that has never had a network has nothing to install and says so by not offering.
+    public static func install(_ style: StyleMenu) -> [MenuItem] {
+        let rows = installableThemes(style)
+        guard !rows.isEmpty else { return [] }
+        return [MenuItem(title: "Style", icon: .paintbrush, action: .submenu([
+            MenuItem(title: "Theme", icon: .droplet, action: .submenu(rows)),
+        ]))]
+    }
+
+    /// Everything Omarchy publishes: what you have, dimmed, and what you do not, priced.
+    ///
+    /// The size is the disclosure — these run from a third of a megabyte to nine, and a row that
+    /// downloaded nine megabytes without having said so first would be a row that surprised you.
+    public static func installableThemes(_ style: StyleMenu) -> [MenuItem] {
+        let have = Set(style.themes.map(\.slug))
+        var rows = style.available.map { theme -> MenuItem in
+            guard !have.contains(theme.slug) else {
+                // Omarchy's `disabled`: listed, dim, ticked, unselectable. The action is left on
+                // the row rather than swapped for a `.note` because the row still *is* the thing
+                // it describes; it is the guard that says you cannot have it again.
+                return MenuItem(title: theme.name, value: checkmark, isDisabled: true,
+                                action: .run(.theme(theme.slug)))
+            }
             // The one being fetched trades its size for a count and starts filling: the size was
             // there to tell you what you were about to spend, and once you have spent it the
             // question has become how much longer.
@@ -185,18 +320,26 @@ public enum MenuModel {
                             action: .run(.theme(theme.slug)))
         }
 
-        // Said rather than left to be inferred from a short list. Deliberately after the themes
-        // and before the way out, which is where the rows it is waiting for will appear.
+        // Said rather than left to be inferred from a short list. Deliberately last, which is
+        // where the rows it is waiting for will appear.
         if style.fetching {
             rows.append(MenuItem(title: "Fetching Omarchy's themes…", action: .note))
         }
-
-        // Last rather than first, so the list reads as a list of themes. Short, because a value
-        // in the second column takes its width out of the title's.
-        rows.append(MenuItem(title: "Your own colours",
-                             value: style.current == nil ? "current" : nil,
-                             action: .run(.theme(""))))
         return rows
+    }
+
+    /// Omarchy's `Remove` level. Upstream it is the mirror of Install and hides with `when` what
+    /// is not there to remove; toe has one removable kind of thing, and no themes of its own, so
+    /// this is every folder in `~/.config/toe/themes` — the ones fetched from the catalogue and
+    /// the ones you wrote yourself alike, because on disk there is no difference between them.
+    ///
+    /// No `✓` on the theme in effect. In a list called Remove a tick would read as *this one is
+    /// already gone*; removing the theme you are wearing is allowed, and hands your own colours
+    /// back on the way out.
+    public static func remove(_ style: StyleMenu) -> [MenuItem] {
+        guard !style.themes.isEmpty else { return [] }
+        return [MenuItem(title: "Theme", icon: .droplet, action: .submenu(
+            style.themes.map { MenuItem(title: $0.name, action: .run(.removeTheme($0.slug))) }))]
     }
 
     /// The current theme's pictures, and the row that steps through them.
@@ -211,22 +354,28 @@ public enum MenuModel {
             // The whole file name, extension and all: strip it and a folder holding city.jpg
             // beside city.png gets two rows that say the same thing.
             MenuItem(title: file,
-                     value: file == style.currentBackground ? "current" : nil,
+                     value: file == style.currentBackground ? checkmark : nil,
                      action: .run(.background(file)))
         }
         rows.append(MenuItem(title: "Next background", action: .run(.nextBackground)))
         return rows
     }
 
-    /// The Configure level. Also built on its own, by the menu, when throwing the startup toggle
-    /// rebuilds the level under the cursor.
-    public static func configure(loginItem: LoginItemState, bindings: [Binding]) -> [MenuItem] {
+    /// Omarchy's `Setup` level — the name upstream gives it, and the level `settings` routes to.
+    /// Also built on its own, by the menu, when throwing the startup toggle rebuilds the level
+    /// under the cursor.
+    ///
+    /// `Config` is `setup.config`, which upstream is a submenu of the files Omarchy will open for
+    /// you. toe has one file, so it is one row.
+    public static func setup(loginItem: LoginItemState, bindings: [Binding]) -> [MenuItem] {
         var rows: [MenuItem] = []
-        if let startup = startup(loginItem) { rows.append(startup) }
         if let opener = configOpener(in: bindings) {
-            rows.append(MenuItem(title: "Edit configuration", icon: .pencil,
-                                 action: .run(opener.command)))
+            rows.append(MenuItem(title: "Config", icon: .pencil, action: .run(opener.command)))
         }
+        // After the ported row rather than before it: this one has no Omarchy counterpart — an
+        // Omarchy session does not start its window manager at login, it *is* the login — and
+        // toe's own rows go under the ones an Omarchy user came looking for.
+        if let startup = startup(loginItem) { rows.append(startup) }
         return rows
     }
 
@@ -246,6 +395,10 @@ public enum MenuModel {
     /// to give ("needs /Applications"), so a row that has to explain itself has nowhere to do
     /// it. And a switch you can see but not throw is worse than one that is not offered.
     /// `LoginItem` logs why.
+    ///
+    /// Deliberately not Omarchy's `disabled`, which would leave it listed and dim: that guard
+    /// means "you already have this", and a tick beside a switch that cannot be thrown would say
+    /// the opposite of what is true.
     private static func startup(_ state: LoginItemState) -> MenuItem? {
         switch state {
         case .on:
@@ -294,7 +447,7 @@ public enum MenuModel {
         case .moveToWorkspace:  return 4
         case .workspace:        return 5
         case .killActive, .toggleFloating, .toggleSplit, .swapSplit: return 6
-        case .theme, .background, .nextBackground: return 7
+        case .theme, .removeTheme, .background, .nextBackground: return 7
         case .menu:             return 8
         case .reload, .quit:    return 9
         case .exec:             return 10

@@ -212,18 +212,19 @@ public struct Config: Equatable {
         // list by the same reasoning that put them here.
         ("super-space", .menu(.root)),
         ("super-k", .menu(.keybindings)),
-        // Not an escape hatch, and the one entry here that is not. It is on the list because the
-        // problem this list exists to solve is exactly its problem: a config is never rewritten,
-        // so a binding introduced after you first ran toe reaches nobody who already had one, and
-        // every existing user is in that position for this key. The menu is not a substitute —
-        // Style › Background can pick a picture, but the thing worth having on a key is stepping
-        // through them without stopping to choose, which is the one thing the menu cannot do.
+        // Not escape hatches, and the two entries here that are not. They are on the list because
+        // the problem it exists to solve is exactly theirs: a config is never rewritten, so a
+        // binding introduced after you first ran toe reaches nobody who already had one, and
+        // every existing user is in that position for both keys. These are the two Omarchy gives
+        // to how the desktop looks, doing there what they do here.
         //
-        // The cost, stated plainly because it is real: unlike the four above, this is a key you
-        // may not want given away. Binding `nextbackground` anywhere else takes it back — a
-        // fallback applies only when its command is bound nowhere — and if ⌃⌥Space is already
-        // claimed the fallback is dropped rather than registered on top of whatever has it.
-        ("super-ctrl-space", .nextBackground),
+        // ⌃⌥Space used to be `nextbackground`, and a config that says so keeps it: a fallback
+        // applies only when its command is bound nowhere, and a key already claimed drops its
+        // fallback rather than being registered on top of whatever has it. So an upgrader who
+        // copied that line out of an older default keeps stepping through pictures, and one who
+        // never had the key gets Omarchy's picker.
+        ("super-ctrl-space", .menu(.background)),
+        ("super-shift-ctrl-space", .menu(.theme)),
     ]
 
     public static let defaultFloatRules: [FloatRule] = [
