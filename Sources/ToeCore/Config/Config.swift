@@ -109,6 +109,9 @@ public struct MiscConfig: Equatable {
     /// off-screen stash alike, and macOS decides that inside WindowManager rather than from an
     /// event any tap could swallow — so it is switched off through its preference instead.
     public var disableWallpaperClick: Bool = true
+    /// A visible Dock is a strip of screen the tiles never get, for something `SUPER`+`SPACE`
+    /// reaches instead. Switched on through `CoreDockSetAutoHideEnabled` — see `DockAutoHide`.
+    public var autohideDock: Bool = true
     /// `⌘H` takes an application's windows out of the layout with no way to reach them again.
     public var preventHiding: Bool = true
     /// Whether the layout is written to disk and put back on the next launch. See
@@ -438,6 +441,13 @@ public struct Config: Equatable {
                     config.misc.disableWallpaperClick = v
                 } else {
                     config.warnings.append("misc.disable_wallpaper_click: must be true or false, using \(config.misc.disableWallpaperClick)")
+                }
+            }
+            if let raw = m["autohide_dock"] {
+                if let v = raw.boolValue {
+                    config.misc.autohideDock = v
+                } else {
+                    config.warnings.append("misc.autohide_dock: must be true or false, using \(config.misc.autohideDock)")
                 }
             }
             if let raw = m["prevent_hiding"] {

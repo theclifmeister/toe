@@ -92,11 +92,14 @@ border: the border panel is `.canJoinAllSpaces` + `.fullScreenAuxiliary`, so it 
 across a fullscreen Space unless something stops it. With *Displays have separate Spaces* on (the
 macOS default) "is anything fullscreen" is never the right question — scope it to a display.
 
-**State that outlives the process.** Symbolic hotkeys (`CGSSetSymbolicHotKeyEnabled`) and the
-wallpaper-click preference are the window server's, not toe's, so a `kill -9` during development
-would leave `Ctrl`+`↑` dead with nothing to explain why. Both are journalled to
+**State that outlives the process.** Symbolic hotkeys (`CGSSetSymbolicHotKeyEnabled`), the
+wallpaper-click preference and the Dock's auto-hide (`CoreDockSetAutoHideEnabled`) belong to the
+window server or the Dock, not to toe, so a `kill -9` during development would leave `Ctrl`+`↑`
+dead — or the Dock hiding itself — with nothing to explain why. All three are journalled to
 `~/.local/state/toe/` *before* the change is made and replayed in reverse at startup. If you add
-another such global toggle, follow that pattern.
+another such global toggle, follow that pattern. `CoreDock*` is also the one place toe reaches a
+symbol through `dlsym` instead of declaring it: unexported from every header, and a link-time
+dependency on it would turn its removal into a launch failure.
 
 **The session snapshot** (`~/.local/state/toe/session.json`) is keyed on `CGWindowID` plus
 `kern.boottime`, and is restored *before* the tracker starts. A stale snapshot is discarded unread

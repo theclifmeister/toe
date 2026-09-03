@@ -122,6 +122,13 @@ disable_expose_shortcuts = true
 # "Click wallpaper to show desktop") and puts it back the way it found it when it quits.
 disable_wallpaper_click = true
 
+# The Dock takes a strip of screen off one edge that the tiles never get — around 70 points on a
+# default install, for something SUPER+SPACE reaches instead. toe turns on the setting System
+# Settings › Desktop & Dock calls "Automatically hide and show the Dock", which hands the strip
+# back and leaves the Dock one mouse-to-the-edge away, and turns it off again when it quits. A
+# Dock you already auto-hide yourself is left alone.
+autohide_dock = true
+
 # ⌘H and ⌘⌥H take an application's windows out of the layout without closing them — the tree
 # reflows around the gap and SUPER+arrows cannot reach them again, because they are no longer on
 # any workspace. toe puts a hidden application straight back.
