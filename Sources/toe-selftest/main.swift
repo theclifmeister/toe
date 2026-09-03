@@ -1797,12 +1797,18 @@ h.test("Configure goes with the startup row, being all that was left in it") { t
 
 h.test("the second column never runs into the title") { t in
     let m = MenuMetrics(lineHeight: 22)
-    let row = MenuLayout.rowFrame(0, width: 295, m)
-    // "Run on startup" at 18pt JetBrainsMono, past a 16pt icon and its 14pt gap.
-    let titleEnd = row.x + m.itemPaddingLeft + m.iconSide + m.iconGap + 151
+    let narrow = MenuLayout.rowFrame(0, width: 295, m)
+    // "Run on startup" at 18pt JetBrainsMono, past a 16pt icon and its 14pt gap. The row's x is
+    // the content inset, so it is the same at every width and the title ends in the same place.
+    let titleEnd = narrow.x + m.itemPaddingLeft + m.iconSide + m.iconGap + 151
+    t.equal(MenuLayout.valueSpace(inRow: narrow, titleEnd: titleEnd, m), 28,
+            "at walker's 295 there are 28 points for a value that needs 32 to say off — why #74")
+
+    let row = MenuLayout.rowFrame(0, width: MenuConfig().width, m)
     let space = MenuLayout.valueSpace(inRow: row, titleEnd: titleEnd, m)
-    t.expect(space < 40, "at walker's 295 points there is room for about three characters")
-    t.expect(space > 0, "but not less than none")
+    t.equal(space, 133, "the 400 the default widened to leaves 133, which off fits inside")
+    t.expect(space < 200, "and is still too little to name a reason in, which is why the "
+                          + "unavailable startup row is dropped rather than dimmed")
 
     let wide = MenuLayout.rowFrame(0, width: 800, m)
     t.expect(MenuLayout.valueSpace(inRow: wide, titleEnd: titleEnd, m) > 400,
@@ -1913,7 +1919,7 @@ h.test("the panel is as tall as its rows, and never taller than the display") { 
     let small = MenuLayout.size(rows: 3, width: 295, maxHeight: 900, m)
     t.equal(small.visibleRows, 3, "three rows fit with room to spare")
     t.equal(small.size.y, 246, "and the panel is exactly that tall")
-    t.equal(small.size.x, 295, "omarchy-menu's --width 295")
+    t.equal(small.size.x, 295, "and as wide as it was asked for")
 
     let long = MenuLayout.size(rows: 50, width: 800, maxHeight: 900, m)
     t.expect(long.size.y <= 900, "fifty bindings do not make a panel taller than the screen")
@@ -1977,7 +1983,7 @@ h.test("the menu table defaults to Omarchy's Tokyo Night") { t in
     t.equal(c.menu.accent, "#7aa2f7", "@selected-text")
     t.equal(c.menu.borderColor, c.menu.foreground, "walker maps the border to the foreground")
     t.equal(c.menu.opacity, 0.95, "alpha(@base, 0.95)")
-    t.equal(c.menu.width, 295, "omarchy-menu's --width for the menu")
+    t.equal(c.menu.width, 400, "wider than omarchy-menu's 295: these rows are sentences")
     t.equal(c.menu.listWidth, 800, "and for a list view")
     t.equal(c.menu.fontSize, 18, "walker draws at 18px")
 }

@@ -70,8 +70,15 @@ public struct MenuConfig: Equatable {
     public var border: String?
     /// `.box-wrapper { background: alpha(@base, 0.95) }`. The search strip stays opaque.
     public var opacity: Double = 0.95
-    /// `omarchy-menu` invokes walker with `--width 295`, and `--width 800` for a list view.
-    public var width: Double = 295
+    /// `omarchy-menu` invokes walker with `--width 295`, and `--width 800` for a list view. The
+    /// list width is walker's; the menu's is not, and the divergence is deliberate — see #74.
+    /// 295 leaves 193 points for a title once the icon and the paddings are out, and "Edit
+    /// configuration" at 18pt JetBrainsMono measures 194, so it truncated by a single point;
+    /// the second column beside "Run on startup" had 28 points to draw `off` in, which needs
+    /// 32. Both were a hair short rather than plainly wrong, which is why it read as a rendering
+    /// glitch for so long. 400 leaves 298 and 133, and every row in `MenuModel.root` draws
+    /// whole. Re-measure these before narrowing it again.
+    public var width: Double = 400
     public var listWidth: Double = 800
     /// GTK's 18px, one for one. The one metric worth a knob: 18 pt is large by macOS convention
     /// and this is how you disagree with that without re-theming the rest.
