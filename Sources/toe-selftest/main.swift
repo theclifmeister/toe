@@ -1832,6 +1832,210 @@ h.test("the second column never runs into the title") { t in
             "a title longer than the row leaves nothing rather than a negative width")
 }
 
+// MARK: - A download, in the menu
+
+/// A Theme level mid-download: two themes on disk, two to be had, and Solitude being fetched.
+///
+/// Solitude's five pictures are deliberately lopsided — 100 KB, 100 KB, 100 KB, 100 KB and 4 MB —
+/// because that is the shape upstream actually has and the shape the first version of the bar got
+/// wrong. Uniform steps put four fifths of the bar behind a tenth of the bytes.
+let solitudePictures = [100_000, 100_000, 100_000, 100_000, 4_000_000]
+
+func downloadingStyle(fetching: Int, bytesDone: Int) -> StyleMenu {
+    let pictures = solitudePictures.enumerated().map {
+        RemoteFile(name: "\($0.offset)-x.webp", bytes: $0.element)
+    }
+    return StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox"),
+                              ThemeRef(slug: "nord", name: "Nord")],
+                     available: [RemoteTheme(slug: "solitude", name: "Solitude",
+                                             backgrounds: pictures),
+                                 RemoteTheme(slug: "lupine", name: "Lupine",
+                                             backgrounds: [RemoteFile(name: "0-y.webp",
+                                                                      bytes: 400_000)])],
+                     current: "gruvbox",
+                     downloading: ThemeDownload(slug: "solitude", fetching: fetching, total: 5,
+                                                bytesDone: bytesDone,
+                                                bytesTotal: solitudePictures.reduce(0, +)))
+}
+
+h.test("the bar measures bytes, so it does not race through the small pictures") { t in
+    let total = solitudePictures.reduce(0, +)          // 4.4 MB, of which the last is 4 MB
+    func at(_ bytesDone: Int) -> Double {
+        ThemeDownload(slug: "solitude", fetching: 1, total: 5,
+                      bytesDone: bytesDone, bytesTotal: total).fraction
+    }
+    // Four small pictures down and only the big one left. Counting files this was four fifths
+    // done; in bytes it is under a tenth, which is the truth — and the difference is exactly the
+    // stall the first version showed at the end.
+    t.expect(at(400_000) < 0.1, "four of five pictures is under a tenth of the bytes")
+    t.equal(at(total / 2), 0.5, "halfway through the bytes is halfway along the bar")
+    t.equal(at(total), 1, "and all of them fills it")
+
+    // The last picture arriving is most of the bar, and it arrives continuously — which is the
+    // point of reporting bytes while a transfer is running rather than only when it ends.
+    t.expect(at(400_000 + 2_000_000) > 0.5, "halfway into the last picture is past halfway")
+}
+
+h.test("a download's bar reaches its end") { t in
+    let total = solitudePictures.reduce(0, +)
+    // The complaint this fixes: every report but the last is sent before or during a transfer,
+    // so without a last word the final state the row ever drew was however much of the last
+    // picture had arrived when it was last asked.
+    let last = ThemeDownload(slug: "solitude", fetching: 5, total: 5,
+                             bytesDone: total, bytesTotal: total)
+    t.equal(last.fraction, 1, "the last word fills the row")
+    t.equal(last.label, "5/5", "with the count to match")
+
+    // Both numbers come off the network and can disagree.
+    t.equal(ThemeDownload(slug: "a", fetching: 1, total: 1,
+                          bytesDone: 9_000_000, bytesTotal: 1_000_000).fraction, 1,
+            "a transfer heavier than advertised fills the row rather than overrunning it")
+    t.equal(ThemeDownload(slug: "a", fetching: 1, total: 1,
+                          bytesDone: -5, bytesTotal: 1_000).fraction, 0, "and clamped below")
+    t.equal(ThemeDownload(slug: "a", fetching: 0, total: 0,
+                          bytesDone: 0, bytesTotal: 0).fraction, 0,
+            "a theme with no pictures has no fraction to draw and is over at once")
+}
+
+h.test("a download's label names the picture in flight, not the last one finished") { t in
+    t.equal(ThemeDownload(slug: "a", fetching: 0, total: 5,
+                          bytesDone: 0, bytesTotal: 100).label, nil,
+            "the palette step has nothing to count yet, so the row keeps showing its size")
+    t.equal(ThemeDownload(slug: "a", fetching: 3, total: 5,
+                          bytesDone: 40, bytesTotal: 100).label, "3/5",
+            "then it names what is being fetched")
+    // The label and the bar deliberately disagree until the end: one says what is happening, the
+    // other how much of it is done.
+    let mid = ThemeDownload(slug: "a", fetching: 5, total: 5, bytesDone: 10, bytesTotal: 100)
+    t.equal(mid.label, "5/5", "the last picture is in flight")
+    t.expect(mid.fraction < 0.2, "while the bar is still near the start of it")
+}
+
+h.test("the theme being downloaded is the row that fills") { t in
+    let rows = MenuModel.themes(downloadingStyle(fetching: 3, bytesDone: 200_000))
+    guard let solitude = rows.first(where: { $0.title == "Solitude" }),
+          let lupine = rows.first(where: { $0.title == "Lupine" }),
+          let gruvbox = rows.first(where: { $0.title == "Gruvbox" }) else {
+        return t.expect(false, "all three themes should have rows")
+    }
+    t.equal(solitude.progress, 200_000.0 / 4_400_000,
+            "the one being fetched carries the fraction, in bytes")
+    // The size was there to say what you were about to spend; once you have spent it the
+    // question has become how much longer.
+    t.equal(solitude.value, "3/5", "and trades its size for the count")
+    t.equal(lupine.progress, nil, "the other themes on offer are untouched")
+    t.equal(lupine.value, "0.4 MB", "and still say what they cost")
+    t.equal(gruvbox.progress, nil, "as is the one already on disk")
+    t.equal(gruvbox.value, "current", "which still says it is the one in effect")
+
+    // Nothing downloading is the ordinary case, and no row should carry a fraction in it.
+    let idle = MenuModel.themes(StyleMenu(themes: [], available: [
+        RemoteTheme(slug: "solitude", name: "Solitude", backgrounds: []),
+    ]))
+    t.equal(idle.compactMap { $0.progress }.count, 0, "with nothing being fetched, no row fills")
+}
+
+h.test("choosing a theme leaves the menu up, and everything else dismisses it") { t in
+    // Two reasons, pointing the same way: a theme toe has not got is being *fetched*, and the
+    // filling row is the only thing reporting it; and a theme recolours the menu itself, so
+    // staying put turns the list into something you can look through rather than commit to.
+    t.equal(Command.theme("solitude").keepsMenuOpen, true, "a theme to be downloaded stays")
+    t.equal(Command.theme("gruvbox").keepsMenuOpen, true, "and so does one already on disk")
+    t.equal(Command.theme("").keepsMenuOpen, true,
+            "`Your own colours` is the way back, and a way back you must reopen the menu to use "
+            + "is not much of one")
+
+    // A wallpaper is behind the panel rather than in it: nothing to restyle, nothing being
+    // fetched, and the picture is the whole of what changed.
+    t.equal(Command.background("1-a.jpg").keepsMenuOpen, false, "backgrounds still close")
+    t.equal(Command.nextBackground.keepsMenuOpen, false, "including stepping through them")
+    // The rest want the panel gone and the keyboard handed back before they begin.
+    t.equal(Command.quit.keepsMenuOpen, false, "quit tears the process down")
+    t.equal(Command.reload.keepsMenuOpen, false, "a reload is over before you could look at it")
+    t.equal(Command.exec("ghostty").keepsMenuOpen, false, "an exec brings something else forward")
+    t.equal(Command.killActive.keepsMenuOpen, false,
+            "and a window command acts on a window you cannot see past the menu")
+}
+
+h.test("a filling row is the row cut off at the fraction") { t in
+    let m = MenuMetrics(lineHeight: 22)
+    let row = MenuLayout.rowFrame(0, width: 400, m)
+    t.equalBox(MenuLayout.progressFrame(inRow: row, fraction: 0.5),
+               Box(x: row.x, y: row.y, w: row.w / 2, h: row.h),
+               "half the row, from its own left edge and its full height")
+    t.equalBox(MenuLayout.progressFrame(inRow: row, fraction: 0),
+               Box(x: row.x, y: row.y, w: 0, h: row.h), "nothing at nothing")
+    t.equalBox(MenuLayout.progressFrame(inRow: row, fraction: 1), row, "and the whole row at one")
+    // The fraction comes from arithmetic over a count off the network.
+    t.equalBox(MenuLayout.progressFrame(inRow: row, fraction: 4),
+               row, "a fraction past one fills the row rather than running out of the panel")
+    t.equalBox(MenuLayout.progressFrame(inRow: row, fraction: -1),
+               Box(x: row.x, y: row.y, w: 0, h: row.h), "and one below zero draws nothing")
+}
+
+h.test("rebuilding under an open menu leaves you where you were standing") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
+                                           style: downloadingStyle(fetching: 1, bytesDone: 0)), visibleRows: 10)
+    // Down into Style › Theme, the way a user gets there.
+    while m.selectedItem?.title != "Style" { m.move(by: 1) }
+    t.equal(m.activate(), .pushed, "into Style")
+    while m.selectedItem?.title != "Theme" { m.move(by: 1) }
+    t.equal(m.activate(), .pushed, "and into Theme")
+    while m.selectedItem?.title != "Solitude" { m.move(by: 1) }
+    let standingOn = m.selection
+    t.equal(m.selectedItem?.progress, 0, "the row under the cursor is filling from nothing")
+
+    // A picture lands. The whole tree is rebuilt, because the level in front of the user is two
+    // rungs down and the menu cannot know which of MenuModel's builders made it.
+    m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [],
+                                   style: downloadingStyle(fetching: 5, bytesDone: 2_400_000)))
+    t.equal(m.breadcrumb, ["Style", "Theme"], "still on the level it was on")
+    t.equal(m.selection, standingOn, "still on the row it was on")
+    t.equal(m.selectedItem?.title, "Solitude", "which is still the same row")
+    t.equal(m.selectedItem?.progress, 2_400_000.0 / 4_400_000, "and it has filled further")
+    t.equal(m.selectedItem?.value, "5/5", "with the count to match")
+}
+
+h.test("a rebuild that cannot re-enter a level surfaces one rung up") { t in
+    // Background exists only while the current theme has pictures, so changing to a theme with
+    // none takes the level the user is standing in out from under them. Real, not defensive.
+    let withPictures = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
+                                 current: "gruvbox", backgrounds: ["1-a.jpg", "2-b.jpg"])
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: withPictures),
+                      visibleRows: 10)
+    while m.selectedItem?.title != "Style" { m.move(by: 1) }
+    _ = m.activate()
+    while m.selectedItem?.title != "Background" { m.move(by: 1) }
+    _ = m.activate()
+    t.equal(m.breadcrumb, ["Style", "Background"], "standing in Background")
+    t.equal(m.visible.count, 3, "two pictures and the row that steps through them")
+
+    let withNone = StyleMenu(themes: [ThemeRef(slug: "vantablack", name: "Vantablack")],
+                             current: "vantablack")
+    m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [], style: withNone))
+    // Not an error and not an empty level: the deepest level that still exists.
+    t.equal(m.breadcrumb, ["Style"], "the level went away, so the user comes up to Style")
+    t.equal(m.visible.map(\.title), ["Theme"], "which no longer offers Background at all")
+    t.expect(m.selection < m.visible.count, "and the selection is inside the level it landed on")
+}
+
+h.test("the fetching note appears and goes away without the menu being reopened") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
+                                           style: StyleMenu(fetching: true)), visibleRows: 10)
+    while m.selectedItem?.title != "Style" { m.move(by: 1) }
+    _ = m.activate()
+    while m.selectedItem?.title != "Theme" { m.move(by: 1) }
+    _ = m.activate()
+    t.equal(m.visible.map(\.title), ["Fetching Omarchy's themes…", "Your own colours"],
+            "a machine with nothing yet, mid-fetch")
+
+    // The catalogue arrives. This is what `ThemeCatalogue.onChange` now reaches.
+    m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [], style: StyleMenu(
+        available: [RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])], fetching: false)))
+    t.equal(m.visible.map(\.title), ["Nord", "Your own colours"],
+            "the note gives way to the themes it was waiting for")
+}
+
 h.test("the selection clamps at both ends") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.move(by: -1)
@@ -2085,6 +2289,45 @@ color14 = "#0db9d7"
 color15 = "#acb0d0"
 """
 
+/// The same theme, in the spelling Omarchy 4 publishes it in — `themes/tokyo-night/colors.toml`
+/// on the `quattro` branch, verbatim. Held beside the Omarchy 3 file above rather than replacing
+/// it, because both are files toe has to read: this one is what a download fetches today, and
+/// that one is what is already sitting in `~/.config/toe/themes` on the disk of anybody who
+/// copied a theme across before Omarchy 4.
+let tokyoNightColors4 = """
+mode = "dark"
+
+accent = "#7aa2f7"
+selection = "#292e42"
+muted = "#414868"
+
+background = "#1a1b26"
+dark_background = "#13141c"
+darker_background = "#0e0e14"
+lighter_background = "#24283b"
+
+foreground = "#a9b1d6"
+dark_foreground = "#565f89"
+light_foreground = "#b4bee6"
+bright_foreground = "#c0caf5"
+
+red = "#f7768e"
+yellow = "#e0af68"
+orange = "#eb927b"
+green = "#9ece6a"
+cyan = "#449dab"
+blue = "#7aa2f7"
+magenta = "#ad8ee6"
+brown = "#75493d"
+
+bright_red = "#ff7a93"
+bright_yellow = "#ff9e64"
+bright_green = "#b9f27c"
+bright_cyan = "#0db9d7"
+bright_blue = "#7da6ff"
+bright_magenta = "#bb9af7"
+"""
+
 /// Two themes to test against, built here rather than taken from toe. toe ships none: a theme is
 /// somebody else's work, and the list you choose from is what you have on disk plus what Omarchy
 /// publishes. So the fixtures below are exactly that — a theme somebody downloaded.
@@ -2124,6 +2367,119 @@ h.test("a theme missing a colour toe paints with is refused rather than guessed 
         t.equal(error as? PaletteError, .notAColour(key: "accent", value: "blue"),
                 "a colour that will not parse is named with what was there, as Hex.rgba's nil intends")
     }
+}
+
+h.test("Omarchy 4's colors.toml is read too, key for key") { t in
+    guard let p = try? Palette.parse(tokyoNightColors4) else {
+        return t.expect(false, "the Omarchy 4 Tokyo Night palette should parse")
+    }
+    // The three toe paints with are spelled the same in both files, and for this theme they carry
+    // the same values too — so following the new branch left Tokyo Night's border alone. It is
+    // not true of every theme: Kanagawa's accent changed upstream between the two, which is an
+    // Omarchy edit rather than anything this parser does.
+    t.equal(p.accent, "#7aa2f7", "accent is still accent")
+    t.equal(p.background, "#1a1b26", "as is background")
+    t.equal(p.foreground, "#a9b1d6", "and foreground")
+
+    t.equal(p.mode, .dark, "and mode is read, which Omarchy 3 never said")
+    t.equal(p.darkerBackground, "#0e0e14", "the background ramp lands, darkest first")
+    t.equal(p.darkBackground, "#13141c", "then dark")
+    t.equal(p.lighterBackground, "#24283b", "then lighter")
+    t.equal(p.darkForeground, "#565f89", "and the foreground ramp with it")
+    t.equal(p.lightForeground, "#b4bee6", "light")
+    t.equal(p.brightForeground, "#c0caf5", "and bright")
+    t.equal(p.selection, "#292e42", "selection replaces the selection_* pair")
+    t.equal(p.muted, "#414868", "and muted beside it")
+
+    // Two hues with no ANSI slot to live in, which is the whole reason they are stored by name.
+    t.equal(p.orange, "#eb927b", "orange has no terminal slot and is kept anyway")
+    t.equal(p.brown, "#75493d", "nor does brown")
+
+    // Nothing in Omarchy 4's file means any of these, and a nil is the honest answer.
+    t.equal(p.cursor, nil, "cursor is gone from the format, not defaulted to something")
+    t.equal(p.selectionForeground, nil, "and the keys it replaced are not invented back")
+    t.equal(p.selectionBackground, nil, "either of them")
+}
+
+h.test("a named hue and a numbered slot are the same colour under two names") { t in
+    guard let three = try? Palette.parse(tokyoNightColors),
+          let four = try? Palette.parse(tokyoNightColors4) else {
+        return t.expect(false, "both spellings of Tokyo Night should parse")
+    }
+    // The mapping in `Palette.ansiNames` is only allowed to exist because this holds — checked
+    // here on the one theme, and checked against all nineteen that exist on both of Omarchy's
+    // branches before it was written down.
+    for index in Palette.ansiNames.keys.sorted() {
+        t.equal(four.color(index), three.color(index),
+                "color\(index) is the same colour whichever file it came from")
+    }
+    t.equal(four.red, three.color(1), "and red is reachable under its own name")
+    t.equal(four.brightCyan, three.color(14), "as is bright_cyan")
+    t.equal(four.blue, four.accent, "Tokyo Night's accent is its blue, in both")
+
+    // ANSI's black and white ends have no Omarchy 4 key at all. `muted` and `lighter_background`
+    // sit near them in some themes and nowhere near them in most, so the slots stay empty: a
+    // caller can fall back from a nil and cannot fall back from a wrong colour.
+    for index in [0, 7, 8, 15] {
+        t.equal(four.color(index), nil, "slot \(index) has no Omarchy 4 key and is left empty")
+        t.expect(three.color(index) != nil, "though Omarchy 3 filled it")
+    }
+    t.equal(four.terminal.compactMap { $0 }.count, 12, "twelve of the sixteen land")
+    t.equal(three.terminal.compactMap { $0 }.count, 16, "against all sixteen from the older file")
+}
+
+h.test("a numbered slot wins over the named hue where a file has both") { t in
+    // A hand-written palette, or one caught mid-conversion. `color1` names the slot; `red` names
+    // a colour that usually sits in it, so the slot is the more specific of the two.
+    let both = """
+    accent = "#111111"
+    background = "#222222"
+    foreground = "#333333"
+    color1 = "#aaaaaa"
+    red = "#bbbbbb"
+    """
+    guard let p = try? Palette.parse(both) else {
+        return t.expect(false, "it should parse")
+    }
+    t.equal(p.color(1), "#aaaaaa", "the numbered slot is the one that lands")
+    t.equal(p.red, "#aaaaaa", "and reading it by name gives the same answer")
+}
+
+h.test("a theme's Hyprland overrides are left alone rather than read as colours") { t in
+    // `hackerman` carries this, and it is a Hyprland gradient rather than a colour. It is also
+    // the most tempting key in the file — literally the border colour — which is why the test
+    // exists: reading it would throw `notAColour` and take the theme down with it.
+    let hackerman = """
+    accent = "#82FB9C"
+    background = "#0B0C16"
+    foreground = "#ddf7ff"
+    hyprland_active_border = "rgba(26a269ee) rgba(2ec27eee) 45deg"
+    hyprland_inactive_border = "rgb(1e1e1e)"
+    active_border_color = "#f2fcff"
+    active_tab_background = "#6fb8e3"
+    """
+    guard let p = try? Palette.parse(hackerman) else {
+        return t.expect(false, "a theme with per-app overrides in it should still parse")
+    }
+    t.equal(p.accent, "#82FB9C", "the accent is read, uppercase hex and all")
+    t.equal(p.colours.contains { $0.key.hasPrefix("hyprland_") }, false,
+            "and Hyprland's own keys are not among the colours toe carries")
+}
+
+h.test("a mode toe does not recognise leaves the theme usable") { t in
+    // Not an error: `mode` is not a colour, nothing paints with it yet, and a third value
+    // arriving upstream should widen what toe knows rather than stop a theme from loading.
+    let odd = """
+    mode = "sepia"
+    accent = "#111111"
+    background = "#222222"
+    foreground = "#333333"
+    """
+    guard let p = try? Palette.parse(odd) else {
+        return t.expect(false, "it should still parse")
+    }
+    t.equal(p.mode, nil, "the mode is simply not known")
+    t.equal(p.accent, "#111111", "and the colours are all still there")
 }
 
 // MARK: - The catalogue
@@ -2233,6 +2589,34 @@ h.test("a catalogue goes stale, and a clock that jumped reads as stale too") { t
     // cheap answer; treating it as fresh would wedge the list until the skew passed.
     let future = Catalogue(fetchedAt: now.addingTimeInterval(3600), themes: [])
     t.equal(future.isStale(now: now, maxAge: 86400), true, "a stamp in the future is not fresh")
+}
+
+h.test("a catalogue written before the move to Omarchy 4 is not mistaken for a current one") { t in
+    // The real shape of a stale one, cut down from a catalogue.json this machine had actually
+    // written against Omarchy's `master` branch. What makes it unusable is not its age: the
+    // pictures it names were renamed when Omarchy 4 re-encoded them, so downloading White from
+    // this listing would ask for `1-white.jpg` and get a 404 partway through.
+    let old = Data("""
+    {"version":1,"fetchedAt":"2026-09-03T12:15:55Z","themes":[
+      {"slug":"white","name":"White","backgrounds":[{"name":"1-white.jpg","bytes":1229622}]}
+    ]}
+    """.utf8)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    guard let decoded = try? decoder.decode(Catalogue.self, from: old) else {
+        return t.expect(false, "an old catalogue should still decode — it is refused, not unreadable")
+    }
+    t.equal(decoded.version, 1, "it reads back as the version it was written at")
+    t.expect(decoded.version != Catalogue.currentVersion,
+             "which is not the current one, so ThemeCatalogue.load discards it and refetches")
+    // Stated as the number rather than just "not current", so that a future bump has to come
+    // past this line and say what it is invalidating.
+    t.equal(Catalogue.currentVersion, 2, "2 since the move from master to quattro")
+
+    // A catalogue toe wrote itself is current by construction — the bump must not be reachable
+    // by forgetting to set the field.
+    t.equal(Catalogue(fetchedAt: Date(), themes: []).version, Catalogue.currentVersion,
+            "and a freshly built one is always current")
 }
 
 h.test("a byte count reads the way a menu row needs it to") { t in

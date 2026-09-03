@@ -102,6 +102,15 @@ final class MenuView: NSView {
         for (index, item) in s.rows.enumerated() {
             let row = MenuLayout.rowFrame(index, width: width, m)
             let selected = index == s.selectedRow
+            if let fraction = item.progress {
+                // The accent, well down in alpha — the colour the selected row already draws its
+                // text in, so a filling row belongs to the theme rather than being the one thing
+                // in the menu that ignores it. Under the selection wash rather than over it, so
+                // that the row you are standing on still reads as the row you are standing on
+                // while it fills.
+                NSColor(s.accent.withAlpha(0.3)).setFill()
+                rect(MenuLayout.progressFrame(inRow: row, fraction: fraction)).fill()
+            }
             if selected {
                 // `child:selected { background: alpha(@text, 0.07) }`
                 NSColor(s.foreground.withAlpha(0.07)).setFill()

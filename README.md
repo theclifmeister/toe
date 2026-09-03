@@ -305,14 +305,24 @@ choose one. Nothing at launch, no update check, no telemetry. A machine that has
 has no themes to choose from and toe's own colours, which is the cost of not shipping other
 people's work.
 
-While either is running the menu bar item says so — `⟳ Gruvbox 3/6` after the workspaces, never
-instead of them — because a nine-megabyte download happens with the menu closed and the tooltip
-behind it needs you to already suspect something is happening.
+Both report themselves in the menu, on the row the wait belongs to. Picking a theme toe has not
+got is the one row that does not dismiss the panel: it stays open and that theme's own row fills
+left to right in the accent as the pictures arrive, its size giving way to `3/5`. The catalogue
+fetch is the `Fetching Omarchy's themes…` row, which now appears and gives way to the themes it
+was waiting for without the menu having to be closed and opened again.
+
+The menu bar says nothing about either — the strip is workspaces and the tooltip is things that
+have gone wrong. Escape or a click elsewhere closes the menu as always and the download carries
+on behind it; what you give up by dismissing it is watching, and what you get back is a menu bar
+that is not a second, worse copy of a list the menu draws properly.
 
 A theme is a folder: `~/.config/toe/themes/<name>/colors.toml` in Omarchy's own format, plus an
 optional `backgrounds/`. That is the same shape a theme directory copied straight out of an
 Omarchy install has, and the same shape the downloader writes, so a theme you fetched and one you
 put there yourself are the same thing afterwards with nothing that treats them differently.
+Omarchy 4 rewrote that file — named hues like `red` and `bright_cyan` where Omarchy 3 had
+`color0`…`color15`, a `mode`, and ramps of backgrounds and foregrounds — and both spellings are
+read, so a folder you copied across before the rewrite keeps working.
 Nothing is registered: a folder you add appears the moment you next open the menu, and saving its
 palette recolours the screen within about 150 ms the way saving `toe.toml` does.
 

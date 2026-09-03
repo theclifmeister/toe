@@ -20,8 +20,6 @@ final class StatusItem: NSObject {
     var onOpenMenu: (() -> Void)?
 
     private var accessibilityGranted = false
-    /// What is being fetched, if anything — see `update(workspaces:warnings:…)`.
-    private var progress: String?
 
     /// waybar's `persistent-workspaces` — how many workspaces keep a slot when empty.
     var persistentWorkspaces = WorkspaceStrip.defaultPersistent
@@ -91,14 +89,14 @@ final class StatusItem: NSObject {
 
     /// Cheap: only the title strip is recomputed, from the little the strip reads.
     ///
-    /// - Parameter progress: what is being fetched, if anything. It goes in the strip rather than
-    ///   only in the tooltip because a tooltip needs you to already suspect something is
-    ///   happening and go looking — and the one moment this matters is a nine-megabyte download
-    ///   running with the menu closed and nothing else on screen to say so.
+    /// This used to take a `progress` string as well, and draw `⟳ Gruvbox 3/6` after the
+    /// workspaces while a theme was being fetched. It does not any more: the quick menu fills the
+    /// downloading theme's own row instead, which is the row that told you what the download
+    /// would cost, so the progress is now reported where the decision was made rather than in a
+    /// second place that had to abbreviate it. The strip is workspaces and nothing else again.
     func update(workspaces: [WorkspaceStrip.State], warnings: [String],
-                accessibilityGranted: Bool, progress: String? = nil) {
+                accessibilityGranted: Bool) {
         self.accessibilityGranted = accessibilityGranted
-        self.progress = progress
         item.button?.attributedTitle = title(for: workspaces)
 
         // The focused workspace is drawn as a square rather than a digit, so the title on
@@ -141,26 +139,7 @@ final class StatusItem: NSObject {
             stripItems.append(item)
             stripWidths.append(Double(width(of: item)))
         }
-        // After the workspaces, never instead of them: what workspace you are on is the thing
-        // this item exists to tell you, and a download must not take that away for a minute.
-        // No entry goes into `stripItems`, so the click targets are unchanged and clicking the
-        // progress opens the menu like clicking anywhere else on the item.
-        if let progress {
-            strip.append(spacer)
-            strip.append(progressPiece(progress))
-        }
         return strip
-    }
-
-    /// `⟳ Gruvbox 3/6`, in the same dimmed grey an unfocused workspace takes.
-    ///
-    /// Static rather than animated: an animation needs a timer running for as long as the
-    /// download, and the step count already moves often enough to read as alive. The glyph is
-    /// there so a glance finds it without reading the words.
-    private func progressPiece(_ text: String) -> NSAttributedString {
-        NSAttributedString(string: "⟳ " + text, attributes: [
-            .font: font, .foregroundColor: NSColor.secondaryLabelColor,
-        ])
     }
 
     /// A fixed `gap` of empty space, kerned rather than padded so its width is exactly known.

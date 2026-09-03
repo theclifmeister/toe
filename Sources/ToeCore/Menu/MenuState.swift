@@ -144,6 +144,40 @@ public struct MenuState: Equatable {
         refilter(resettingSelection: false)
     }
 
+    /// Rebuilds every level from a fresh tree, leaving the user on the level and the row they
+    /// were on.
+    ///
+    /// `replaceLevel` is not enough for a menu that changes while you are looking at it: the rows
+    /// that move are two levels down from the root, and the caller would have to know which of
+    /// `MenuModel`'s builders made the level in front of you in order to call the right one. So
+    /// the whole tree is rebuilt and this walks back down it by title, which is a thing the state
+    /// already records for the breadcrumb.
+    ///
+    /// A level that cannot be re-entered — its row is gone, or stopped leading anywhere — stops
+    /// the walk and leaves you at the deepest level that still exists. That is a real case rather
+    /// than a defensive one: `Background` appears only while the current theme has pictures, so
+    /// changing to a theme with none takes the level you are standing in out from under you, and
+    /// surfacing one rung up is the answer that cannot show rows belonging to a theme you left.
+    public mutating func rebuild(root: [MenuItem]) {
+        var levels: [[MenuItem]] = [root]
+        var reached: [String] = []
+        for title in titles {
+            guard let item = levels[levels.count - 1].first(where: { $0.title == title }),
+                  case .submenu(let children) = item.action else { break }
+            levels.append(children)
+            reached.append(title)
+        }
+        stack = levels
+        titles = reached
+        // The selection is kept rather than reset, which is what makes the fill appear under the
+        // cursor instead of the list jumping to the top on every picture that lands. It is an
+        // index into a list whose rows can move — a finished download leaves `available` for
+        // `themes` — so `refilter` clamps it, and the row under the cursor afterwards may not be
+        // the row that was under it before. That is the same trade `replaceLevel` already makes
+        // for the startup toggle.
+        refilter(resettingSelection: false)
+    }
+
     // MARK: - Private
 
     /// Typing searches the whole tree below wherever you are, not the one level in front of you,

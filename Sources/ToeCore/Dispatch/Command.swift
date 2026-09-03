@@ -53,6 +53,36 @@ public extension Command {
         guard case .exec(let line) = self else { return false }
         return line.contains(Config.fileName)
     }
+
+    /// Whether the quick menu stays up after running this.
+    ///
+    /// Every row used to dismiss the panel, which is right for almost all of them: `exec` brings
+    /// another application forward, `quit` tears the process down, and a window command acts on a
+    /// window you cannot see past the menu. Choosing a theme is the exception, and for two
+    /// reasons that arrived separately and point the same way.
+    ///
+    /// The first is that a theme you have not got has to be *fetched*, and the fetching is
+    /// reported by that row filling — so closing the menu would dismiss the only surface saying
+    /// anything about the slowest thing toe does.
+    ///
+    /// The second is that a theme recolours the menu itself. Picking one and staying put means
+    /// the panel restyles under the cursor, so arrowing down the list and pressing return is a
+    /// way of *looking* at themes rather than a commitment to one — which is what the list is
+    /// for. Closing on each pick made trying three themes three trips through
+    /// `SUPER`+`SPACE` › `Style` › `Theme`.
+    ///
+    /// `.theme("")` — `Your own colours` — is in here for the same reason: it is the way back,
+    /// and a way back you have to reopen the menu to use is not much of one.
+    ///
+    /// Backgrounds deliberately still close. A wallpaper is behind the panel rather than in it,
+    /// so there is nothing to restyle and nothing being fetched; the picture is the whole of what
+    /// changed, and the menu is what is in front of it.
+    var keepsMenuOpen: Bool {
+        switch self {
+        case .theme: return true
+        default:     return false
+        }
+    }
 }
 
 public enum CommandError: Error, CustomStringConvertible {

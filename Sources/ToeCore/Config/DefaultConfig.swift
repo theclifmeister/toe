@@ -67,11 +67,12 @@ split_bias             = 0
 # theme there and editing it here are the same act. It refuses to write at all if the result would
 # not parse.
 #
-# A theme is a folder: ~/.config/toe/themes/<name>/colors.toml, in Omarchy's own format, plus an
-# optional backgrounds/ beside it. Nothing has to be registered — one appears in the menu the
-# moment you next open it, and saving its palette recolours the screen the way saving this file
-# does. Style > Background appears exactly when that theme has pictures, and SUPER+CTRL+SPACE
-# steps through them.
+# A theme is a folder: ~/.config/toe/themes/<name>/colors.toml, in Omarchy's own format — either
+# spelling of it, the named hues Omarchy 4 writes or the numbered color0-color15 of Omarchy 3 —
+# plus an optional backgrounds/ beside it. Nothing has to be registered — one appears in the
+# menu the moment you next open it, and saving its palette recolours the screen the way saving
+# this file does. Style > Background appears exactly when that theme has pictures, and
+# SUPER+CTRL+SPACE steps through them.
 name = ""
 
 [border]
