@@ -924,24 +924,29 @@ h.test("dock swipe swallowing is configurable") { t in
 }
 
 h.test("the macOS behaviours toe takes over are configurable") { t in
-    let off = try Config.parse("[misc]\ndisable_expose_shortcuts = false\nprevent_hiding = false\ndisable_wallpaper_click = false\n")
+    let off = try Config.parse("[misc]\ndisable_expose_shortcuts = false\nprevent_hiding = false\ndisable_wallpaper_click = false\nautohide_dock = false\n")
     t.equal(off.misc.disableExposeShortcuts, false, "the Exposé shortcuts can be handed back")
     t.equal(off.misc.preventHiding, false, "hiding can be allowed")
     t.equal(off.misc.disableWallpaperClick, false, "the wallpaper click can be handed back")
+    t.equal(off.misc.autohideDock, false, "the Dock can be left showing")
     t.equal(off.warnings, [], "no warnings")
 
     let absent = try Config.parse("[general]\ngaps_in = 5\n")
     t.equal(absent.misc.disableExposeShortcuts, true, "omitting the table keeps the defaults")
     t.equal(absent.misc.preventHiding, true, "omitting the table keeps the defaults")
     t.equal(absent.misc.disableWallpaperClick, true, "omitting the table keeps the defaults")
+    t.equal(absent.misc.autohideDock, true, "omitting the table keeps the defaults")
 
-    let bad = try Config.parse("[misc]\nprevent_hiding = 1\ndisable_wallpaper_click = \"no\"\n")
+    let bad = try Config.parse("[misc]\nprevent_hiding = 1\ndisable_wallpaper_click = \"no\"\nautohide_dock = \"sometimes\"\n")
     t.equal(bad.misc.preventHiding, true, "a non-boolean keeps the default")
     t.equal(bad.misc.disableWallpaperClick, true, "a non-boolean keeps the default")
+    t.equal(bad.misc.autohideDock, true, "a non-boolean keeps the default")
     t.equal(bad.warnings.contains { $0.contains("misc.prevent_hiding") }, true,
             "and says so in the menu bar")
     t.equal(bad.warnings.contains { $0.contains("misc.disable_wallpaper_click") }, true,
             "and says so for the wallpaper click too")
+    t.equal(bad.warnings.contains { $0.contains("misc.autohide_dock") }, true,
+            "and for the Dock")
 }
 
 h.test("restoring the layout across a restart is configurable") { t in

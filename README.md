@@ -221,6 +221,23 @@ removing the key again, so a setting you never set is not left holding a value y
 A reveal you had already switched off yourself is left alone. `misc.disable_wallpaper_click = false`
 hands the click back.
 
+**The Dock.** A visible Dock is a strip of screen — around 70 points — that `NSScreen.visibleFrame`
+stops short of, so the layout gives up one edge of every display to something a tiling user
+reaches with `SUPER`+`SPACE` instead. toe turns on "Automatically hide and show the Dock" while it
+runs, which hands the strip back and leaves the Dock one mouse-to-the-edge away. Not through the
+preference: `com.apple.dock`'s `autohide` is what System Settings writes, but the Dock reads its
+own only at launch, so a write needs a `killall -HUP Dock` — which restarts the Dock and blinks
+out every badge and running-app dot. `CoreDockSetAutoHideEnabled` does the whole job instead, the
+Dock animates away, and the preference is updated underneath so System Settings agrees. It is
+exported by HIServices but declared in no public header, so toe looks it up with `dlsym` rather
+than naming it: a declaration would be a link-time dependency, and the day the symbol goes toe
+should lose this one feature rather than stop launching. `NSApplication`'s `.autoHideDock`
+presentation option is the tempting public answer and does not work here — presentation options
+hold only while the application is *active*, and toe is an `.accessory` that is never frontmost.
+This outlives the process too, so it is journalled to `~/.local/state/toe/dock-autohide` first,
+exactly as the two above are. A Dock you already auto-hide yourself is left alone.
+`misc.autohide_dock = false` leaves the Dock where you have it.
+
 **The quick menu.** The menu bar item is the workspace strip and nothing else, which is faithful
 to waybar and leaves toe with nowhere to *show* you anything: the bindings above are the whole
 interface, and a Homebrew user has no way to discover one of them. Omarchy has the surface that

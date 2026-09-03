@@ -114,9 +114,13 @@ final class Coordinator: WindowTrackerDelegate {
         // Same reasoning, same shape: the reveal-desktop preference is the window server's, not
         // toe's, so a copy that was killed rather than quit may have left it switched off.
         WallpaperClick.repairAfterUncleanExit()
-        // Not the same thing as those two — the desktop picture is not given back on the way out
-        // — but the note of what was there before toe touched it is read at the same point, so a
-        // theme picked in a run that was killed is still reversible in this one. See `Wallpaper`.
+        // And the third of them: the Dock's auto-hide setting is the Dock's own, so a copy that
+        // was killed rather than quit may have left the Dock hiding itself.
+        DockAutoHide.repairAfterUncleanExit()
+        // Not the same thing as those three — the desktop picture is not given back on the way
+        // out — but the note of what was there before toe touched it is read at the same point,
+        // so a theme picked in a run that was killed is still reversible in this one. See
+        // `Wallpaper`.
         wallpaper.repairAfterUncleanExit()
         writeDefaultConfigIfMissing()
         loadConfig(force: true)
@@ -646,6 +650,12 @@ final class Coordinator: WindowTrackerDelegate {
             WallpaperClick.restore()
         }
 
+        if config.misc.autohideDock {
+            DockAutoHide.enable()
+        } else {
+            DockAutoHide.restore()
+        }
+
         if config.misc.preventHiding {
             hideBlocker.start()
         } else {
@@ -1036,11 +1046,12 @@ final class Coordinator: WindowTrackerDelegate {
         // WindowServer, so it is taken down deliberately rather than left to process death.
         dockSwipes.stop()
         hideBlocker.stop()
-        // The two that would otherwise outlive toe: the window server keeps a symbolic hotkey
-        // switched off until something switches it back on, and the reveal-desktop preference is
-        // written to the user's settings.
+        // The three that would otherwise outlive toe: the window server keeps a symbolic hotkey
+        // switched off until something switches it back on, and the reveal-desktop and Dock
+        // auto-hide preferences are written to the user's settings.
         SymbolicHotkeys.restoreAll()
         WallpaperClick.restore()
+        DockAutoHide.restore()
     }
 
     private func unstashEverything() {
