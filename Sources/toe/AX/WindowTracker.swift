@@ -11,7 +11,16 @@ final class ManagedWindow {
     /// Where the window sat before it was stashed off-screen, so floating windows come back
     /// to exactly where they were.
     var frameBeforeStash: Box?
-    var isStashed = false
+    var isStashed = false {
+        // One place rather than at each of the three sites that bring a window back, because a
+        // debt owed by a window that is on screen again is not a debt at all.
+        didSet { if !isStashed { stashPending = false } }
+    }
+    /// The window belongs to a hidden workspace but is still where the user can see it: it was
+    /// in native fullscreen when its workspace was hidden, and a fullscreen window is on a Space
+    /// of its own and refuses a position. `Coordinator.settleFullscreenReturns` puts that right
+    /// the moment it becomes an ordinary window again.
+    var stashPending = false
 
     init(id: CGWindowID, element: AXUIElement, pid: pid_t,
          bundleID: String?, title: String?) {

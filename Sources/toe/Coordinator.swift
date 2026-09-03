@@ -795,6 +795,61 @@ final class Coordinator: WindowTrackerDelegate {
         return CGPoint(x: origin.x, y: origin.y)
     }
 
+    /// Parks a window off-screen, where its hidden workspace keeps its windows.
+    private func park(_ window: ManagedWindow) {
+        window.frameBeforeStash = window.element.frame
+        window.isStashed = true
+        desired.removeValue(forKey: window.id)
+        corrections.removeValue(forKey: window.id)
+        WindowMover.setPosition(stashPoint(for: window), element: window.element, pid: window.pid)
+    }
+
+    /// Settles the stashes `apply` could not make, once the windows owing them have left native
+    /// fullscreen.
+    ///
+    /// The sequence this exists for: fullscreen a tiled window, switch workspace while it is
+    /// fullscreen, then leave fullscreen. macOS closes the fullscreen Space and restores the
+    /// window to the frame it had before — its old tile, on a workspace that is no longer
+    /// showing — so it lands on top of the workspace that is, managed by nothing.
+    ///
+    /// The window is not pushed away: its workspace is brought to it. Leaving fullscreen is the
+    /// user saying they want this window back at its ordinary size, and hiding it a frame later
+    /// answers a question nobody asked — where a workspace switch says plainly which window they
+    /// are looking at, and puts it in its tile with the rest of its workspace around it. This is
+    /// `moveToWorkspace`'s `follow`, arrived at from the other end.
+    ///
+    /// A second window owing a stash cannot also be followed, so it is parked as `apply` would
+    /// have parked it. Two windows leaving fullscreen in the same breath is not a real sequence;
+    /// leaving one of them on top of a workspace it does not belong to is the bug above.
+    private func settleFullscreenReturns(preferring preferred: WindowID? = nil) {
+        guard tracker.windows.values.contains(where: { $0.stashPending }) else { return }
+
+        // Sorted, because `tracker.windows` is a dictionary and which window gets followed must
+        // not depend on its hashing. The window the caller heard from wins outright.
+        var returned = tracker.windows.values
+            .filter { $0.stashPending && !$0.element.isFullscreen }
+            .sorted { $0.id < $1.id }
+        if let preferred, let at = returned.firstIndex(where: { $0.id == preferred }) {
+            returned.insert(returned.remove(at: at), at: 0)
+        }
+        guard let follow = returned.first else { return }
+        for window in returned { window.stashPending = false }
+        for window in returned.dropFirst() { park(window) }
+
+        guard let index = workspaces.workspaceIndex(of: follow.id) else {
+            park(follow)
+            return
+        }
+        workspaces.switchTo(workspace: index)
+        // After the switch, which refocuses the workspace's own last window: the one that just
+        // came back from fullscreen is the window the user is actually looking at.
+        workspaces.noteFocus(follow.id)
+        // `apply` clears `isStashed` and writes the tile. The window may still be animating out
+        // of fullscreen and clobber that frame on the way — which is the ordinary case
+        // `corrections` handles, on the move notification that follows.
+        apply(refocus: true)
+    }
+
     // MARK: - WindowTrackerDelegate
 
     func windowAppeared(_ window: ManagedWindow, shouldFloat: Bool) {
@@ -839,7 +894,15 @@ final class Coordinator: WindowTrackerDelegate {
     /// move/resize notification is what actually makes those apps tile — and it doubles as
     /// snap-back when a window is dragged out of its tile.
     func windowFrameChangedExternally(_ id: WindowID) {
-        guard let window = tracker.window(id), !window.isStashed else { return }
+        guard let window = tracker.window(id) else { return }
+        guard !window.isStashed else {
+            // Coming out of fullscreen is a move and a resize, and it arrives after the Space
+            // change rather than with it — by which point the window has finished animating back
+            // to a frame worth remembering. `activeSpaceChanged` usually gets there first; this
+            // is the one that is right about the frame.
+            if window.stashPending { settleFullscreenReturns(preferring: id) }
+            return
+        }
         // A move the user is making by hand hides the border until they let go; see DragMonitor.
         if id == workspaces.focusedWindow { drag.noteExternalFrameChange(id) }
 
@@ -905,6 +968,10 @@ final class Coordinator: WindowTrackerDelegate {
     /// so the floats are left exactly where they are — the border is the only thing that cares,
     /// because the window now in front may be a fullscreen one it must not draw over.
     func activeSpaceChanged() {
+        // Before the border, because it may be about to change which workspace is showing:
+        // leaving a fullscreen Space is a Space change, and it is the moment a window that went
+        // fullscreen on a since-hidden workspace asks for its workspace back.
+        settleFullscreenReturns()
         updateBorder()
         // With *Displays have separate Spaces* on — the macOS default — a desktop picture is set
         // per Space and not per screen, so a Space that has not been visited since the theme
@@ -920,11 +987,25 @@ final class Coordinator: WindowTrackerDelegate {
 
         for id in plan.stashed {
             guard let window = tracker.window(id), !window.isStashed else { continue }
-            window.frameBeforeStash = window.element.frame
-            window.isStashed = true
-            desired.removeValue(forKey: id)
-            corrections.removeValue(forKey: id)
-            WindowMover.setPosition(stashPoint(for: window), element: window.element, pid: window.pid)
+            // A native-fullscreen window is on a Space of its own and will not take a position,
+            // so parking it fails silently — and the window then walks back onto whichever
+            // workspace is showing the moment the user leaves fullscreen, tiled by nobody. The
+            // stash is owed instead, and `settleFullscreenReturns` calls it in — by bringing the
+            // workspace back to the window. No frame is remembered: the one it is wearing now is
+            // the display, not the tile it came from.
+            //
+            // The AX round trip costs nothing on the common path — the guard above has already
+            // dropped every window that is parked, so this only asks about the handful a
+            // workspace switch is actually moving.
+            if window.element.isFullscreen {
+                window.frameBeforeStash = nil
+                window.isStashed = true
+                window.stashPending = true
+                desired.removeValue(forKey: id)
+                corrections.removeValue(forKey: id)
+                continue
+            }
+            park(window)
         }
 
         // Floating frames deliberately bypass `desired` / `corrections`: that machinery exists
