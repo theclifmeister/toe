@@ -1735,6 +1735,17 @@ h.test("a branch found by searching is still a branch") { t in
     t.equal(m.activate(), .pushed, "and it descends the way it does unfiltered")
 }
 
+h.test("a searched list carries no icons") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 20)
+    t.expect(m.visible.contains { $0.icon != nil }, "a level draws its glyphs")
+    m.type("e")
+    t.expect(m.visible.count > 1, "the search turns up rows from several levels")
+    t.expect(m.visible.allSatisfy { $0.icon == nil },
+             "and none of them indents past a glyph the row beneath it has not got")
+    m.backspace()
+    t.expect(m.visible.contains { $0.icon != nil }, "the level gets its glyphs back")
+}
+
 h.test("an empty query is one level at a time, with no paths") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
     m.type("z")
