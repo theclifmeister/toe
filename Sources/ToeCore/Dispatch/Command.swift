@@ -20,16 +20,22 @@ public enum Command: Equatable {
     case swapSplit
     case exec(String)
     case reload
-    /// The quick menu, and the keybindings list it holds. One case with a page rather than two
-    /// cases: the keybindings view *is* the menu on another page — same panel, same filter, same
-    /// keys — so two cases would give `dispatch` two arms with one body between them.
-    case menu(MenuPage)
+    /// The quick menu, at a level. One case with a route rather than one per door: the
+    /// keybindings view *is* the menu on another page — same panel, same filter, same keys — and
+    /// `menu theme` is the same panel again, opened three rows in. Separate cases would give
+    /// `dispatch` several arms with one body between them.
+    case menu(MenuRoute)
     case quit
     /// An Omarchy theme, by slug — `omarchy-theme-set`. Empty clears it and hands your own
     /// `[border]` and `[menu]` colours back, which is why the argument is the one in the parser
     /// that may be missing: `theme none` would be wrong, since `none` is a directory somebody
     /// could legitimately name.
     case theme(String)
+    /// Deletes a theme's folder from `~/.config/toe/themes` — `omarchy-theme-remove`. The one
+    /// destructive thing the menu can do, which is why it takes a slug rather than a path: the
+    /// name is joined onto a directory that is about to be removed, and `Slug.make` is what
+    /// stands between that join and a name with a `/` or a `..` in it.
+    case removeTheme(String)
     /// A picture from the current theme's `backgrounds/`, by file name.
     case background(String)
     /// `omarchy-theme-bg-next`.
@@ -79,8 +85,10 @@ public extension Command {
     /// changed, and the menu is what is in front of it.
     var keepsMenuOpen: Bool {
         switch self {
-        case .theme: return true
-        default:     return false
+        // Removing one is the same argument from the other side: the row leaves the list under
+        // the cursor, and that disappearance is the whole of what toe says about it.
+        case .theme, .removeTheme: return true
+        default:                   return false
         }
     }
 }
@@ -145,6 +153,11 @@ public enum CommandParser {
         // Night"` copied out of an Omarchy config finds the same directory, and so that no
         // un-slugified string can reach the code that writes this name back into your config.
         case "theme":                       return .theme(Slug.make(argument))
+        // `omarchy theme remove <name>`, one word rather than two because a binding's value is a
+        // verb and its argument, and `theme` had already taken the first word.
+        case "removetheme", "theme-remove":
+            guard !argument.isEmpty else { throw CommandError.missingArgument(name) }
+            return .removeTheme(Slug.make(argument))
         // Not slugified: a background is a file name, with an extension and whatever case the
         // photographer gave it.
         case "background", "bg":
@@ -155,10 +168,20 @@ public enum CommandParser {
 
         // Spelled the way `omarchy-menu` and `omarchy-menu keybindings` are invoked, so a
         // binding can be read across from an Omarchy config without translating it.
+        // Routes are Omarchy's, aliases included: `omarchy-menu toggle background` and
+        // `toggle settings` are lines out of its own bindings and its own menu file, and they
+        // open the same levels here.
         case "menu":
             switch argument.lowercased() {
-            case "", "root":            return .menu(.root)
-            case "keybindings", "keys": return .menu(.keybindings)
+            case "", "root", "go":                    return .menu(.root)
+            case "keybindings", "keys":               return .menu(.keybindings)
+            case "learn":                             return .menu(.learn)
+            case "style":                             return .menu(.style)
+            case "theme", "themes":                   return .menu(.theme)
+            case "background", "backgrounds", "wallpaper": return .menu(.background)
+            case "setup", "settings":                 return .menu(.setup)
+            case "install":                           return .menu(.install)
+            case "remove", "uninstall":               return .menu(.remove)
             default:                    throw CommandError.badArgument(name, argument)
             }
         case "keybindings":                 return .menu(.keybindings)

@@ -30,8 +30,9 @@ as the defaults.
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
-| `SUPER` + `SPACE` | The quick menu — Configure, Learn, Style, Quit |
-| `SUPER` + `CTRL` + `SPACE` | Next background, when the theme has any |
+| `SUPER` + `SPACE` | The quick menu — Learn, Style, Setup, Install, Remove, Quit |
+| `SUPER` + `CTRL` + `SPACE` | The background picker, when the theme has pictures |
+| `SUPER` + `SHIFT` + `CTRL` + `SPACE` | The theme picker |
 | `SUPER` + `K` | Every binding, in a list |
 | `SUPER` + `,` | Edit the config — a VS Code window |
 | `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
@@ -111,7 +112,7 @@ what it does — and it will not launch anything you did not bind. Point them wh
 
 A binding naming an application you do not have fails quietly: `/bin/sh` runs, `open` reports
 that it cannot find it, and no window appears. Nothing else in toe depends on the press. The one
-knock-on is the quick menu's *Edit configuration* row, which is whichever `exec` mentions
+knock-on is the quick menu's *Config* row, which is whichever `exec` mentions
 `toe.toml` — repoint `SUPER`+`,` and the row follows it; remove the binding and the row goes.
 
 The `[[float]]` rules name 1Password, Raycast, System Settings and Activity Monitor, but those
@@ -244,24 +245,36 @@ interface, and a Homebrew user has no way to discover one of them. Omarchy has t
 fills that gap, and it is not a menu bar menu — it is the one walker draws for `omarchy-menu`, on
 `SUPER`+`ALT`+`SPACE`. toe ports that to `SUPER`+`SPACE`, with the keybindings list on
 `SUPER`+`K` as Omarchy has it. Arrows to move, `ENTER` to choose, `ESC` or backspace to back out,
-and a second `SUPER`+`SPACE` to close. `Configure` holds *Run on startup* and *Edit
-configuration*, `Learn` holds the keybindings, and `Quit` is a row rather than a keystroke you
-had to know. *Run on startup* is `SMAppService`, so it appears in System Settings › General ›
-Login Items too — and it is left out of the menu entirely where it cannot work: from a build
-directory rather than `/Applications`, or alongside a LaunchAgent that `make start-at-login`
-wrote. The log says which, and what fixes it.
+and a second `SUPER`+`SPACE` to close.
 
-*Edit configuration* runs **your** binding rather than an editor toe picked: it is whichever
-`exec` in your config mentions `toe.toml`, so pointing `SUPER`+`,` at Zed points the menu row at
-Zed, moving it to another key takes the row with it, and removing it removes the row. The
-keybindings list names that same binding *Edit the config* instead of printing the shell line, by
-the same rule. Where neither row can be offered — no such binding, and *Run on startup*
-unavailable — `Configure` is left out too, rather than leading into an empty level.
+**The tree is Omarchy's**, and the rule for what is missing is Omarchy's own `when` guard: a row
+whose condition fails is not listed, and a submenu whose visible descendants have all gone goes
+with them. So the root reads `Learn`, `Style`, `Setup`, `Install`, `Remove`, `About`, `Quit` —
+upstream's order, with the rows a Mac cannot honour left out rather than renamed. There is no
+`Style` › `Menu Bar`, because upstream's two rows there are Position (macOS fixes it) and
+Transparency (that menu bar is not toe's to style); no `Apps`, `Trigger` or `Update`; and no
+`System`, whose rows power the machine down. `Quit` is toe's own and comes last, a row rather
+than a keystroke you had to know.
+
+A binding can open any level, the way `omarchy-menu toggle <route>` does: `menu theme`,
+`menu background`, `menu setup`, `menu install` and the rest, Omarchy's aliases included. That is
+what puts the background picker on `SUPER`+`CTRL`+`SPACE` and the theme picker on
+`SUPER`+`SHIFT`+`CTRL`+`SPACE` — the keys Omarchy binds them to, opening the levels Omarchy opens.
+
+`Setup` holds *Config* and *Run on startup*. The first runs **your** binding rather than an editor
+toe picked: it is whichever `exec` in your config mentions `toe.toml`, so pointing `SUPER`+`,` at
+Zed points the menu row at Zed, moving it to another key takes the row with it, and removing it
+removes the row. The keybindings list names that same binding *Edit the config* instead of
+printing the shell line, by the same rule. *Run on startup* is `SMAppService`, so it appears in
+System Settings › General › Login Items too — and it is left out entirely where it cannot work:
+from a build directory rather than `/Applications`, or alongside a LaunchAgent that
+`make start-at-login` wrote. The log says which, and what fixes it. Where neither row can be
+offered, `Setup` is left out too, rather than leading into an empty level.
 
 Typing searches what a row does as well as what it is called — on the keybindings page the name
 is `SUPER`+`W` and the description is *Close window*, so a filter that read only names would have
 you typing modifiers to find anything. It searches the whole tree rather than the level in front
-of you, too, and every hit says where it was found — type `startup` at the top and *Run on startup* comes back labelled `Configure`,
+of you, too, and every hit says where it was found — type `startup` at the top and *Run on startup* comes back labelled `Setup`,
 ready to act on without going there first. That is Omarchy's behaviour, and it is the difference
 between a filter and a search: you should not have to know which submenu something lives in to be
 able to type its name.
@@ -299,26 +312,38 @@ toe redistributing them rather than Omarchy. So the list you choose from is what
 from Omarchy for you. All nineteen of them, rather than a chosen three, and 79 MB of pictures that
 never ship.
 
-`Style` › `Theme` lists what you have first, then what you could have, each with what it would
-cost to fetch:
+The three verbs sit where Omarchy puts them. `Style` › `Theme` is what is on the disk — a list
+where nothing takes longer than a repaint:
 
 ```
-Tokyo Night           current
+Tokyo Night           ✓
 Rose Pine
-Everforest            0.3 MB
-Kanagawa              2.1 MB
-Gruvbox               9.2 MB
 Your own colours
 ```
 
+`Install` › `Style` › `Theme` is Omarchy's catalogue entire, priced, with what you already have
+listed and dimmed rather than dropped — upstream's `disabled` guard, which is what keeps the level
+a catalogue of everything toe can fetch instead of a list that empties as you use it:
+
+```
+Tokyo Night           ✓
+Everforest            0.3 MB
+Kanagawa              2.1 MB
+Gruvbox               9.2 MB
+```
+
 The size is the disclosure — they run from a third of a megabyte to nine, and a row that fetched
-nine without saying so would be a row that surprised you. Choosing one is the same act either way:
-if you have it, it is applied; if you do not, it is fetched and then applied.
+nine without saying so would be a row that surprised you. Choosing one fetches it and then applies
+it, so the row you press does the same thing in either level.
+
+`Remove` › `Theme` puts a folder in the Trash, the current theme included — removing the one you
+are wearing hands your own colours back on the way out. Every folder in `~/.config/toe/themes` is
+listed, whether toe fetched it or you wrote it, because on disk there is nothing to tell them
+apart.
 
 **The network, stated plainly.** toe asks for Accessibility and nothing else, and it makes exactly
 two kinds of request, both to github.com and both because you did something: the list of themes
-when you open `Style` › `Theme`, cached and refreshed at most once a day, and a theme when you
-choose one. Nothing at launch, no update check, no telemetry. A machine that has never been online
+when you open the menu, cached and refreshed at most once a day, and a theme when you choose one. Nothing at launch, no update check, no telemetry. A machine that has never been online
 has no themes to choose from and toe's own colours, which is the cost of not shipping other
 people's work.
 
@@ -344,8 +369,9 @@ Nothing is registered: a folder you add appears the moment you next open the men
 palette recolours the screen within about 150 ms the way saving `toe.toml` does.
 
 Pictures come only from that folder. `Style` › `Background` appears exactly when the current theme
-has some, and `SUPER`+`CTRL`+`SPACE` steps through them — the key Omarchy gives to backgrounds,
-where it opens the picker, which here is the menu's job.
+has some, and `SUPER`+`CTRL`+`SPACE` opens it — the key Omarchy gives to backgrounds, doing there
+what it does here. Its last row steps to the next picture without stopping to choose one, which is
+also the `nextbackground` command if you would rather have that on the key.
 
 The focused border goes **flat** under a theme. That is Omarchy's, not a simplification:
 `hyprland.conf.tpl` renders `col.active_border = rgb({{ accent_strip }})` — one opaque colour,
@@ -528,31 +554,37 @@ menu bar item's tooltip — a typo can never leave you without a keyboard. See
 Binding specs parse in both the dash spelling and Omarchy's, so you can paste from either:
 `"alt-shift-1"`, `"super+shift+1"` and `"SUPER SHIFT, 1"` are the same binding.
 
-`reload`, `quit`, the quick menu and `nextbackground` are bound in code as well as in the file —
-`SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE`, `SUPER`+`K` and
-`SUPER`+`CTRL`+`SPACE` — so they exist whether or not your config mentions them. Your config is never rewritten once it is there, so a binding introduced after you
+`reload`, `quit`, the quick menu and its two picker routes are bound in code as well as in the
+file — `SUPER`+`SHIFT`+`R`, `SUPER`+`SHIFT`+`Q`, `SUPER`+`SPACE`, `SUPER`+`K`,
+`SUPER`+`CTRL`+`SPACE` and `SUPER`+`SHIFT`+`CTRL`+`SPACE` — so they exist whether or not your config mentions them. Your config is never rewritten once it is there, so a binding introduced after you
 first ran toe would otherwise never reach you: that is how the menu bar item losing its menu left
 anyone upgrading with no way to quit but `pkill`. A fallback applies only when the command is
 bound nowhere, so rebinding `quit` keeps your key and does not also collect the default, and a
 fallback whose own combination you have already used for something else is dropped rather than
 registered on top of yours.
 
-The first four are escape hatches — a config that forgot them leaves you stuck. `nextbackground`
-is not, and is the only entry on that list which isn't: it is there because it is a key that
-could otherwise never reach an install that predates it, and because stepping through a theme's
-pictures is the one thing the menu cannot do for you. Those same two rules are how you take it
-back: bind `nextbackground` to another key and `SUPER`+`CTRL`+`SPACE` is yours again, and if you
-already use that combination it is left alone. Opening the config is not on that list: it is an `exec` like any
+The first four are escape hatches — a config that forgot them leaves you stuck. The two picker
+routes are not, and are the only entries on that list which aren't: they are there because they
+are keys that could otherwise never reach an install that predates them. Those same two rules are
+how you take them back: bind `menu background` to another key and `SUPER`+`CTRL`+`SPACE` is yours
+again, and if you already use that combination — including a config that still says
+`"super-ctrl-space" = "nextbackground"`, which is what the key used to do — it is left alone.
+Opening the config is not on that list: it is an `exec` like any
 other now, and a fallback would have to name an editor toe has no business choosing.
 
 Commands: `movefocus`, `swapwindow`, `movewindow`, `workspace`, `movetoworkspace`,
 `movetoworkspacesilent`, `killactive`, `togglefloating`, `togglesplit`, `swapsplit`, `exec`,
-`reload`, `menu`, `keybindings`, `theme`, `background`, `nextbackground`, `quit`.
+`reload`, `menu`, `keybindings`, `theme`, `removetheme`, `background`, `nextbackground`, `quit`.
+
+`menu` takes a route — `root`, `keybindings`, `learn`, `style`, `theme`, `background`, `setup`,
+`install`, `remove`, plus Omarchy's aliases `settings`, `wallpaper`, `uninstall` and `themes` —
+and opens the tree there. Pressing the same key again closes it; pressing another route's key
+moves to that level.
 
 `[theme] name` names a folder in `~/.config/toe/themes` — one you put there, or one the menu
 downloaded from Omarchy; empty is toe's own colours. toe ships none. `theme` takes a name in either spelling (`theme gruvbox`, `theme Tokyo Night`) and,
-alone, clears it. Only `nextbackground` is bound by default, on `SUPER`+`CTRL`+`SPACE`. That is
-the one binding with a macOS shortcut behind it: ⌃⌥Space is *select next input source*, a
+alone, clears it; `removetheme` takes the same name and deletes the folder. `SUPER`+`CTRL`+`SPACE`
+is the one binding with a macOS shortcut behind it: ⌃⌥Space is *select next input source*, a
 symbolic hotkey the window server resolves ahead of anything toe can register — but one that is
 switched off unless you have two or more input sources.
 

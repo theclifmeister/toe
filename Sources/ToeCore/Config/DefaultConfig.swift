@@ -52,14 +52,15 @@ split_bias             = 0
 # focused border takes the accent, flat, and the quick menu takes the background, the foreground
 # and the accent.
 #
-# SUPER+SPACE > Style > Theme is where you get one. toe ships no themes: a theme is somebody
-# else's work, and the list you choose from is what is in ~/.config/toe/themes plus what Omarchy
-# publishes. Choosing one you have not got downloads it from Omarchy into that folder — palette
-# and pictures — and then sets it, so a theme you fetched and a theme you copied in by hand are
-# the same thing afterwards.
+# SUPER+SHIFT+CTRL+SPACE is Style > Theme, which lists what is in ~/.config/toe/themes. toe ships
+# no themes — a theme is somebody else's work — so on a new machine that list is short, and the
+# rest of them are under Install > Style > Theme, where Omarchy keeps its own: everything Omarchy
+# publishes, priced, with the ones you already have dimmed. Choosing one there downloads it into
+# that folder, palette and pictures, and then sets it, so a theme you fetched and a theme you
+# copied in by hand are the same thing afterwards. Remove > Theme puts one in the Trash.
 #
 # That download is the only time toe touches the network, along with the list of themes it fetches
-# when you open Style > Theme, at most once a day. Nothing at launch, no update check, no
+# when you open the menu, at most once a day. Nothing at launch, no update check, no
 # telemetry; the only host it talks to is github.com. A machine that has never been online has no
 # themes to choose from, and the colours below.
 #
@@ -72,7 +73,7 @@ split_bias             = 0
 # plus an optional backgrounds/ beside it. Nothing has to be registered — one appears in the
 # menu the moment you next open it, and saving its palette recolours the screen the way saving
 # this file does. Style > Background appears exactly when that theme has pictures, and
-# SUPER+CTRL+SPACE steps through them.
+# SUPER+CTRL+SPACE opens it.
 name = ""
 
 [border]
@@ -152,7 +153,9 @@ persistent_workspaces = 5
 [menu]
 # SUPER+SPACE opens the quick menu, styled after Omarchy's — the one walker draws for
 # `omarchy-menu`. Arrows to move, Enter to choose, Escape to back out. Typing searches the whole
-# tree rather than the level you are on, and each hit says which submenu it came from.
+# tree rather than the level you are on, and each hit says which submenu it came from. The tree
+# is Omarchy's, with the rows that mean nothing on a Mac left out the way Omarchy's own `when`
+# guard leaves out a row whose condition fails.
 # These are its theme's tokens: Omarchy's default (Tokyo Night) resolved the way walker's
 # stylesheet resolves them — background, foreground (which is also the border), and the accent
 # the selected row's text takes. Which is to say these three are already a theme: setting
@@ -240,21 +243,31 @@ font_size  = 18
 "super-shift-r" = "reload"
 # Puts every window on a hidden workspace back where it came from on the way out.
 "super-shift-q" = "quit"
-# The quick menu — Omarchy's SUPER+ALT+SPACE, and the keybindings list it holds. Note that this
-# takes ⌥Space and ⌥K away from typing ` ` and ˚ for as long as toe runs.
+# The quick menu — Omarchy's SUPER+SPACE, and the keybindings list it holds. Note that this takes
+# ⌥Space and ⌥K away from typing ` ` and ˚ for as long as toe runs.
+#
+# `menu` takes a route, the way `omarchy-menu toggle <route>` does, and opens the tree at that
+# level: root, keybindings, learn, style, theme, background, setup, install, remove. Pressing the
+# same key again closes; pressing another one moves to its level. Omarchy's own aliases work too,
+# so `menu settings` and `menu wallpaper` are lines you can copy across.
 "super-space"   = "menu"
 "super-k"       = "keybindings"
-# Omarchy's background key. SUPER+CTRL+SPACE is what its bindings.conf gives to backgrounds —
-# there it opens the picker, which here is Style › Background in the menu above, so the key does
-# the thing the menu cannot: step to the next picture without stopping to choose one. Does
-# nothing until the current theme has a backgrounds/ folder with something in it.
+# Omarchy's two look-and-feel keys, doing what they do there: SUPER+CTRL+SPACE opens the
+# background picker and SUPER+SHIFT+CTRL+SPACE the theme one. Background is only offered when the
+# current theme has a backgrounds/ folder with something in it, so on a themeless machine that
+# key opens the menu one rung up rather than at a level that is not there.
+#
+# `nextbackground` is what this key used to do — step to the next picture without stopping to
+# choose one. It is still a command, and still what Style › Background's last row does:
+#   "super-ctrl-space" = "nextbackground"
 #
 # The one binding here with a macOS shortcut behind it: ⌃⌥Space is "select next input source",
 # and while that is a symbolic hotkey — resolved inside the window server, ahead of anything toe
 # can register — it is switched off unless you have two or more input sources. If you do, and
 # this key changes your keyboard instead of your wallpaper, that is why; move it, or turn the
 # shortcut off in System Settings › Keyboard › Keyboard Shortcuts › Input Sources.
-"super-ctrl-space" = "nextbackground"
+"super-ctrl-space"       = "menu background"
+"super-shift-ctrl-space" = "menu theme"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current

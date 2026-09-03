@@ -29,11 +29,17 @@ public struct MenuState: Equatable {
     public private(set) var scroll: Int = 0
     public private(set) var visibleRows: Int
 
-    public init(root: [MenuItem], visibleRows: Int) {
-        self.stack = [root]
-        self.titles = []
-        self.filtered = root
+    /// - Parameter path: the level to open at, by row title — `["Style", "Theme"]` for the key
+    ///   Omarchy gives its theme picker. Empty is the root, which is every case but a `menu`
+    ///   binding that named a route. A path that does not resolve stops where it can: see
+    ///   `MenuState.walk`.
+    public init(root: [MenuItem], visibleRows: Int, path: [String] = []) {
+        let (levels, reached) = MenuState.walk(root: root, titles: path)
+        self.stack = levels
+        self.titles = reached
+        self.filtered = levels[levels.count - 1]
         self.visibleRows = max(1, visibleRows)
+        self.selection = MenuState.firstSelectable(in: filtered) ?? 0
     }
 
     // MARK: - Reading
@@ -79,23 +85,36 @@ public struct MenuState: Equatable {
 
     /// Clamps rather than wraps. A menu of three rows could defensibly wrap; a keybindings list
     /// of fifty cannot — holding ↓ and finding yourself back at the top reads as a glitch.
+    ///
+    /// A disabled row is stepped over rather than landed on, which is Omarchy's rule for one:
+    /// the search continues past it in the direction of travel, and only if the list runs out
+    /// that way does it look back — so `End` on a list whose last rows are all installed lands on
+    /// the last row you could actually choose instead of refusing to move.
     public mutating func move(by delta: Int) {
-        guard !filtered.isEmpty else { return }
-        selection = min(max(selection + delta, 0), filtered.count - 1)
+        guard !filtered.isEmpty, delta != 0 else { return }
+        let target = min(max(selection + delta, 0), filtered.count - 1)
+        guard let landing = selectable(from: target, step: delta > 0 ? 1 : -1)
+                         ?? selectable(from: target, step: delta > 0 ? -1 : 1) else { return }
+        selection = landing
         clampScroll()
     }
 
-    public mutating func moveToTop() { selection = 0; clampScroll() }
+    public mutating func moveToTop() {
+        selection = selectable(from: 0, step: 1) ?? selection
+        clampScroll()
+    }
 
     public mutating func moveToEnd() {
-        selection = max(filtered.count - 1, 0)
+        guard !filtered.isEmpty else { return }
+        selection = selectable(from: filtered.count - 1, step: -1) ?? selection
         clampScroll()
     }
 
-    /// A click, in on-screen rows rather than filtered indices.
+    /// A click, in on-screen rows rather than filtered indices. A disabled row does not take it —
+    /// the pointer steps over one exactly as the cursor does.
     public mutating func select(row: Int) {
         let index = scroll + row
-        guard filtered.indices.contains(index) else { return }
+        guard filtered.indices.contains(index), !filtered[index].isDisabled else { return }
         selection = index
     }
 
@@ -107,7 +126,10 @@ public struct MenuState: Equatable {
     // MARK: - Acting
 
     public mutating func activate() -> MenuOutcome {
-        guard let item = selectedItem else { return .none }
+        // `selectedItem` can be a disabled row only if one was under the cursor before it became
+        // disabled — a download finishing turns its Install row into an installed one under your
+        // hand. Return does nothing to it, as it does to a `.note`.
+        guard let item = selectedItem, !item.isDisabled else { return .none }
         switch item.action {
         case .submenu(let items):
             stack.append(items)
@@ -159,14 +181,7 @@ public struct MenuState: Equatable {
     /// changing to a theme with none takes the level you are standing in out from under you, and
     /// surfacing one rung up is the answer that cannot show rows belonging to a theme you left.
     public mutating func rebuild(root: [MenuItem]) {
-        var levels: [[MenuItem]] = [root]
-        var reached: [String] = []
-        for title in titles {
-            guard let item = levels[levels.count - 1].first(where: { $0.title == title }),
-                  case .submenu(let children) = item.action else { break }
-            levels.append(children)
-            reached.append(title)
-        }
+        let (levels, reached) = MenuState.walk(root: root, titles: titles)
         stack = levels
         titles = reached
         // The selection is kept rather than reset, which is what makes the fill appear under the
@@ -191,7 +206,10 @@ public struct MenuState: Equatable {
         if query.isEmpty {
             filtered = level
         } else {
-            let flat = MenuState.flatten(level, path: [])
+            // Disabled rows are omitted rather than listed and refused: Omarchy's search does
+            // the same, and a search that offers you a row you cannot press is a worse answer
+            // than one that does not mention it.
+            let flat = MenuState.flatten(level, path: []).filter { !$0.item.isDisabled }
             // Both halves of a row are searchable. On the keybindings page the title is the
             // shortcut and the value is what it does, so a search that only read titles would
             // have you typing `SUPER` to find things.
@@ -205,12 +223,48 @@ public struct MenuState: Equatable {
         }
         if resettingSelection {
             // A keystroke re-ranks the list, so the old index refers to a row that has moved.
-            selection = 0
+            selection = MenuState.firstSelectable(in: filtered) ?? 0
             scroll = 0
         } else {
             selection = min(selection, max(filtered.count - 1, 0))
             clampScroll()
         }
+    }
+
+    /// The first row a cursor may rest on, or nil when every row is disabled — which is a real
+    /// list rather than a defensive one: an Install level whose every theme is already installed
+    /// is exactly that.
+    private static func firstSelectable(in items: [MenuItem]) -> Int? {
+        items.firstIndex { !$0.isDisabled }
+    }
+
+    /// The first selectable row at or beyond `start`, walking one way.
+    private func selectable(from start: Int, step: Int) -> Int? {
+        var index = start
+        while filtered.indices.contains(index) {
+            if !filtered[index].isDisabled { return index }
+            index += step
+        }
+        return nil
+    }
+
+    /// Walks a fresh tree down a list of titles, as far as it goes.
+    ///
+    /// A level that cannot be entered — its row is gone, or stopped leading anywhere — stops the
+    /// walk and leaves the caller at the deepest level that still exists. Shared by `rebuild`,
+    /// where the titles are where the user already is, and by `init(root:visibleRows:path:)`,
+    /// where they are the route a binding asked for.
+    private static func walk(root: [MenuItem],
+                             titles: [String]) -> (levels: [[MenuItem]], reached: [String]) {
+        var levels: [[MenuItem]] = [root]
+        var reached: [String] = []
+        for title in titles {
+            guard let item = levels[levels.count - 1].first(where: { $0.title == title }),
+                  case .submenu(let children) = item.action else { break }
+            levels.append(children)
+            reached.append(title)
+        }
+        return (levels, reached)
     }
 
     /// Every row below this level, branches included: a branch is a thing you can go to, so it

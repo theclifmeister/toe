@@ -106,6 +106,10 @@ enum MenuFont {
         case .paintbrush: return "\u{F1FC}"  // nf-fa-paint_brush
         case .droplet:   return "\u{F043}"   // nf-fa-tint
         case .image:     return "\u{F03E}"   // nf-fa-picture_o
+        case .download:  return "\u{F019}"   // nf-fa-download
+        case .trash:     return "\u{F014}"   // nf-fa-trash_o
+        case .info:      return "\u{F05A}"   // nf-fa-info_circle
+        case .globe:     return "\u{F0AC}"   // nf-fa-globe
         }
     }
 
@@ -123,6 +127,10 @@ enum MenuFont {
         case .paintbrush: return "paintbrush"
         case .droplet:   return "drop"
         case .image:     return "photo"
+        case .download:  return "arrow.down.circle"
+        case .trash:     return "trash"
+        case .info:      return "info.circle"
+        case .globe:     return "globe"
         }
     }
 }

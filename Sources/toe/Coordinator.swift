@@ -522,13 +522,32 @@ final class Coordinator: WindowTrackerDelegate {
             themes = ThemeStore.installed()
             if let current { backgrounds = ThemeStore.backgrounds(named: current) }
         }
-        let (installed, offer) = Themes.merged(installed: themes, available: available.themes)
+        let installed = Themes.ordered(themes)
         themes = installed
-        return StyleMenu(themes: installed, available: offer,
+        // The catalogue whole, installed themes included: `Style › Theme` reads the first field
+        // and `Install › Style › Theme` reads this one, dimming what it finds in both.
+        return StyleMenu(themes: installed, available: available.themes,
                          fetching: available.isFetching,
                          current: current,
                          backgrounds: backgrounds, currentBackground: currentBackground,
                          downloading: downloading)
+    }
+
+    /// Takes a theme off the disk, and off your border if you were wearing it.
+    ///
+    /// The order matters: the config is rewritten *first*, so that the moment the folder goes
+    /// there is nothing left pointing at it. Doing it the other way round leaves a window — short,
+    /// but real, because writing the config reloads it — in which the palette in effect names a
+    /// directory that is no longer there, and toe would report the theme it just removed as
+    /// broken rather than as gone.
+    private func removeTheme(_ slug: String) {
+        // Through the slug, because a hand-written config may say `name = "Tokyo Night"` where
+        // the folder is `tokyo-night`, and the theme about to be deleted would otherwise not be
+        // recognised as the one in effect.
+        if slug == Slug.make(config.theme.name) { setTheme("") }
+        guard ThemeStore.remove(named: slug) else { return }
+        themes = ThemeStore.installed()
+        refreshMenu()
     }
 
     /// Writes the theme into your config rather than holding it in memory, so it survives a
@@ -1264,11 +1283,11 @@ final class Coordinator: WindowTrackerDelegate {
             // changed, so the unchanged-bytes early-out would make it do nothing at all.
             loadConfig(force: true)
 
-        case .menu(let page):
+        case .menu(let route):
             // `styleMenu()` re-reads the themes directory here rather than relying on the last
             // reload, which is what makes a theme folder you created a moment ago appear the
             // first time you look. It is a directory listing; nothing is opened.
-            quickMenu.toggle(page: page, config: config,
+            quickMenu.toggle(route: route, config: config,
                              usable: workspaces.monitor(id: workspaces.focusedMonitorID)?.usable,
                              style: styleMenu())
 
@@ -1278,6 +1297,9 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .theme(let slug):
             setTheme(slug)
+
+        case .removeTheme(let slug):
+            removeTheme(slug)
 
         case .background(let file):
             setBackground(file)

@@ -73,6 +73,28 @@ Two invariants in that loop are easy to break:
 - **A window the user has hold of is never written to.** `draggedWindow` is checked in `apply`,
   `windowFrameChangedExternally` and `updateBorder`; the frame is written once, on release.
 
+## The quick menu mirrors Omarchy's tree
+
+`MenuModel` is a port of `default/omarchy/omarchy-menu.jsonc` on Omarchy's `quattro` branch, not a
+menu that borrowed some names — the same rows at the same depth in the same order, so that an
+Omarchy user diving it finds their own menu with the Linux taken out. The rule for what is absent
+is Omarchy's own `when` guard: a row whose condition fails is not listed, and a submenu whose
+visible descendants have all gone goes with them. Before adding a row, check where upstream puts
+it; before leaving one out, check that it genuinely cannot work here rather than that it was
+inconvenient.
+
+Two divergences are deliberate and should stay:
+
+- **`Quit` is a root row.** Omarchy's `System` is a power menu for the machine; toe quits an
+  agent, and one row does not want a level.
+- **`About` is a `.note` row carrying the version**, where upstream's opens a branding window.
+  toe has no window to open and one fact to report.
+
+`disabled` (dim, ticked, unselectable, omitted from search) is upstream's guard for "you already
+have this" and is why `Install › Style › Theme` can list the whole catalogue. `MenuState` enforces
+it in four places — `move`, `select`, `activate` and the search filter — so a new way of reaching a
+row needs a fifth.
+
 ## Things that will bite you
 
 **Coordinate spaces.** `Box` is Accessibility coordinates: origin top-left of the primary display,

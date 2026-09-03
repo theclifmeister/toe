@@ -85,6 +85,44 @@ enum ThemeStore {
         return Backgrounds.list(names)
     }
 
+    /// Deletes a theme's folder — `omarchy-theme-remove`, which is `rm -rf` on the same path.
+    ///
+    /// The one thing in toe that destroys a directory the user might have written by hand, so it
+    /// is held to the shape of a theme name before it joins the path rather than after: a slug
+    /// has no `/` and cannot be `..`, and a name that is not one names nothing here. That is
+    /// upstream's guard too, and for the same reason — a theme called `..` would take
+    /// `~/.config/toe` with it.
+    ///
+    /// The trash rather than an unlink, because this is somebody's own colours and a menu row is
+    /// a small thing to have pressed by accident. Falls back to removing outright where there is
+    /// no trash to move it to.
+    @discardableResult
+    static func remove(named slug: String) -> Bool {
+        guard !slug.isEmpty, slug == Slug.make(slug) else {
+            Log.error("theme remove: '\(slug)' is not a theme name")
+            return false
+        }
+        let folder = directory.appendingPathComponent(slug)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            Log.error("theme remove: there is no theme called '\(slug)'")
+            return false
+        }
+        do {
+            try FileManager.default.trashItem(at: folder, resultingItemURL: nil)
+        } catch {
+            do {
+                try FileManager.default.removeItem(at: folder)
+            } catch {
+                Log.error("theme remove: \(slug) could not be removed (\(error))")
+                return false
+            }
+        }
+        Log.info("theme remove: \(slug)")
+        return true
+    }
+
     static func background(named file: String, in slug: String) -> URL {
         directory.appendingPathComponent(slug)
             .appendingPathComponent("backgrounds")
