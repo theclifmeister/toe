@@ -18,6 +18,14 @@ public enum Command: Equatable {
     case toggleFloating
     case toggleSplit
     case swapSplit
+    /// `resizeactive <dx> <dy>`: how far the focused window's splits move, in points, right and
+    /// down when positive. Hyprland's numbers and Hyprland's meaning — see
+    /// `DwindleLayout.resizeActive` for why the split moves rather than the window growing.
+    case resizeActive(dx: Double, dy: Double)
+    /// `growactive <dx> <dy>`: how much the focused window grows, in points, whichever side of
+    /// its splits it is on — so `=` is always bigger and `-` always smaller. toe's own verb,
+    /// bound by default; `resizeactive` is kept for configs copied from Omarchy.
+    case growActive(dx: Double, dy: Double)
     case exec(String)
     case reload
     /// The quick menu, at a level. One case with a route rather than one per door: the
@@ -58,6 +66,15 @@ public extension Command {
     var opensConfig: Bool {
         guard case .exec(let line) = self else { return false }
         return line.contains(Config.fileName)
+    }
+
+    /// True for the two verbs that change a window's size. They answer for one another where
+    /// the question is "has this config got resizing on a key" — see `Config.bound(_:in:)`.
+    var resizes: Bool {
+        switch self {
+        case .resizeActive, .growActive: return true
+        default:                         return false
+        }
     }
 
     /// Whether the quick menu stays up after running this.
@@ -142,6 +159,18 @@ public enum CommandParser {
         case "togglefloating", "float":     return .toggleFloating
         case "togglesplit":                 return .toggleSplit
         case "swapsplit":                   return .swapSplit
+        case "resizeactive", "growactive":
+            // Two numbers, and only two: Hyprland's `exact` and percentage forms are not ported,
+            // because a tile's size is the tree's to decide and an exact size has no meaning in
+            // it. They fail as a bad argument rather than an unknown verb so the warning points
+            // at the right word. Commas and spaces both separate, as `resizeactive, 100 0`
+            // copied from an Omarchy config has both.
+            let parts = argument.split { $0.isWhitespace || $0 == "," }.map(String.init)
+            guard !parts.isEmpty else { throw CommandError.missingArgument(name) }
+            guard parts.count == 2, let dx = Double(parts[0]), let dy = Double(parts[1]),
+                  dx.isFinite, dy.isFinite
+            else { throw CommandError.badArgument(name, argument) }
+            return name == "growactive" ? .growActive(dx: dx, dy: dy) : .resizeActive(dx: dx, dy: dy)
         case "reload":                      return .reload
         case "quit", "exit":                return .quit
 

@@ -385,6 +385,48 @@ public final class WorkspaceManager {
         return true
     }
 
+    /// `resizeactive`, and the settling of a mouse resize. A tiled window moves its splits; a
+    /// floating one grows or shrinks in place, which is what Hyprland's `resizeActiveWindow`
+    /// does for a window with no node — the delta goes onto its real size, top-left corner
+    /// staying put. Returns true if anything changed, so the caller can skip the render.
+    ///
+    /// The float branch is the keyboard's: a mouse resize of a float is already the user's own
+    /// business, and the coordinator never brings one here.
+    @discardableResult
+    public func resizeWindow(_ id: WindowID, dx: Double, dy: Double, edges: ResizeEdges = []) -> Bool {
+        guard let index = workspaceIndex(of: id), let ws = workspaces[index] else { return false }
+        if ws.layout.contains(id) {
+            return ws.layout.resizeActive(id, dx: dx, dy: dy, edges: edges)
+        }
+        return growFloat(id, on: ws, dx: dx, dy: dy)
+    }
+
+    /// `growactive`: the same, with the sign relative to the window rather than to the split.
+    /// For a float the two are one thing — it has no split, and the delta is already its size.
+    @discardableResult
+    public func growWindow(_ id: WindowID, dx: Double, dy: Double) -> Bool {
+        guard let index = workspaceIndex(of: id), let ws = workspaces[index] else { return false }
+        if ws.layout.contains(id) {
+            return ws.layout.growActive(id, dx: dx, dy: dy)
+        }
+        return growFloat(id, on: ws, dx: dx, dy: dy)
+    }
+
+    private func growFloat(_ id: WindowID, on ws: Workspace, dx: Double, dy: Double) -> Bool {
+        // A float that has not been rendered yet has no frame of its own; grow the one it is
+        // about to get, which is the frame the user is looking at.
+        guard ws.floating.contains(id), let m = monitor(id: ws.monitorID) else { return false }
+        var frame = floatingFrames[id] ?? floatingBox(for: id, on: m)
+        frame.w = max(Self.minimumFloatingSide, frame.w + dx)
+        frame.h = max(Self.minimumFloatingSide, frame.h + dy)
+        floatingFrames[id] = frame
+        return true
+    }
+
+    /// Small enough that a run of `resizeactive` cannot shrink a float out of reach of the
+    /// mouse, and no larger — an app with a bigger minimum will hold its own line.
+    private static let minimumFloatingSide = 100.0
+
     /// `movewindow <dir>` — reparent the focused window towards a direction.
     @discardableResult
     public func moveWindow(_ dir: Direction) -> Bool {

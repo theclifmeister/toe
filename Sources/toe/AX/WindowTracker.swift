@@ -37,8 +37,13 @@ protocol WindowTrackerDelegate: AnyObject {
     func windowDisappeared(_ id: CGWindowID)
     func windowFocused(_ id: CGWindowID)
     /// The window moved or resized without toe asking — an app restoring its own remembered
-    /// geometry, or the user dragging it.
-    func windowFrameChangedExternally(_ id: CGWindowID)
+    /// geometry, or the user dragging it. `resized` is which of the two Accessibility
+    /// notifications this was: AppKit posts Moved when the origin changes and Resized when the
+    /// size does, per frame write, so a title-bar drag is Moved only, a right- or bottom-edge
+    /// drag Resized only, and a left- or top-edge drag both. That is the one fact telling a
+    /// window being resized by hand from one being moved by hand, and it is not recoverable
+    /// from the frame — see `DragMonitor.Kind`.
+    func windowFrameChangedExternally(_ id: CGWindowID, resized: Bool)
     func screensChanged()
     /// Something moved in the window stack that toe does not manage: another application came
     /// forward, or one opened a window toe will never tile. Neither changes the layout, but
@@ -244,7 +249,7 @@ final class WindowTracker {
 
         case kAXWindowMovedNotification, kAXWindowResizedNotification:
             guard let id = windows.first(where: { CFEqual($0.value.element, element) })?.key else { return }
-            delegate?.windowFrameChangedExternally(id)
+            delegate?.windowFrameChangedExternally(id, resized: notification == kAXWindowResizedNotification)
 
         case kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification:
             guard let id = windows.first(where: { CFEqual($0.value.element, element) })?.key else { return }
