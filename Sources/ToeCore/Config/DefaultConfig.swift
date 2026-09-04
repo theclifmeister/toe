@@ -252,7 +252,9 @@ font_size  = 18
 # is on — = is always bigger, - always smaller. Omarchy binds Hyprland's resizeactive here
 # instead, where the number is how far the *split* moves, so = grows a left-hand window and
 # shrinks a right-hand one; that verb works too, for a config copied across. Dragging a tiled
-# window's edge with the mouse does the same thing without a key.
+# window's edge with the mouse does the same thing without a key. A detached window grows
+# about its centre, so it gets bigger where it is rather than sliding off to one side, and
+# stops at gaps_out like a tile would.
 "super-minus"       = "growactive -100 0"
 "super-equal"       = "growactive 100 0"
 "super-shift-minus" = "growactive 0 -100"

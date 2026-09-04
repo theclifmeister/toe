@@ -386,9 +386,9 @@ public final class WorkspaceManager {
     }
 
     /// `resizeactive`, and the settling of a mouse resize. A tiled window moves its splits; a
-    /// floating one grows or shrinks in place, which is what Hyprland's `resizeActiveWindow`
-    /// does for a window with no node — the delta goes onto its real size, top-left corner
-    /// staying put. Returns true if anything changed, so the caller can skip the render.
+    /// floating one grows or shrinks in place about its centre — see `growFloat` for why not
+    /// the top-left corner Hyprland's `resizeActiveWindow` keeps. Returns true if anything
+    /// changed, so the caller can skip the render.
     ///
     /// The float branch is the keyboard's: a mouse resize of a float is already the user's own
     /// business, and the coordinator never brings one here.
@@ -412,14 +412,68 @@ public final class WorkspaceManager {
         return growFloat(id, on: ws, dx: dx, dy: dy)
     }
 
+    /// The centre stays put, not the top-left corner. Hyprland keeps the corner, and for a
+    /// tile the question does not arise — its split moves and the far edges are pinned by the
+    /// display. A float has no such anchor, and growing it from the corner reads as the
+    /// window sliding down and to the right rather than getting bigger: the same key that
+    /// widens a tile symmetrically about its content lurched a float off to one side. Sharing
+    /// the delta between the two edges is what makes the four keys feel like one command.
+    ///
+    /// Growing about the centre can push an edge past the display where the corner never
+    /// would have, which is `settleFloat`'s job to undo.
     private func growFloat(_ id: WindowID, on ws: Workspace, dx: Double, dy: Double) -> Bool {
         // A float that has not been rendered yet has no frame of its own; grow the one it is
         // about to get, which is the frame the user is looking at.
         guard ws.floating.contains(id), let m = monitor(id: ws.monitorID) else { return false }
-        var frame = floatingFrames[id] ?? floatingBox(for: id, on: m)
-        frame.w = max(Self.minimumFloatingSide, frame.w + dx)
-        frame.h = max(Self.minimumFloatingSide, frame.h + dy)
-        floatingFrames[id] = frame
+        let before = floatingFrames[id] ?? floatingBox(for: id, on: m)
+        var frame = before
+        frame.w = max(Self.minimumFloatingSide, before.w + dx)
+        frame.h = max(Self.minimumFloatingSide, before.h + dy)
+        // Half of what was actually applied, so hitting the minimum does not slide the window.
+        frame.x = before.x - (frame.w - before.w) / 2
+        frame.y = before.y - (frame.h - before.h) / 2
+        floatingFrames[id] = frame.rounded()
+        settleFloat(id)
+        return true
+    }
+
+    /// Brings a floating window back inside the outer gap of the display it is on: slid in
+    /// when it fits, cut to the gap's edges when it does not. Called when the user lets go of
+    /// a float, and after the keyboard has grown one. Returns true if the frame changed.
+    ///
+    /// The line is `gaps_out`, not the display edge. A float left flush with the edge sits
+    /// where every tile around it keeps the margin clear, and reads as the one window that
+    /// missed it — and a float dragged half off the display is never where the user wanted it
+    /// to stay, only where the hand stopped. Hyprland leaves a float wherever it is dropped;
+    /// toe has the margin already and the snap costs nothing on release, when the window is
+    /// being written anyway.
+    ///
+    /// The display is its workspace's, which is the one `floatingBox` holds it to: a float
+    /// dragged onto the other display keeps its workspace, and the next render already brings
+    /// it back — by recentring it, since that rule was written for a display that has gone.
+    /// Settling first means it comes back to the nearest edge instead, which is where the
+    /// hand was heading.
+    @discardableResult
+    public func settleFloat(_ id: WindowID) -> Bool {
+        guard let index = workspaceIndex(of: id), let ws = workspaces[index],
+              ws.floating.contains(id), let frame = floatingFrames[id],
+              let m = monitor(id: ws.monitorID)
+        else { return false }
+        let usable = m.usable
+        var margin = usable.inset(top: gaps.outer, left: gaps.outer,
+                                  bottom: gaps.outer, right: gaps.outer)
+        // A gap wider than half the display leaves nothing to put a window in; the display
+        // itself is the next best thing.
+        if margin.w <= 0 || margin.h <= 0 { margin = usable }
+
+        var settled = frame
+        settled.w = min(frame.w, margin.w)
+        settled.h = min(frame.h, margin.h)
+        settled.x = min(max(frame.x, margin.minX), margin.maxX - settled.w)
+        settled.y = min(max(frame.y, margin.minY), margin.maxY - settled.h)
+        settled = settled.rounded()
+        guard settled != frame else { return false }
+        floatingFrames[id] = settled
         return true
     }
 
@@ -545,8 +599,8 @@ public final class WorkspaceManager {
     /// the window is dragged.
     ///
     /// A frame is taken as-is only while a usable amount of the window is still on the
-    /// monitor, so dragging one half off an edge is never undone on the next render. Anything
-    /// less is pulled back. Hyprland never has to think about this; toe does, because hiding a
+    /// monitor — a render never moves a float on its own; `settleFloat`, on release, is where
+    /// one dragged off the edge is brought back. Anything less is pulled back here. Hyprland never has to think about this; toe does, because hiding a
     /// workspace parks its windows with a single pixel inside the monitor's corner — a frame
     /// captured from a parked window overlaps by 1×1pt, and handing that back would make the
     /// window vanish.

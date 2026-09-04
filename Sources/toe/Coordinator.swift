@@ -1516,9 +1516,18 @@ final class Coordinator: WindowTrackerDelegate {
     /// or a trailing notification that found the button already up. Nothing to move — a
     /// window with no neighbour on that axis, or a drag that turned out to be a move after all
     /// — falls through to the snap-back this always was.
+    ///
+    /// A float has no tile to snap back to, but it has a margin: `settleFloat` brings one that
+    /// was dropped past `gaps_out` back inside it, and `apply` writes the result the way it
+    /// writes any floating frame that differs from what the window has. The frame is read
+    /// afresh rather than trusted to `floatingFrames`, which holds whatever the last Moved
+    /// notification said — and the last one of a drag can arrive after the mouse-up.
     private func endDrag(_ id: WindowID, kind: DragMonitor.Kind, origin: Box?) {
-        if kind == .resize, let origin, let have = tracker.window(id)?.element.frame,
-           let gesture = ResizeGesture.delta(from: origin, to: have) {
+        if workspaces.isFloating(id) {
+            if let have = tracker.window(id)?.element.frame { workspaces.floatingFrames[id] = have }
+            workspaces.settleFloat(id)
+        } else if kind == .resize, let origin, let have = tracker.window(id)?.element.frame,
+                  let gesture = ResizeGesture.delta(from: origin, to: have) {
             workspaces.resizeWindow(id, dx: gesture.dx, dy: gesture.dy, edges: gesture.edges)
         }
         desired.removeValue(forKey: id)
