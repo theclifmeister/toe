@@ -49,7 +49,8 @@ dev-cert:
 ## every build. Run this after a rebuild if hotkeys or window moves stop working.
 reset-perms:
 	@tccutil reset Accessibility $(BUNDLEID) || true
-	@echo "re-grant Accessibility for toe, then relaunch"
+	@tccutil reset ScreenCapture $(BUNDLEID) || true
+	@echo "re-grant Accessibility for toe (and Screen Recording, if the slide is on), then relaunch"
 
 start-at-login:
 	@mkdir -p $(dir $(AGENT))

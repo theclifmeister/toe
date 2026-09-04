@@ -60,6 +60,19 @@ public struct GestureConfig: Equatable {
     public init() {}
 }
 
+/// What moves on screen when a workspace changes.
+public struct AnimationConfig: Equatable {
+    /// Slide the display sideways on a dock swipe, the way Spaces does: the outgoing workspace
+    /// pushed off one edge by the incoming one. Off by default because it is the one setting in
+    /// toe that needs a second permission — the slide is two screenshots on a panel, and a
+    /// screenshot needs Screen Recording. The swipe only, deliberately: it is the gesture the
+    /// Spaces slide answers, and a key binding is a jump, not a swipe.
+    public var slideOnSwipe: Bool = false
+    /// How long the slide takes, in seconds.
+    public var slideDuration: Double = 0.3
+    public init() {}
+}
+
 /// Which theme is in effect, by name.
 ///
 /// Empty is toe's own colours — the `[border]` and `[menu]` values below — which is what every
@@ -174,6 +187,7 @@ public struct Config: Equatable {
     public var bar: BarConfig = BarConfig()
     public var floating: FloatingSize = FloatingSize()
     public var gestures: GestureConfig = GestureConfig()
+    public var animations: AnimationConfig = AnimationConfig()
     public var menu: MenuConfig = MenuConfig()
     public var theme: ThemeConfig = ThemeConfig()
     public var misc: MiscConfig = MiscConfig()
@@ -385,6 +399,25 @@ public struct Config: Equatable {
                 config.gestures.swallowDockSwipes = v
             } else {
                 config.warnings.append("gestures.swallow_dock_swipes: must be true or false, using \(config.gestures.swallowDockSwipes)")
+            }
+        }
+
+        if let a = root["animations"]?.tableValue {
+            if let raw = a["slide_on_swipe"] {
+                // Warned about for the same reason as `swallow_dock_swipes`: a mistyped boolean
+                // here is the difference between a permission prompt and nothing happening.
+                if let v = raw.boolValue {
+                    config.animations.slideOnSwipe = v
+                } else {
+                    config.warnings.append("animations.slide_on_swipe: must be true or false, using \(config.animations.slideOnSwipe)")
+                }
+            }
+            // Bounded like every other number, and this one for a reason of its own: the value
+            // goes straight into a `CABasicAnimation`, and a NaN duration is a panel that never
+            // finishes and never comes down.
+            if let v = number(a["slide_duration"], "animations.slide_duration", in: 0.05...2,
+                              keeping: config.animations.slideDuration, warnings: &config.warnings) {
+                config.animations.slideDuration = v
             }
         }
 

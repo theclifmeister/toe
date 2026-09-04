@@ -1022,6 +1022,60 @@ h.test("dock swipe swallowing is configurable") { t in
             "and says so in the menu bar")
 }
 
+h.test("the slide on a swipe is configurable and off by default") { t in
+    let c = Config.makeDefault()
+    t.equal(c.animations.slideOnSwipe, false, "off until asked for: it needs Screen Recording")
+    t.equal(c.animations.slideDuration, 0.3, "about what Spaces takes")
+
+    let on = try Config.parse("[animations]\nslide_on_swipe = true\nslide_duration = 0.5\n")
+    t.equal(on.animations.slideOnSwipe, true, "on")
+    t.equal(on.animations.slideDuration, 0.5, "duration")
+    t.equal(on.warnings, [], "no warnings")
+
+    let bad = try Config.parse("[animations]\nslide_on_swipe = \"yes\"\nslide_duration = nan\n")
+    t.equal(bad.animations.slideOnSwipe, false, "a non-boolean keeps the default")
+    t.equal(bad.animations.slideDuration, 0.3, "a NaN never reaches Core Animation")
+    t.equal(bad.warnings.contains { $0.contains("animations.slide_on_swipe") }, true, "the boolean is named")
+    t.equal(bad.warnings.contains { $0.contains("animations.slide_duration") }, true, "and the duration")
+
+    let slow = try Config.parse("[animations]\nslide_duration = 10\n")
+    t.equal(slow.animations.slideDuration, 0.3, "out of range keeps the default")
+}
+
+h.test("the slide follows the target, not the fingers") { t in
+    t.equal(WorkspaceSlide.direction(for: .next), .left, "the next workspace comes in from the right")
+    t.equal(WorkspaceSlide.direction(for: .previous), .right, "the previous one from the left")
+    t.equal(WorkspaceSlide.direction(for: .index(3)), nil, "a numbered switch does not slide")
+    t.equal(WorkspaceSlide.direction(for: .former), nil, "nor the last-visited one")
+    // Natural scrolling is folded into the target before the slide sees it, so either setting
+    // slides the way Spaces would under it.
+    for natural in [true, false] {
+        let target = WorkspaceTarget.swipe(.left, naturalScrolling: natural)
+        t.equal(WorkspaceSlide.direction(for: target), natural ? .left : .right,
+                "fingers left, natural scrolling \(natural ? "on" : "off")")
+    }
+}
+
+h.test("a slide's mask is the windows on the picture, clipped to it") { t in
+    let area = box(0, 40, 1440, 860)                       // below a menu bar
+    let cut = WorkspaceSlide.cutouts([(box(10, 50, 700, 400), 12),
+                                      (box(1400, 800, 200, 200), 8),   // half off the right and bottom
+                                      (box(1500, 40, 100, 100), 8),    // on another display
+                                      (box(0, 0, 1440, 40), 0)],       // the menu bar's strip
+                                     in: area)
+    t.equal(cut.count, 2, "what is on the picture, and only that")
+    t.equalBox(cut[0].box, box(10, 10, 700, 400), "relative to the picture's top-left")
+    t.equal(cut[0].radius, 12, "at the window's own radius")
+    t.equalBox(cut[1].box, box(1400, 760, 40, 100), "clipped to the edge it runs off")
+}
+
+h.test("the two pictures of a slide stay one width apart") { t in
+    t.equal(WorkspaceSlide.travel(.left, width: 1440),
+            WorkspaceSlide.Travel(outgoingEnd: -1440, incomingStart: 1440), "leaving to the left")
+    t.equal(WorkspaceSlide.travel(.right, width: 1440),
+            WorkspaceSlide.Travel(outgoingEnd: 1440, incomingStart: -1440), "leaving to the right")
+}
+
 h.test("the macOS behaviours toe takes over are configurable") { t in
     let off = try Config.parse("[misc]\ndisable_expose_shortcuts = false\nprevent_hiding = false\ndisable_wallpaper_click = false\nautohide_dock = false\n")
     t.equal(off.misc.disableExposeShortcuts, false, "the Exposé shortcuts can be handed back")
@@ -1848,15 +1902,15 @@ h.test("an empty query is one level at a time, with no paths") { t in
     m.type("z")
     t.equal(m.visible.count, 0, "nothing matches")
     m.backspace()
-    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "the level comes back")
+    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Setup", "Quit"], "the level comes back")
     t.expect(m.visible.allSatisfy { $0.subtitle == nil },
              "and the paths go away with the search that needed them")
 }
 
 h.test("the rows lead where the menu says they do") { t in
     var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "the whole menu, bare minimum")
-    t.equal(m.visible.map(\.leadsOn), [true, true, true, false], "three lead on, Quit acts")
+    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Setup", "Quit"], "the whole menu, bare minimum")
+    t.equal(m.visible.map(\.leadsOn), [true, true, true, true, false], "four lead on, Quit acts")
     m.type("quit")
     t.equal(m.activate(), .run(.quit), "and Quit dispatches rather than descending")
 
@@ -1881,6 +1935,29 @@ h.test("the startup row reads the state it is handed") { t in
     t.equal(startup(.unavailable("needs /Applications"))?.title, nil,
             "where it cannot work the row is not there at all — a switch you can see but not "
             + "throw is worse than one you were never offered")
+}
+
+h.test("the slide switch lives under Trigger › Toggle and reads the config") { t in
+    func row(_ on: Bool) -> MenuItem? {
+        let root = MenuModel.root(loginItem: .off, bindings: [], slideOnSwipe: on)
+        guard case .submenu(let trigger)? = root.first(where: { $0.title == "Trigger" })?.action,
+              case .submenu(let toggles)? = trigger.first(where: { $0.title == "Toggle" })?.action
+        else { return nil }
+        return toggles.first
+    }
+    t.equal(row(true)?.title, "Workspace slide", "toe's own row, where upstream keeps its switches")
+    t.equal(row(true)?.value, "on", "the row shows the config")
+    t.equal(row(true)?.icon, .toggleOn, "and draws it")
+    t.equal(row(false)?.value, "off", "the other way round")
+    t.equal(row(false)?.icon, .toggleOff, "likewise")
+    t.equal(row(false)?.action, .toggleSlide, "and pressing it flips it")
+
+    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10,
+                      path: MenuRoute.toggle.path)
+    t.equal(m.breadcrumb, ["Trigger", "Toggle"], "`menu toggle` opens on the level")
+    t.equal(m.activate(), .toggleSlide, "and Return asks the app layer to throw the switch")
+    t.equal(try CommandParser.parse("menu toggle"), .menu(.toggle), "Omarchy's alias for the level")
+    t.equal(try CommandParser.parse("menu trigger"), .menu(.trigger), "and its parent")
 }
 
 h.test("the Config row is your binding, not toe's idea of an editor") { t in
@@ -1913,7 +1990,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
                            bindings: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n").bindings)
                 .map(\.title),
-            ["Learn", "Style", "Quit"],
+            ["Learn", "Trigger", "Style", "Quit"],
             "and with the startup row gone as well, Setup has nothing left to hold")
 
     // The row is there even when the startup toggle cannot be.
@@ -1924,7 +2001,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
 h.test("Setup goes with the startup row, being all that was left in it") { t in
     let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
                       visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Learn", "Style", "Quit"],
+    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Quit"],
             "a row that leads into an empty level is worse than no row")
 
     var searching = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
@@ -2919,6 +2996,24 @@ h.test("setting a theme moves one line and leaves every other byte") { t in
     t.equal(c.warnings, [], "with nothing to warn about")
 }
 
+h.test("a boolean is written back the way a theme is") { t in
+    let before = Config.defaultTOML
+    let after = ConfigWriter.setting("slide_on_swipe", to: "true", inTable: "animations", of: before)
+    let a = before.components(separatedBy: "\n"), b = after.components(separatedBy: "\n")
+    t.equal(a.count, b.count, "no line is added or removed")
+    t.equal(zip(a, b).filter { $0 != $1 }.count, 1, "and exactly one is different")
+    guard let c = try? Config.parse(after) else { return t.expect(false, "the result parses") }
+    t.equal(c.animations.slideOnSwipe, true, "the slide is on")
+    t.equal(c.warnings, [], "with nothing to warn about")
+    t.equal(ConfigWriter.setting("slide_on_swipe", to: "false", inTable: "animations", of: after),
+            before, "and off again is the shipped file, byte for byte")
+
+    let bare = ConfigWriter.setting("slide_on_swipe", to: "true", inTable: "animations",
+                                    of: "[general]\ngaps_in = 5\n")
+    t.equal(try? Config.parse(bare).animations.slideOnSwipe, true, "a config without the table grows it")
+    t.equal(try? Config.parse(bare).gaps.inner, 5, "and keeps what it had")
+}
+
 h.test("a config written before themes existed grows the table at the end") { t in
     for source in ["[general]\ngaps_in = 5\n", "[general]\ngaps_in = 5"] {
         let after = ThemeWriter.settingTheme("catppuccin", in: source)
@@ -3060,7 +3155,7 @@ h.test("Style is always at the root, because it is how you get a theme at all") 
     // Unlike Setup, which goes when both its rows are unavailable, Style stays even on a
     // machine with no themes and no network: it is the level you go to *to* get one, so leaving
     // it out exactly when it is most needed would be the wrong way round.
-    t.equal(m.visible.map(\.title), ["Learn", "Style", "Quit"], "still there with nothing behind it")
+    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Quit"], "still there with nothing behind it")
     t.equal(MenuModel.style(StyleMenu()).map(\.title), ["Theme"],
             "holding the theme list, and no Background row until there are pictures")
 }
@@ -3203,7 +3298,7 @@ h.test("the root is Omarchy's root, with what a Mac cannot do left out") { t in
     let c = try Config.parse(Config.defaultTOML)
     let rows = MenuModel.root(loginItem: .off, bindings: c.bindings, style: full, version: "0.9.7")
     t.equal(rows.map(\.title),
-            ["Learn", "Style", "Setup", "Install", "Remove", "About", "Quit"],
+            ["Learn", "Trigger", "Style", "Setup", "Install", "Remove", "About", "Quit"],
             "the same names at the same depth, in the same order")
     t.equal(rows.first { $0.title == "About" }?.value, "0.9.7",
             "About is the one fact toe can report about itself, in the second column")
