@@ -32,6 +32,14 @@ The two-argument `brew tap` is needed because the cask lives in this repository.
 On first launch, grant **System Settings → Privacy & Security → Accessibility** when asked. That
 is the only permission toe needs.
 
+There is one optional extra. The workspace slide — the screen sliding sideways under a dock
+swipe, the way Spaces does — is drawn from a picture of the display, and taking that picture is
+**Screen Recording**, a second permission. It is off by default, and it is a gimmick: toe tiles,
+focuses and switches exactly the same without it. Turn it on from the quick menu under
+**Trigger › Toggle › Workspace slide** (or `slide_on_swipe = true` under `[animations]`) and macOS
+asks for the grant then, not before. If you would rather not give it, leave the slide off and
+nothing else changes.
+
 ### What the defaults assume
 
 Three of the shipped bindings launch an application. toe has no terminal, browser or editor of its
