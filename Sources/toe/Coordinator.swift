@@ -160,6 +160,25 @@ final class Coordinator: WindowTrackerDelegate {
         }
         drag.onEnd = { [weak self] id in self?.endDrag(id) }
         hideBlocker.onRestored = { [weak self] pid in self?.relayoutAfterUnhide(pid) }
+        // A sideways dock swipe is `workspace e+1` / `e-1` from the trackpad. Only while
+        // `gestures.swallow_dock_swipes` is on, and no `if` here says so: `applyDockSwipeSetting`
+        // stops the tap when the setting is off, so there is no event to arrive. The handler is
+        // already off the tap's callback (see `DockSwipeTap.onSwipe`), so `apply()`'s AX round
+        // trips are safe from here.
+        dockSwipes.onSwipe = { [weak self] direction in
+            guard let self else { return }
+            let natural = NaturalScrolling.isOn
+            let target = WorkspaceTarget.swipe(direction, naturalScrolling: natural)
+            let before = self.workspaces.focusedWorkspaceIndex
+            self.dispatch(.workspace(target))
+            let after = self.workspaces.focusedWorkspaceIndex
+            // `.next` / `.previous` walk the workspaces in use, as SUPER+TAB does, so a fresh
+            // session with everything on one workspace has nowhere to go — say so, or the first
+            // swipe anyone tries reads as broken.
+            Log.info("dock swipe \(direction) (natural scrolling \(natural ? "on" : "off")): "
+                     + (before == after ? "no other workspace in use, staying on \(before)"
+                                        : "workspace \(before) → \(after)"))
+        }
 
         guard waitForAccessibility() else {
             Log.error("no Accessibility permission — hotkeys are live but windows cannot be moved. "
@@ -664,6 +683,9 @@ final class Coordinator: WindowTrackerDelegate {
 
     /// Starts and stops the dock swipe tap as the config flips, on every reload as well as at
     /// startup. A no-op until Accessibility has landed; `beginManaging()` calls it again then.
+    /// This is also the whole of the gate on the swipe *switching workspaces*: with the setting
+    /// off the tap does not exist, so `onSwipe` cannot fire, and a second check anywhere else
+    /// would be a redundancy waiting to drift.
     private func applyDockSwipeSetting() {
         guard isManaging else { return }
         runtimeWarnings.removeAll()

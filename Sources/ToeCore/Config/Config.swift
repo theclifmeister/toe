@@ -51,8 +51,11 @@ public struct FloatingSize: Equatable {
 /// Trackpad gestures toe takes off macOS's hands.
 public struct GestureConfig: Equatable {
     /// Swallow the Dock's swipe gestures — Mission Control, App Exposé and the sideways Spaces
-    /// switch — before the window server acts on them. Keyed off the gesture's event type rather
-    /// than a finger count, so it covers the three-finger setting as well as the four-finger one.
+    /// switch — before the window server acts on them, and give the sideways one to toe's
+    /// workspaces (`DockSwipe`). Keyed off the gesture's event type rather than a finger count,
+    /// so it covers the three-finger setting as well as the four-finger one. One key for both,
+    /// deliberately: it means *toe owns the trackpad's swipes*, and a swallowed swipe that goes
+    /// nowhere is not a setting anyone would choose.
     public var swallowDockSwipes: Bool = true
     public init() {}
 }

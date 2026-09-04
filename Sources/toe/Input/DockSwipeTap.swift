@@ -1,13 +1,18 @@
 import CoreGraphics
 import Foundation
+import ToeCore
 
-/// Swallows the Dock's swipe gestures before the window server acts on them.
+/// Swallows the Dock's swipe gestures before the window server acts on them, and points the
+/// sideways one at toe's workspaces instead.
 ///
 /// toe keeps its own ten workspaces, and a hidden one's windows are parked off-screen rather
 /// than on a macOS Space — see `Stash`. A four-finger swipe up opens Mission Control, which puts
 /// that stash on display; a sideways swipe changes the Space out from under toe, leaving its
 /// model describing windows that are no longer on screen. Both are better prevented than
-/// recovered from.
+/// recovered from. But the sideways swipe is the most natural gesture on the trackpad, and toe
+/// has ten workspaces to point it at — so it is swallowed *and* reported through `onSwipe`, as
+/// `workspace e+1` / `e-1`. The vertical swipe stays swallowed and silent: Mission Control is
+/// what shows the stash, and toe has nothing to offer in its place.
 ///
 /// The two event types in the mask and the fields the callback reads are private and
 /// version-sensitive. `CGEvent.tapCreate` itself is public API, so this needs no entitlement, no
@@ -20,6 +25,14 @@ final class DockSwipeTap {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var swallowed = 0
+    /// Which event of a gesture is the one to act on — the decision lives in ToeCore, where the
+    /// selftest can reach it. Reset with the tap, so a stop mid-gesture cannot leave it armed.
+    private var gesture = DockSwipe()
+    /// A sideways swipe, once per gesture, with the direction the fingers went. Delivered on the
+    /// main queue *after* the tap callback has returned, never from inside it: a filtering tap
+    /// whose callback is slow is switched off by the system (see `handle`), and the handler ends
+    /// in `Coordinator.apply()`, which writes frames over Accessibility at up to 250 ms each.
+    var onSwipe: ((DockSwipe.Direction) -> Void)?
     /// Read once here rather than per event: the hot path does no dictionary lookups.
     private let verbose = ProcessInfo.processInfo.environment["TOE_VERBOSE"] != nil
 
@@ -44,9 +57,9 @@ final class DockSwipeTap {
     /// index Apple has not declared — which is all of these. The enum's layout is its raw value,
     /// so a bit cast is the way in. Resolved once, at type initialisation, never per event.
     private static let hidTypeField = field(110)     // kCGEventGestureHIDType
-    private static let swipeMaskField = field(115)   // up 1, down 2, left 4, right 8 — diagnostics
-    private static let motionField = field(123)      // 0 none, 1 horizontal, 2 vertical — diagnostics
-    private static let phaseField = field(132)       // 1 began, 2 changed, 4 ended, 8 cancelled
+    private static let swipeMaskField = field(115)   // up 1, down 2, left 4, right 8 — `DockSwipe.Mask`
+    private static let motionField = field(123)      // 0 none, 1 horizontal, 2 vertical — `DockSwipe.Motion`
+    private static let phaseField = field(132)       // 1 began, 2 changed, 4 ended, 8 cancelled — `DockSwipe.Phase`
     private static let subtypeField = field(55)      // kCGSEventTypeField — diagnostics
 
     private static func field(_ raw: UInt32) -> CGEventField {
@@ -96,6 +109,7 @@ final class DockSwipeTap {
         tap = nil
         source = nil
         swallowed = 0
+        gesture = DockSwipe()
         Log.info("dock swipe tap: stopped")
     }
 
@@ -124,11 +138,23 @@ final class DockSwipeTap {
 
         if swallowed == 0 { Log.info("dock swipe tap: swallowing dock swipes") }
         swallowed &+= 1
+
+        // Three more field reads, only for an event already known to be a dock swipe — a few
+        // dozen per gesture, nothing on the scale of what `dump` does. The state machine is fed
+        // whether or not anyone is listening, so its arming stays in step with the gesture.
+        if let direction = gesture.feed(phase: event.getIntegerValueField(Self.phaseField),
+                                        swipeMask: event.getIntegerValueField(Self.swipeMaskField),
+                                        motion: event.getIntegerValueField(Self.motionField)),
+           let onSwipe {
+            DispatchQueue.main.async { onSwipe(direction) }
+        }
         return nil                      // the event never reaches the Dock
     }
 
     /// `TOE_VERBOSE=1` only. The bring-up tool for the day a macOS release renumbers a field:
-    /// swipe, watch the numbers, compare them with the constants above.
+    /// swipe, watch the numbers, compare them with the constants above and `DockSwipe`'s. Also
+    /// the way to check which way the fingers went — `swipe=4` is left — against what the
+    /// workspace did, with System Settings' *Natural scrolling* set both ways.
     private func dump(type: CGEventType, event: CGEvent) {
         Log.info("gesture event: type=\(type.rawValue)"
                  + " subtype=\(event.getIntegerValueField(Self.subtypeField))"
