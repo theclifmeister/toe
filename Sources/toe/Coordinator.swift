@@ -39,8 +39,8 @@ final class Coordinator: WindowTrackerDelegate {
     /// What Omarchy publishes and this machine has not got. Fetched lazily — see `ThemeCatalogue`.
     private let available = ThemeCatalogue()
     /// What a download is doing. Separate from `warnings`, which is replaced wholesale on every
-    /// reload, and from `runtimeWarnings`, which is for things that have gone wrong: this is
-    /// progress, and it clears itself when it finishes.
+    /// reload, and from `setupWarnings` and `runtimeWarnings`, which are for things that have
+    /// gone wrong: this is progress, and it clears itself when it finishes.
     ///
     /// One value rather than the pair of pre-built strings this used to hold. Both of those were
     /// for the menu bar — the strip and the tooltip behind it — and the menu bar has stopped
@@ -61,9 +61,23 @@ final class Coordinator: WindowTrackerDelegate {
 
     private var config = Config.makeDefault()
     private var warnings: [String] = []
-    /// Problems that are not the config's fault and so must survive a reload — a tap that would
-    /// not create, for instance. `warnings` is replaced wholesale on every load.
-    private var runtimeWarnings: [String] = []
+    /// What the `apply*` functions found wrong the last time they ran — a tap that would not
+    /// create, a permission not yet granted. Rebuilt from nothing on every reload, because a
+    /// reload re-runs every one of them and the answer may have changed: `swallow_dock_swipes`
+    /// switched off is a tap nobody needs any more. `applyDockSwipeSetting` runs first and
+    /// starts the list afresh; the others append.
+    private var setupWarnings: [String] = []
+    /// Problems that are not the config's fault and that nothing in a reload knows how to
+    /// re-check, so they must survive one — a theme download that failed is no more fetched
+    /// after `SUPER`+`SHIFT`+`R` than before. Keyed by who put the entry there, so a writer takes
+    /// back its own and nobody else's: a failed fetch is keyed by the theme's slug and comes down
+    /// when a later fetch of that theme succeeds.
+    ///
+    /// Kept apart from `setupWarnings` on purpose. These used to be one list, and the
+    /// `removeAll()` that starts the dock-tap check afresh took the download failure with it on
+    /// the next config save — a message documented as surviving a reload that did not. Two
+    /// lists cleared at two moments by two hands cannot repeat that.
+    private var runtimeWarnings: [String: String] = [:]
     /// False until Accessibility has landed and `beginManaging()` has run. A config reload before
     /// that must not try to create the event tap: it would be refused and never retried.
     private var isManaging = false
@@ -704,6 +718,8 @@ final class Coordinator: WindowTrackerDelegate {
             switch result {
             case .success:
                 Log.info("themes: fetched \(theme.slug)")
+                // This theme's own earlier failure, if any, is over; anyone else's stands.
+                self.runtimeWarnings.removeValue(forKey: theme.slug)
                 // Into `setTheme` rather than straight into the config: the download is a step on
                 // the way to the same act, so it ends up in the same place, with the same write
                 // and the same reload.
@@ -721,8 +737,11 @@ final class Coordinator: WindowTrackerDelegate {
                 // your config still names it, then fetch it again from the menu — a normal thing
                 // to do to replace a theme — and the line needs no change, so nothing reloads.
                 self.refreshMenu()
+                // And the tooltip, for the same reason: the failure it may have carried for
+                // this theme has just been taken down, and those early returns refresh nothing.
+                self.refreshStatus()
             case .failure(let why):
-                self.runtimeWarnings.append("\(theme.name) could not be fetched: \(why)")
+                self.runtimeWarnings[theme.slug] = "\(theme.name) could not be fetched: \(why)"
                 Log.error("themes: \(theme.slug): \(why)")
                 // The tooltip still carries a failure — that is a thing that went wrong rather
                 // than progress, and the row it happened on has gone back to saying its size.
@@ -751,27 +770,29 @@ final class Coordinator: WindowTrackerDelegate {
     /// would be a redundancy waiting to drift.
     private func applyDockSwipeSetting() {
         guard isManaging else { return }
-        runtimeWarnings.removeAll()
+        // `setupWarnings`, never `runtimeWarnings`: this is the one place the reload-rebuilt list
+        // is started over, and a download failure has no business being on it.
+        setupWarnings.removeAll()
 
         guard config.gestures.swallowDockSwipes else {
             dockSwipes.stop()
             return
         }
         if !dockSwipes.isRunning, !dockSwipes.start() {
-            runtimeWarnings = ["dock swipe tap could not be created — swipes are not swallowed"]
+            setupWarnings = ["dock swipe tap could not be created — swipes are not swallowed"]
         }
     }
 
     /// The slide's permission and its picture of the displays, when `animations.slide_on_swipe`
-    /// asks for them. After `applyDockSwipeSetting`, which starts `runtimeWarnings` afresh, and
+    /// asks for them. After `applyDockSwipeSetting`, which starts `setupWarnings` afresh, and
     /// gated on `isManaging` like it: a swipe cannot arrive before the tap exists, so neither
     /// can the need for a picture. With the setting off nothing here runs — no prompt, no
     /// ScreenCaptureKit, no reminder from macOS 15 that toe can record the screen.
     private func applyAnimationSetting() {
         guard isManaging, config.animations.slideOnSwipe else { return }
         guard ScreenSnapshot.isGranted else {
-            runtimeWarnings.append("the slide needs Screen Recording — grant it in System Settings "
-                                   + "› Privacy & Security, then relaunch toe")
+            setupWarnings.append("the slide needs Screen Recording — grant it in System Settings "
+                                 + "› Privacy & Security, then relaunch toe")
             snapshot.requestOnce()
             return
         }
@@ -841,8 +862,10 @@ final class Coordinator: WindowTrackerDelegate {
         // is back to workspaces and the tooltip to things that have gone wrong, which is what the
         // menu bar is for: `⟳ Gruvbox 3/6` was a second, worse copy of a list the menu draws
         // properly, and it was on screen at the moment the user was looking at the menu anyway.
+        // Sorted so the tooltip does not reorder itself between two refreshes; the dictionary
+        // has no order of its own.
         status.update(workspaces: workspaceStates(),
-                      warnings: warnings + runtimeWarnings,
+                      warnings: warnings + setupWarnings + runtimeWarnings.values.sorted(),
                       accessibilityGranted: AXIsProcessTrusted())
     }
 
