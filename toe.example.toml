@@ -134,6 +134,15 @@ disable_expose_shortcuts = true
 # "Click wallpaper to show desktop") and puts it back the way it found it when it quits.
 disable_wallpaper_click = true
 
+# Dragging a window to the side of the display tiles it to that half, and dragging it to the menu
+# bar fills the screen — macOS deciding where a window goes, which is toe's job, and deciding it
+# after the mouse has already come up. toe puts the window back either way, but you see it go
+# there and come back, so the two settings behind it are switched off while toe runs and put back
+# when it quits: the ones System Settings › Desktop & Dock calls "Drag windows to screen edges to
+# tile" and "Drag windows to menu bar to fill screen". Holding ⌥ while you drag still tiles, since
+# that is tiling you asked for rather than tiling that happened to you.
+disable_edge_tiling = true
+
 # The Dock takes a strip of screen off one edge that the tiles never get — around 70 points on a
 # default install, for something SUPER+SPACE reaches instead. toe turns on the setting System
 # Settings › Desktop & Dock calls "Automatically hide and show the Dock", which hands the strip

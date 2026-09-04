@@ -112,7 +112,7 @@ theme, toe's own colours are Tokyo Night's.
 
 **Things toe changes while it runs.** To keep its workspaces intact, toe takes over the Dock's
 swipe gestures, switches off `Ctrl`+`↑`/`↓`, turns off "click wallpaper to show desktop" and
-auto-hides the Dock. Everything is put back when it quits — and restored on the next launch if it
+macOS's own drag-a-window-to-the-edge tiling, and auto-hides the Dock. Everything is put back when it quits — and restored on the next launch if it
 did not get the chance. Each has a switch in the config.
 
 ## Configuration
@@ -153,7 +153,8 @@ Other sections worth knowing about:
   while `[theme] name` is set.
 - `[floating]` — the sizes `SUPER` + `T` cycles through.
 - `[gestures]` and `[misc]` — the switches for the Dock swipes, the Mission Control shortcuts, the
-  wallpaper click, Dock auto-hide, un-hiding ⌘H'd apps and restoring the layout across restarts.
+  wallpaper click, macOS's edge tiling, Dock auto-hide, un-hiding ⌘H'd apps and restoring the
+  layout across restarts.
 - `[animations] slide_on_swipe` — slide the screen on a swipe the way Spaces does. Off by
   default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
   menu flips it.
