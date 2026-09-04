@@ -112,6 +112,20 @@ max_aspect_ratio = 1.6
 # which is also the way out of a fullscreen app now that swiping is not.
 swallow_dock_swipes = true
 
+[animations]
+# Slide the screen sideways on a dock swipe, the way Spaces does: the workspace you are leaving
+# is pushed off one edge by the one arriving. toe cannot move other apps' windows at animation
+# speed — every move is a round trip into the app, and the app repaints when it likes — so the
+# slide is two screenshots on a panel over the screen, with the real switch made underneath.
+# A screenshot needs Screen Recording, a second permission on top of Accessibility, which is
+# why this is off. Turning it on asks for the grant; relaunch toe once it is given. Until then
+# the swipe switches instantly, as it does now. macOS 15 reminds you now and then that toe can
+# record the screen — it captures for the moment of a swipe and keeps nothing. The swipe only:
+# it is the gesture the Spaces slide belongs to. SUPER+1…0 and SUPER+TAB stay instant.
+slide_on_swipe = false
+# Seconds. Spaces takes about a third of one.
+slide_duration = 0.3
+
 [misc]
 # Ctrl+↑ and Ctrl+↓ open the same Mission Control and App Exposé the vertical swipe does. These
 # are symbolic hotkeys, resolved inside the window server, so nothing an event tap can do reaches

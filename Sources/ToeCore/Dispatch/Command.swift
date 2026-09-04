@@ -176,6 +176,8 @@ public enum CommandParser {
             case "", "root", "go":                    return .menu(.root)
             case "keybindings", "keys":               return .menu(.keybindings)
             case "learn":                             return .menu(.learn)
+            case "trigger":                           return .menu(.trigger)
+            case "toggle", "toggles":                 return .menu(.toggle)
             case "style":                             return .menu(.style)
             case "theme", "themes":                   return .menu(.theme)
             case "background", "backgrounds", "wallpaper": return .menu(.background)

@@ -5,8 +5,9 @@ import ToeCore
 /// The window server's stacking order, which Accessibility does not expose at all.
 ///
 /// Reads `kCGWindowNumber`, `kCGWindowBounds`, `kCGWindowLayer`, `kCGWindowOwnerPID` and
-/// `kCGWindowAlpha`, and nothing else. `kCGWindowName` would need Screen Recording; Accessibility is the one
-/// permission toe asks for, so the window list is read for geometry and never for content.
+/// `kCGWindowAlpha`, and nothing else. `kCGWindowName` would need Screen Recording, which toe asks
+/// for only when the workspace slide is switched on (`ScreenSnapshot`), so the window list is read
+/// for geometry and never for content.
 enum WindowStack {
 
     /// The levels worth considering. A window above `.floating` — a menu, the Dock, a system

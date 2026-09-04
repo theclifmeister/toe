@@ -7,6 +7,7 @@ public enum MenuOutcome: Equatable {
     case closed
     case run(Command)
     case toggleLoginItem
+    case toggleSlide
     case page(MenuPage)
     /// Nothing under the cursor — an empty list, filtered down to no rows at all.
     case none
@@ -143,6 +144,8 @@ public struct MenuState: Equatable {
             return .run(command)
         case .toggleLoginItem:
             return .toggleLoginItem
+        case .toggleSlide:
+            return .toggleSlide
         case .note:
             // Pressing it does nothing, and `.none` is what the menu already does when there is
             // nothing to do — the panel stays open on the row you are looking at.

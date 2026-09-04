@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A native macOS tiling window manager: a direct port of Hyprland's `CHyprDwindleLayout`, with
 Omarchy's defaults (`preserve_split = true`, `force_split = 2`). It runs as a background agent
 (`.accessory`) with no Dock icon and no main window — a menu bar item, key bindings and a
-gradient border around the focused window. Accessibility is the only permission it asks for.
+gradient border around the focused window. Accessibility is the only permission it asks for by
+default; the opt-in `[animations] slide_on_swipe` is the one feature behind a second one (Screen
+Recording — see `ScreenSnapshot`).
 
 ## Commands
 

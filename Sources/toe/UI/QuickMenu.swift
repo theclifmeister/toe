@@ -29,6 +29,9 @@ final class QuickMenu {
 
     /// Where a chosen row goes. `Coordinator` hands these straight to `dispatch`.
     var onCommand: ((Command) -> Void)?
+    /// The Trigger › Toggle row for the slide: flips the setting and answers the value now in
+    /// effect, which is what the level is rebuilt with. The Coordinator owns the config file.
+    var onToggleSlide: (() -> Bool)?
 
     /// What the bundle was stamped with, for the `About` row. nil for a binary run straight out
     /// of `.build`, which has no Info.plist to have been stamped — and the row is then left out
@@ -123,7 +126,8 @@ final class QuickMenu {
         let items = route.page == .keybindings
             ? MenuModel.keybindings(config.bindings, superKey: config.superKey)
             : MenuModel.root(loginItem: loginItem, bindings: config.bindings, style: style,
-                             version: QuickMenu.version)
+                             version: QuickMenu.version,
+                             slideOnSwipe: config.animations.slideOnSwipe)
         state = MenuState(root: items, visibleRows: 10, path: route.path)
 
         frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -175,7 +179,8 @@ final class QuickMenu {
         if fontChanged { measure() }
         if route.page == .root {
             state?.rebuild(root: MenuModel.root(loginItem: loginItem, bindings: config.bindings,
-                                                style: style, version: QuickMenu.version))
+                                                style: style, version: QuickMenu.version,
+                                                slideOnSwipe: config.animations.slideOnSwipe))
         }
         // Through the full path rather than straight to `render()`: a level that gained or lost
         // rows — the fetching note going away, a downloaded theme moving up into the installed
@@ -263,6 +268,15 @@ final class QuickMenu {
             // place — Install and Remove come and go with the catalogue — and on the day the
             // toggle answers `unavailable` it is not there at all.
             if !setup.isEmpty { state?.replaceLevel(with: setup) }
+            layoutAndRender()
+        case .toggleSlide:
+            // Same shape as the login toggle: the value flips under the cursor and the menu
+            // stays. The flip goes through the config file and a reload, and that reload has
+            // already handed the new config to `update` by the time the callback returns; the
+            // level is replaced from the answer all the same, so the row is right even if the
+            // reload found nothing to do.
+            let on = onToggleSlide?() ?? config.animations.slideOnSwipe
+            state?.replaceLevel(with: MenuModel.toggles(slideOnSwipe: on))
             layoutAndRender()
         case .run(let command):
             // Theme rows stay — `Command.keepsMenuOpen` says why at length. Everything else

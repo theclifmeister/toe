@@ -93,7 +93,8 @@ The two-argument `brew tap` is because the cask lives in this repository rather 
 separate `homebrew-toe` one. `brew upgrade --cask toe` picks up new releases.
 
 Grant **System Settings → Privacy & Security → Accessibility** when asked. That single
-permission is all toe needs.
+permission is all toe needs — unless you switch on the [workspace slide](#the-slide-on-a-swipe),
+which is the one feature that asks for a second one.
 
 ### What the defaults assume
 
@@ -217,6 +218,32 @@ app's Space — and natively-fullscreen windows are one of the things toe leaves
 still switches Spaces and `⌃⌘F` still leaves fullscreen; the config key is there for anyone who
 would rather have macOS's swipe than toe's.
 
+### The slide on a swipe
+
+Spaces slides the desktop sideways under a swipe; toe's swipe, out of the box, jumps. That is a
+choice with a reason: Spaces can slide because the window server composites the desktop as one
+texture, and toe has no handle on that. The windows on screen belong to other processes, each move
+is a synchronous Accessibility round trip capped at 250 ms, and the app repaints when it likes —
+moving the real windows at animation speed would stutter and fight every Electron app on the way.
+What a picture can do, though, is enough. With `[animations] slide_on_swipe = true`, a swipe
+photographs the usable area of the display, puts the photograph on a click-through panel over it,
+makes the real switch underneath, photographs the result a beat later, and slides the two
+pictures like Spaces would before the panel comes down — the menu bar and the Dock stay put, the
+wallpaper moves, and a click during the slide lands on the real window, which is already where
+it is going to be. `slide_duration` is the length of it, in seconds. The switch is also a row:
+`Trigger` › `Toggle` › `Workspace slide` in the quick menu writes the key into your config the
+way choosing a theme does, and the first `on` is when the permission prompt appears.
+
+The reason it is off by default is the photograph: a picture of the screen is Screen Recording,
+whichever API takes it, and that is a second permission with a different weight from
+Accessibility — macOS 15 reminds you now and then that an app holding it can record the screen.
+toe captures for the moment of a swipe and keeps nothing, and asks for the grant only when the
+setting is on; until it is given (relaunch toe once it is), and on any failure along the way, the
+swipe switches instantly as before. The pieces that can be got wrong once — which way a `.next`
+slides, and how far the two pictures travel — are `WorkspaceSlide` in ToeCore, under the
+selftest; `ScreenSnapshot` and `SlideOverlay` are the camera and the panel. Only the swipe slides.
+`SUPER`+`1`…`0` and `SUPER`+`TAB` are jumps, and stay jumps.
+
 The swipe is not the only way in: `Ctrl`+`↑` and `Ctrl`+`↓` open the same two views. Those are
 *symbolic hotkeys*, resolved inside the window server well before any event tap sees a key, so the
 tap cannot help — toe switches them off with `CGSSetSymbolicHotKeyEnabled` while it runs. Unlike
@@ -267,15 +294,19 @@ and a second `SUPER`+`SPACE` to close.
 
 **The tree is Omarchy's**, and the rule for what is missing is Omarchy's own `when` guard: a row
 whose condition fails is not listed, and a submenu whose visible descendants have all gone goes
-with them. So the root reads `Learn`, `Style`, `Setup`, `Install`, `Remove`, `About`, `Quit` —
-upstream's order, with the rows a Mac cannot honour left out rather than renamed. There is no
-`Style` › `Menu Bar`, because upstream's two rows there are Position (macOS fixes it) and
-Transparency (that menu bar is not toe's to style); no `Apps`, `Trigger` or `Update`; and no
-`System`, whose rows power the machine down. `Quit` is toe's own and comes last, a row rather
-than a keystroke you had to know.
+with them. So the root reads `Learn`, `Trigger`, `Style`, `Setup`, `Install`, `Remove`, `About`,
+`Quit` — upstream's order, with the rows a Mac cannot honour left out rather than renamed. There
+is no `Style` › `Menu Bar`, because upstream's two rows there are Position (macOS fixes it) and
+Transparency (that menu bar is not toe's to style); no `Apps` or `Update`; and no `System`, whose
+rows power the machine down. `Trigger` keeps one of its eight levels, `Toggle` — where upstream
+puts every switch that is on or off right now — because toe has a switch to put there: the
+[workspace slide](#the-slide-on-a-swipe), `on`/`off` in the value column, flipped in place the
+way `Run on startup` is. `Quit` is toe's own and comes last, a row rather than a keystroke you
+had to know.
 
 A binding can open any level, the way `omarchy-menu toggle <route>` does: `menu theme`,
-`menu background`, `menu setup`, `menu install` and the rest, Omarchy's aliases included. That is
+`menu background`, `menu setup`, `menu toggle`, `menu install` and the rest, Omarchy's aliases
+included. That is
 what puts the background picker on `SUPER`+`CTRL`+`SPACE` and the theme picker on
 `SUPER`+`SHIFT`+`CTRL`+`SPACE` — the keys Omarchy binds them to, opening the levels Omarchy opens.
 

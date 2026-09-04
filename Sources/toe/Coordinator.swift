@@ -14,6 +14,8 @@ final class Coordinator: WindowTrackerDelegate {
     private let border = BorderOverlay()
     private let drag = DragMonitor()
     private let dockSwipes = DockSwipeTap()
+    private let snapshot = ScreenSnapshot()
+    private let slide = SlideOverlay()
     private let hideBlocker = HideBlocker()
     private let status = StatusItem()
     private let quickMenu = QuickMenu()
@@ -95,6 +97,40 @@ final class Coordinator: WindowTrackerDelegate {
     /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
     /// to a floating window.
     private var draggedWindow: WindowID? { drag.isDragging ? drag.window : nil }
+    /// Where a swipe's slide has got to. See `swipeToWorkspace` for the sequence and `apply`
+    /// for the two phases a render from elsewhere cuts short.
+    private enum SlidePhase {
+        case idle
+        /// The model has switched; the screen has not. Waiting for the picture of it.
+        case awaitingPicture
+        /// The picture is up and the switch has been made under it. Waiting for the picture of
+        /// the result.
+        case switching
+        /// Both pictures are moving.
+        case sliding
+    }
+    private var slidePhase = SlidePhase.idle
+    /// Bumped whenever a slide is started or cancelled, so that a callback from an earlier one
+    /// — a picture, a timer, an animation ending — finds it is no longer wanted and does nothing.
+    private var slideGeneration = 0
+    /// How long the switch waits for the first picture before going ahead without one. A
+    /// capture is a few milliseconds once the capture session is warm, and the user's fingers
+    /// have just left the trackpad, so this is the most a swipe may be held up for a picture.
+    private static let slidePictureDeadline: TimeInterval = 0.1
+    /// How long after the switch the second picture is taken. The Accessibility writes have
+    /// returned by then, but that means the app has *received* its frame, not painted it —
+    /// Chromium takes a frame or two — and a picture of a half-drawn window slides in as a
+    /// half-drawn window. The live screen replaces it the moment the slide ends, so an app
+    /// slower than this costs a glitch of one slide, not a wrong layout.
+    private static let slideSettleTime: TimeInterval = 0.08
+    /// How long the switch is held after the panel goes up, so the panel is on screen with its
+    /// picture before anything under it moves. The picture is flushed to the render server
+    /// before the panel is ordered front, but the window server composites on its own clock and
+    /// a window that has been moved lands in the very next frame; two refreshes covers the one
+    /// the panel is presented in and the one after, on a 60 Hz display or a faster one. Without
+    /// this the switch showed through for a frame and the picture snapped back over it — a
+    /// flash before the slide, which is worse than no slide.
+    private static let slidePanelLatency: TimeInterval = 0.035
     private var signalSources: [any DispatchSourceSignal] = []
 
     // MARK: - Start-up
@@ -152,6 +188,7 @@ final class Coordinator: WindowTrackerDelegate {
             self.dispatch(binding.command)
         }
         quickMenu.onCommand = { [weak self] command in self?.dispatch(command) }
+        quickMenu.onToggleSlide = { [weak self] in self?.toggleSlide() ?? false }
         // Dragging a tiled window over another one trades their places, live, the way
         // Hyprland's `IHyprLayout::onMouseMove` does.
         drag.onMove = { [weak self] id, point in
@@ -170,7 +207,7 @@ final class Coordinator: WindowTrackerDelegate {
             let natural = NaturalScrolling.isOn
             let target = WorkspaceTarget.swipe(direction, naturalScrolling: natural)
             let before = self.workspaces.focusedWorkspaceIndex
-            self.dispatch(.workspace(target))
+            self.swipeToWorkspace(target)
             let after = self.workspaces.focusedWorkspaceIndex
             // `.next` / `.previous` walk the workspaces in use, as SUPER+TAB does, so a fresh
             // session with everything on one workspace has nowhere to go — say so, or the first
@@ -237,6 +274,7 @@ final class Coordinator: WindowTrackerDelegate {
         // point at which the grant is known to exist, whether it was already there or has just
         // been given, so a first run picks the tap up without a relaunch.
         applyDockSwipeSetting()
+        applyAnimationSetting()
         applyMiscSettings()
         applySessionSetting()
         refreshStatus()
@@ -364,6 +402,7 @@ final class Coordinator: WindowTrackerDelegate {
         border.apply(config.border)
         status.persistentWorkspaces = config.bar.persistentWorkspaces
         applyDockSwipeSetting()
+        applyAnimationSetting()
         applyMiscSettings()
         applySessionSetting()
 
@@ -586,19 +625,43 @@ final class Coordinator: WindowTrackerDelegate {
             Log.error("theme: there is no theme called '\(slug)'")
             return
         }
+        rewriteConfig("theme", edit: { ThemeWriter.settingTheme(slug, in: $0) },
+                      verify: { Slug.make($0.theme.name) == slug })
+    }
+
+    /// Flips `animations.slide_on_swipe` in the config file, for the menu's Toggle row, and
+    /// answers the value now in effect.
+    ///
+    /// Through the file rather than flipped in memory, because the file is where the setting
+    /// lives: a flip the next reload put back would be a switch that throws itself. Going through
+    /// the file also means the first `on` arrives by `applyAnimationSetting` and asks for Screen
+    /// Recording with the menu open on the row that asked — the one moment the prompt has a
+    /// context, and better than a config save nobody was watching.
+    private func toggleSlide() -> Bool {
+        let wanted = !config.animations.slideOnSwipe
+        rewriteConfig("slide", edit: {
+            ConfigWriter.setting("slide_on_swipe", to: wanted ? "true" : "false",
+                                 inTable: "animations", of: $0)
+        }, verify: { $0.animations.slideOnSwipe == wanted })
+        return config.animations.slideOnSwipe
+    }
+
+    /// Edits `toe.toml` in place and reloads. `what` names the caller in the log.
+    ///
+    /// The writer works a line at a time and cannot see everything a parser can — `["theme"]`
+    /// is the same table as `[theme]`, and a header inside a string is not a header at all. So
+    /// its own output is parsed back before it is committed and `verify` is asked whether it says
+    /// what it was asked to say, which turns every case the writer gets wrong from a config that
+    /// will not load into a config that was left alone.
+    private func rewriteConfig(_ what: String, edit: (String) -> String, verify: (Config) -> Bool) {
         guard let text = try? String(contentsOf: Coordinator.configURL, encoding: .utf8) else {
-            Log.error("theme: \(Coordinator.configURL.lastPathComponent) could not be read")
+            Log.error("\(what): \(Coordinator.configURL.lastPathComponent) could not be read")
             return
         }
-        let proposed = ThemeWriter.settingTheme(slug, in: text)
+        let proposed = edit(text)
         guard proposed != text else { return }
-
-        // The writer works a line at a time and cannot see everything a parser can — `["theme"]`
-        // is the same table as `[theme]`, and a header inside a string is not a header at all. So
-        // its own output is parsed back before it is committed, which turns every case it gets
-        // wrong from a config that will not load into a config that was left alone.
-        guard let check = try? Config.parse(proposed), Slug.make(check.theme.name) == slug else {
-            Log.error("theme: declined to edit \(Coordinator.configURL.lastPathComponent) — "
+        guard let check = try? Config.parse(proposed), verify(check) else {
+            Log.error("\(what): declined to edit \(Coordinator.configURL.lastPathComponent) — "
                       + "the result would not have said what it was asked to say")
             return
         }
@@ -697,6 +760,22 @@ final class Coordinator: WindowTrackerDelegate {
         if !dockSwipes.isRunning, !dockSwipes.start() {
             runtimeWarnings = ["dock swipe tap could not be created — swipes are not swallowed"]
         }
+    }
+
+    /// The slide's permission and its picture of the displays, when `animations.slide_on_swipe`
+    /// asks for them. After `applyDockSwipeSetting`, which starts `runtimeWarnings` afresh, and
+    /// gated on `isManaging` like it: a swipe cannot arrive before the tap exists, so neither
+    /// can the need for a picture. With the setting off nothing here runs — no prompt, no
+    /// ScreenCaptureKit, no reminder from macOS 15 that toe can record the screen.
+    private func applyAnimationSetting() {
+        guard isManaging, config.animations.slideOnSwipe else { return }
+        guard ScreenSnapshot.isGranted else {
+            runtimeWarnings.append("the slide needs Screen Recording — grant it in System Settings "
+                                   + "› Privacy & Security, then relaunch toe")
+            snapshot.requestOnce()
+            return
+        }
+        snapshot.refresh()
     }
 
     /// The macOS behaviours toe takes over, applied at startup and on every reload. None of them
@@ -872,6 +951,190 @@ final class Coordinator: WindowTrackerDelegate {
         apply(refocus: true)
     }
 
+    // MARK: - Switching workspaces
+
+    /// The model half of `workspace <target>`, without the render. `dispatch` wants both and
+    /// takes them in a row; the swipe wants a picture of the screen between the two, which is
+    /// the only reason this is not inline there.
+    private func switchWorkspace(_ target: WorkspaceTarget) {
+        switch target {
+        case .index(let n): workspaces.switchTo(workspace: n)
+        case .next: workspaces.switchToRelativeWorkspace(1)
+        case .previous: workspaces.switchToRelativeWorkspace(-1)
+        case .former: workspaces.switchToPreviousWorkspace()
+        }
+    }
+
+    /// `workspace <target>` from the trackpad: the switch `dispatch` makes, with the slide
+    /// `animations.slide_on_swipe` asks for laid over it when it can be.
+    ///
+    /// Whether the display's content actually changes is read off `activeWorkspace` for the
+    /// display that had the focus *before* the switch: `.next` can land on a workspace that
+    /// lives on the other display, in which case `switchTo` moves the focus there and nothing on
+    /// this one moves — no slide. `render()` would be the wrong test: it recalculates layouts
+    /// as a side effect, and two workspaces whose windows happen to tile alike would read as
+    /// unchanged when the screen has in fact changed.
+    private func swipeToWorkspace(_ target: WorkspaceTarget) {
+        // Whatever slide is in flight, the screen under it is already the end of that switch.
+        cancelSlide()
+
+        let monitorID = workspaces.focusedMonitorID
+        let before = workspaces.activeWorkspace[monitorID]
+        // Where the windows are *now*, and which of them wears the border, for the mask on the
+        // outgoing picture. After the switch the model has forgotten both. Only with the slide
+        // on: this is a render and a corner-radius query per window, on every swipe.
+        let leaving = config.animations.slideOnSwipe
+            ? workspaces.monitor(id: monitorID).map {
+                slideCutouts(workspaces.render(), on: $0, border: workspaces.focusedWindow)
+            } ?? []
+            : []
+        switchWorkspace(target)
+        let after = workspaces.activeWorkspace[monitorID]
+
+        guard config.animations.slideOnSwipe, before != after,
+              let direction = WorkspaceSlide.direction(for: target),
+              let monitor = workspaces.monitor(id: monitorID)
+        else { apply(refocus: true); return }
+
+        // The grant may have landed since the config was applied — read it now, and if the
+        // displays have not been listed since, list them for the next swipe. This one switches
+        // the plain way rather than wait on an enumeration of every window on the system.
+        guard ScreenSnapshot.isGranted else { apply(refocus: true); return }
+        guard snapshot.knows(display: monitor.id) else {
+            snapshot.refresh()
+            apply(refocus: true)
+            return
+        }
+
+        // A native-fullscreen window on this display means the swipe is switching workspaces
+        // behind a Space the user cannot see them on; a panel over it would be the one thing
+        // they did see. The border's rule, and its helper: scoped to a display, never "is
+        // anything fullscreen".
+        guard !BorderGeometry.isBehindFullscreen(window: monitor.usable,
+                                                  fullscreen: AX.frontmostFullscreenFrame)
+        else { apply(refocus: true); return }
+
+        beginSlide(direction, on: monitor, leaving: leaving)
+    }
+
+    /// The windows on `monitor` in `plan`, as the mask for a picture of it — each at the radius
+    /// the window server rounds it to, and the focused one grown by the border so the ring
+    /// slides with its window instead of being cut off at the window's edge.
+    private func slideCutouts(_ plan: RenderPlan, on monitor: Monitor,
+                              border focused: WindowID?) -> [WorkspaceSlide.Cutout] {
+        var windows: [(box: Box, radius: Double)] = []
+        for (id, box) in plan.frames.merging(plan.floating, uniquingKeysWith: { _, floating in floating }) {
+            let radius = Double(WindowCornerRadius.points(for: id) ?? SystemCornerRadius.points)
+            if id == focused, config.border.enabled, config.border.width > 0 {
+                let w = config.border.width
+                windows.append((BorderGeometry.outset(box, by: w),
+                                BorderGeometry.outerRadius(inner: radius, width: w)))
+            } else {
+                windows.append((box, radius))
+            }
+        }
+        return WorkspaceSlide.cutouts(windows, in: monitor.usable)
+    }
+
+    /// The sequence: picture of the screen as it is → panel up showing it → the real switch,
+    /// hidden under the panel → a beat for the apps to paint → picture of the result → both
+    /// pictures slide → panel down. Every step checks it still belongs to the current slide,
+    /// because every step is asynchronous and a second swipe, a render from elsewhere or a
+    /// display change can have moved on without it. The model is already switched when this is
+    /// called; what is owed is the `apply`, and every path out of here makes it exactly once.
+    private func beginSlide(_ direction: WorkspaceSlide.Direction, on monitor: Monitor,
+                            leaving outgoingCutouts: [WorkspaceSlide.Cutout]) {
+        slideGeneration += 1
+        let mine = slideGeneration
+        let started = Date()
+        func ms() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
+
+        slidePhase = .awaitingPicture
+
+        // The switch is not held for a picture that is not coming. A late one finds the phase
+        // moved on and is dropped.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.slidePictureDeadline) { [weak self] in
+            guard let self, self.slideIs(.awaitingPicture, mine) else { return }
+            Log.info("slide: no picture after \(ms()) ms, switching without one")
+            self.slidePhase = .idle
+            self.apply(refocus: true)
+        }
+
+        // Two pictures at once — the screen, and the wallpaper under it — and the panel goes up
+        // when the second lands. The wallpaper is allowed to fail: without it the whole picture
+        // slides, wallpaper and all, which is how the first version looked.
+        var screen: CGImage??
+        var wallpaper: CGImage??
+        let proceed = { [weak self] in
+            guard let self, self.slideIs(.awaitingPicture, mine),
+                  let screen, let wallpaper else { return }
+            guard let image = screen else {
+                self.slidePhase = .idle
+                self.apply(refocus: true)
+                return
+            }
+            Log.info("slide: outgoing picture after \(ms()) ms"
+                     + (wallpaper == nil ? " — no wallpaper picture, sliding the whole screen" : ""))
+            self.slidePhase = .switching
+            self.slide.begin(showing: image, over: monitor.usable, wallpaper: wallpaper,
+                             cutouts: outgoingCutouts)
+
+            // The switch itself, once the panel is on screen. Still `.switching` if it runs: a
+            // cancel in the meantime came from a caller that renders next itself.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.slidePanelLatency) { [weak self] in
+                guard let self, self.slideIs(.switching, mine) else { return }
+                self.apply(refocus: true)
+                Log.info("slide: switched after \(ms()) ms")
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.slideSettleTime) { [weak self] in
+                    guard let self, self.slideIs(.switching, mine) else { return }
+                    self.snapshot.capture(display: monitor.id, area: monitor.usable, frame: monitor.frame,
+                                          of: .everythingButToe) { [weak self] image in
+                        guard let self, self.slideIs(.switching, mine) else { return }
+                        Log.info("slide: incoming picture after \(ms()) ms"
+                                 + (image == nil ? " — none, revealing instead" : ""))
+                        // The border is not in this picture — toe is excluded from it — so no
+                        // window is grown for it.
+                        let cutouts = self.slideCutouts(self.workspaces.render(), on: monitor, border: nil)
+                        self.slidePhase = .sliding
+                        self.slide.push(image, cutouts: cutouts, direction: direction,
+                                        duration: self.config.animations.slideDuration) { [weak self] in
+                            guard let self, self.slideIs(.sliding, mine) else { return }
+                            self.slidePhase = .idle
+                            Log.info("slide: done after \(ms()) ms")
+                        }
+                    }
+                }
+            }
+        }
+        snapshot.capture(display: monitor.id, area: monitor.usable, frame: monitor.frame,
+                         of: .everything) { image in
+            screen = .some(image)
+            proceed()
+        }
+        snapshot.capture(display: monitor.id, area: monitor.usable, frame: monitor.frame,
+                         of: .wallpaper) { image in
+            wallpaper = .some(image)
+            proceed()
+        }
+    }
+
+    /// Whether a callback started for slide `generation` still has that slide, at `phase`, to
+    /// act on. Every asynchronous step of `beginSlide` asks this first.
+    private func slideIs(_ phase: SlidePhase, _ generation: Int) -> Bool {
+        slideGeneration == generation && slidePhase == phase
+    }
+
+    /// Takes the slide down, whatever step it is at. Never renders: a slide still waiting for
+    /// its picture has a switch owed, and every caller of this either renders next or starts
+    /// another slide that will.
+    private func cancelSlide() {
+        guard slidePhase != .idle else { return }
+        slideGeneration += 1
+        slidePhase = .idle
+        slide.cancel()
+    }
+
     // MARK: - WindowTrackerDelegate
 
     func windowAppeared(_ window: ManagedWindow, shouldFloat: Bool) {
@@ -965,7 +1228,10 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     func screensChanged() {
+        // A slide in flight is a picture of a screen that no longer exists in that shape.
+        cancelSlide()
         refreshMonitors()
+        snapshot.refresh()
         desired.removeAll()
         corrections.removeAll()
         apply(refocus: false)
@@ -1005,6 +1271,19 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - Applying the layout
 
     private func apply(refocus: Bool) {
+        // A slide waiting for its picture has switched the model and not yet the screen. A render
+        // arriving now from anywhere else — a window appearing, a config reload — puts the new
+        // layout on screen before the picture of the old one is taken, and the picture would then
+        // be of the wrong workspace: so the slide is dropped and this render is the switch, made
+        // the instant way. A render during the slide itself means the screen has changed under
+        // the pictures, and the honest thing is to show it. In between, while the pictures are
+        // being made, a render is part of the end state the second picture will show — the
+        // swipe's own switch above all — and is left alone.
+        switch slidePhase {
+        case .awaitingPicture, .sliding: cancelSlide()
+        case .idle, .switching: break
+        }
+
         let plan = workspaces.render()
 
         for id in plan.stashed {
@@ -1333,12 +1612,7 @@ final class Coordinator: WindowTrackerDelegate {
             if workspaces.moveWindow(direction) { apply(refocus: false) }
 
         case .workspace(let target):
-            switch target {
-            case .index(let n): workspaces.switchTo(workspace: n)
-            case .next: workspaces.switchToRelativeWorkspace(1)
-            case .previous: workspaces.switchToRelativeWorkspace(-1)
-            case .former: workspaces.switchToPreviousWorkspace()
-            }
+            switchWorkspace(target)
             apply(refocus: true)
 
         case .moveToWorkspace(let n, let follow):

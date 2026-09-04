@@ -34,6 +34,8 @@ public struct MenuRoute: Equatable, Sendable {
     public static let style = MenuRoute(path: ["Style"])
     public static let theme = MenuRoute(path: ["Style", "Theme"])
     public static let background = MenuRoute(path: ["Style", "Background"])
+    public static let trigger = MenuRoute(path: ["Trigger"])
+    public static let toggle = MenuRoute(path: ["Trigger", "Toggle"])
     public static let setup = MenuRoute(path: ["Setup"])
     public static let install = MenuRoute(path: ["Install"])
     public static let remove = MenuRoute(path: ["Remove"])
@@ -47,6 +49,7 @@ public struct MenuItem: Equatable {
     /// moves rather than every test that mentions a row.
     public enum Icon: Equatable, Sendable {
         case gear, book, keyboard, pencil, power, toggleOn, toggleOff
+        case rocket, sliders
         case paintbrush, droplet, image
         case download, trash, info, globe
     }
@@ -56,6 +59,10 @@ public struct MenuItem: Equatable {
         case page(MenuPage)
         case run(Command)
         case toggleLoginItem
+        /// The Trigger › Toggle row for `animations.slide_on_swipe`. Its own case rather than a
+        /// `.run`, for the reason the login toggle has one: the row's value flips under the
+        /// cursor and the menu stays open, which no `Command` does.
+        case toggleSlide
         /// A row that says something and does nothing when you press it — "Fetching Omarchy's
         /// themes…". The alternative was leaving the level looking like a short list rather than
         /// an unfinished one, which is the sort of thing you stare at wondering if it is broken.
@@ -197,12 +204,15 @@ public enum MenuModel {
 
     public static func root(loginItem: LoginItemState, bindings: [Binding],
                             style: StyleMenu = StyleMenu(),
-                            version: String? = nil) -> [MenuItem] {
+                            version: String? = nil,
+                            slideOnSwipe: Bool = false) -> [MenuItem] {
         // Omarchy's root order, with the rows toe has no analogue for left out: Apps, **Learn**,
-        // Trigger, **Style**, **Setup**, **Install**, **Remove**, Update, **About**, System.
+        // **Trigger**, **Style**, **Setup**, **Install**, **Remove**, Update, **About**, System.
         // Quit is toe's own and goes last, after everything ported.
         var items: [MenuItem] = [
             MenuItem(title: "Learn", icon: .book, action: .submenu(learn())),
+            MenuItem(title: "Trigger", icon: .rocket,
+                     action: .submenu(trigger(slideOnSwipe: slideOnSwipe))),
             MenuItem(title: "Style", icon: .paintbrush, action: .submenu(MenuModel.style(style))),
         ]
         // Setup can come out empty — neither of its rows is guaranteed — and a row that leads
@@ -249,6 +259,31 @@ public enum MenuModel {
             MenuItem(title: "Hyprland", icon: .globe,
                      action: .run(.exec("open https://wiki.hypr.land/"))),
         ]
+    }
+
+    /// Omarchy's `Trigger` level: Emoji, Reminder, Capture, Transcode, Share, **Toggle**,
+    /// Hardware, Speed Test. One survives. The rest are Linux tools — an emoji picker, ffmpeg,
+    /// a share sheet, a touchpad switch — that a Mac either has of its own or has no need of, so
+    /// they fail their `when` here the way an upstream row does on a machine without the
+    /// hardware. Toggle stays because it holds a row toe can honour, and a level with one live
+    /// descendant is listed: that is the Setup rule read the other way round.
+    public static func trigger(slideOnSwipe: Bool) -> [MenuItem] {
+        [MenuItem(title: "Toggle", icon: .sliders, action: .submenu(toggles(slideOnSwipe: slideOnSwipe)))]
+    }
+
+    /// Omarchy's `Trigger › Toggle` level — where upstream keeps every switch that is on or off
+    /// *right now*: Stay Awake, Notifications, Screensaver, Nightlight, Menu Bar, and the
+    /// Hyprland ones, Workspace Layout and Window Gaps. None of those ten has a Mac analogue
+    /// toe can throw from here yet, so the level opens with toe's own row, where an Omarchy
+    /// user would go looking for a switch. (Run on startup is under Setup, not here, on
+    /// purpose: it is how toe *starts*, like upstream's Direct Boot, not what is on at the
+    /// moment.) Also built on its own, by the menu, when throwing the switch rebuilds the level
+    /// under the cursor.
+    public static func toggles(slideOnSwipe: Bool) -> [MenuItem] {
+        [MenuItem(title: "Workspace slide",
+                  icon: slideOnSwipe ? .toggleOn : .toggleOff,
+                  value: slideOnSwipe ? "on" : "off",
+                  action: .toggleSlide)]
     }
 
     /// Omarchy's `Style` level, minus the parts toe has no analogue for.
