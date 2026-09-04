@@ -2198,7 +2198,7 @@ h.test("the filter matches a subsequence rather than a substring") { t in
 }
 
 h.test("typing puts the selection back at the top") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     m.move(by: 2)
     t.equal(m.selection, 2, "moved down two")
     m.type("q")
@@ -2207,7 +2207,7 @@ h.test("typing puts the selection back at the top") { t in
 }
 
 h.test("a submenu is entered, backed out of, and clears the query on the way in") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .on, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .on, config: Config()), visibleRows: 10)
     t.equal(m.prompt, "Go…", "walker's placeholder at the root")
     m.type("setup")
     t.equal(m.visible.count, 1, "one row matches 'setup'")
@@ -2215,13 +2215,15 @@ h.test("a submenu is entered, backed out of, and clears the query on the way in"
     t.equal(m.query, "", "the query does not follow you into the submenu")
     t.equal(m.breadcrumb, ["Setup"], "the level is named")
     t.equal(m.prompt, "Setup…", "and the placeholder says where you are")
-    t.equal(m.visible.map(\.title), ["Run on startup"], "what toe can actually change for you")
+    t.equal(m.visible.map(\.title),
+            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
     t.equal(m.pop(), .closed, "and closes at the root")
 }
 
 h.test("backspace eats the query, then leaves the submenu") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     m.type("learn")
     t.equal(m.activate(), .pushed, "into Learn")
     m.type("ke")
@@ -2259,14 +2261,14 @@ h.test("an empty field is not a match") { t in
 }
 
 h.test("typing searches the whole tree, not the level in front of you") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     m.type("startup")
     t.equal(m.visible.map(\.title), ["Run on startup"],
             "found two levels down without anyone having to go there")
     t.equal(m.visible.first?.subtitle, "Setup", "and the row says where it lives")
     t.equal(m.activate(), .toggleLoginItem, "acting on it needs no descent either")
 
-    var deep = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var deep = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     deep.type("keyb")
     t.equal(deep.visible.map(\.title), ["Keybindings"], "the same for the other branch")
     t.equal(deep.visible.first?.subtitle, "Learn", "named by its path")
@@ -2274,7 +2276,7 @@ h.test("typing searches the whole tree, not the level in front of you") { t in
 }
 
 h.test("a branch found by searching is still a branch") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     m.type("learn")
     t.equal(m.visible.map(\.title), ["Learn"], "the branch itself matches, not only its children")
     t.equal(m.visible.first?.subtitle, nil, "a row at the level you are on has no path to show")
@@ -2282,7 +2284,7 @@ h.test("a branch found by searching is still a branch") { t in
 }
 
 h.test("a searched list carries no icons") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 20)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 20)
     t.expect(m.visible.contains { $0.icon != nil }, "a level draws its glyphs")
     m.type("e")
     t.expect(m.visible.count > 1, "the search turns up rows from several levels")
@@ -2293,23 +2295,23 @@ h.test("a searched list carries no icons") { t in
 }
 
 h.test("an empty query is one level at a time, with no paths") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     m.type("z")
     t.equal(m.visible.count, 0, "nothing matches")
     m.backspace()
-    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Setup", "Quit"], "the level comes back")
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "the level comes back")
     t.expect(m.visible.allSatisfy { $0.subtitle == nil },
              "and the paths go away with the search that needed them")
 }
 
 h.test("the rows lead where the menu says they do") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Setup", "Quit"], "the whole menu, bare minimum")
-    t.equal(m.visible.map(\.leadsOn), [true, true, true, true, false], "four lead on, Quit acts")
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "the whole menu, bare minimum")
+    t.equal(m.visible.map(\.leadsOn), [true, true, true, false], "three lead on, Quit acts")
     m.type("quit")
     t.equal(m.activate(), .run(.quit), "and Quit dispatches rather than descending")
 
-    var learn = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var learn = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     learn.type("learn")
     _ = learn.activate()
     t.equal(learn.activate(), .page(.keybindings), "Learn holds the keybindings page")
@@ -2317,12 +2319,13 @@ h.test("the rows lead where the menu says they do") { t in
 
 h.test("the startup row reads the state it is handed") { t in
     func startup(_ state: LoginItemState) -> MenuItem? {
-        let root = MenuModel.root(loginItem: state, bindings: [])
+        let root = MenuModel.root(loginItem: state, config: Config())
         // By title rather than by position: Setup moves as Install and Remove come and go with
-        // the catalogue, and in the case below it is not there at all.
+        // the catalogue. The row is looked up by title too — Setup holds the slide switch as
+        // well, and in the case below the startup row is the one of the two that is missing.
         guard case .submenu(let setup)? = root.first(where: { $0.title == "Setup" })?.action
         else { return nil }
-        return setup.first
+        return setup.first { $0.title == "Run on startup" }
     }
     t.equal(startup(.on)?.value, "on", "the row shows launchd's answer, not a preference")
     t.equal(startup(.on)?.action, .toggleLoginItem, "and pressing it flips it")
@@ -2332,38 +2335,66 @@ h.test("the startup row reads the state it is handed") { t in
             + "throw is worse than one you were never offered")
 }
 
-h.test("the slide switch lives under Trigger › Toggle and reads the config") { t in
-    func row(_ on: Bool) -> MenuItem? {
-        let root = MenuModel.root(loginItem: .off, bindings: [], slideOnSwipe: on)
-        guard case .submenu(let trigger)? = root.first(where: { $0.title == "Trigger" })?.action,
-              case .submenu(let toggles)? = trigger.first(where: { $0.title == "Toggle" })?.action
-        else { return nil }
-        return toggles.first
+h.test("the switches live under Setup, and each row is the line it writes") { t in
+    func setup(_ config: Config) -> [MenuItem] {
+        let root = MenuModel.root(loginItem: .off, config: config)
+        guard case .submenu(let rows)? = root.first(where: { $0.title == "Setup" })?.action
+        else { return [] }
+        return rows
     }
-    t.equal(row(true)?.title, "Workspace slide", "toe's own row, where upstream keeps its switches")
-    t.equal(row(true)?.value, "on", "the row shows the config")
-    t.equal(row(true)?.icon, .toggleOn, "and draws it")
-    t.equal(row(false)?.value, "off", "the other way round")
-    t.equal(row(false)?.icon, .toggleOff, "likewise")
-    t.equal(row(false)?.action, .toggleSlide, "and pressing it flips it")
+    let shipped = try Config.parse(Config.defaultTOML)
+    t.equal(setup(shipped).map(\.title).suffix(3),
+            ["Workspace slide", "Focus border", "Auto-hide Dock"],
+            "toe's own switches, under the config and the startup row")
 
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10,
-                      path: MenuRoute.toggle.path)
-    t.equal(m.breadcrumb, ["Trigger", "Toggle"], "`menu toggle` opens on the level")
-    t.equal(m.activate(), .toggleSlide, "and Return asks the app layer to throw the switch")
-    t.equal(try CommandParser.parse("menu toggle"), .menu(.toggle), "Omarchy's alias for the level")
-    t.equal(try CommandParser.parse("menu trigger"), .menu(.trigger), "and its parent")
+    // Each switch is checked through the writer the menu throws it with, against the parser the
+    // config is read with: a `table` or a `key` that named nothing would leave a row that looks
+    // like it works and a file that never changes, which is the one failure the runtime guard
+    // (`Coordinator.rewriteConfig`'s verify) can only turn into a log line after the fact.
+    for setting in ConfigSwitch.allCases {
+        let was = setting.value(in: shipped)
+        let edited = ConfigWriter.setting(setting.key, to: was ? "false" : "true",
+                                          inTable: setting.table, of: Config.defaultTOML)
+        t.equal(setting.value(in: try Config.parse(edited)), !was,
+                "\(setting.rawValue): the table and the key are the ones the parser reads")
+
+        let row = setup(try Config.parse(edited)).first { $0.title == setting.title }
+        t.equal(row?.value, was ? "off" : "on", "\(setting.rawValue): the row shows the config")
+        t.equal(row?.icon, was ? .toggleOff : .toggleOn, "\(setting.rawValue): and draws it")
+        t.equal(row?.action, .toggleSetting(setting),
+                "\(setting.rawValue): and pressing it flips that switch, not another")
+    }
+
+    // What `QuickMenu` redraws the level with while the file is being read back.
+    var shown = shipped
+    ConfigSwitch.dock.set(false, in: &shown)
+    t.equal(setup(shown).first { $0.title == "Auto-hide Dock" }?.value, "off",
+            "a switch set in memory shows in the row, for the moment before the reload lands")
+    t.equal(setup(shown).first { $0.title == "Focus border" }?.value, "on", "and moves nothing else")
+
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10,
+                      path: MenuRoute.setup.path)
+    t.equal(m.breadcrumb, ["Setup"], "`menu setup` opens on the level")
+    m.type("slide")
+    t.equal(m.activate(), .toggleSetting(.slide),
+            "and Return asks the app layer to throw the switch under the cursor")
+    // The level the switches used to live on is gone, and the two routes that opened it now open
+    // the one they moved to, so a config written when the slide was three levels down still works.
+    t.equal(try CommandParser.parse("menu toggle"), .menu(.setup), "Omarchy's alias follows the rows")
+    t.equal(try CommandParser.parse("menu trigger"), .menu(.setup), "and so does its parent")
 }
 
 h.test("the Config row is your binding, not toe's idea of an editor") { t in
     func rows(_ toml: String, loginItem: LoginItemState = .off) throws -> [MenuItem] {
-        MenuModel.setup(loginItem: loginItem, bindings: try Config.parse(toml).bindings)
+        MenuModel.setup(loginItem: loginItem, config: try Config.parse(toml))
     }
 
     // The shipped config: the row runs exactly the line the file bound, character for character.
     // Omarchy's `setup.config` first, then toe's own row — the ported rows lead.
     let shipped = try rows(Config.defaultTOML)
-    t.equal(shipped.map(\.title), ["Config", "Run on startup"], "both rows, Omarchy's leading")
+    t.equal(shipped.map(\.title),
+            ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            "every row, Omarchy's leading")
     t.equal(shipped.first?.action,
             .run(.exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml")),
             "and it opens the config the way your config says to")
@@ -2380,29 +2411,34 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
 
     // An exec that opens something else is not an editor for this file.
     let unrelated = try rows("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n")
-    t.equal(unrelated.map(\.title), ["Run on startup"],
+    t.equal(unrelated.map(\.title),
+            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock"],
             "no binding that opens the config, no row offering to")
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
-                           bindings: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n").bindings)
+                           config: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n"))
                 .map(\.title),
-            ["Learn", "Trigger", "Style", "Quit"],
-            "and with the startup row gone as well, Setup has nothing left to hold")
+            ["Learn", "Style", "Setup", "Quit"],
+            "and with the startup row gone as well, Setup is down to the switch that always works")
 
     // The row is there even when the startup toggle cannot be.
     let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
-    t.equal(buildDir.map(\.title), ["Config"], "the one row that works is still offered")
+    t.equal(buildDir.map(\.title),
+            ["Config", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            "the rows that work are still offered")
 }
 
-h.test("Setup goes with the startup row, being all that was left in it") { t in
-    let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
+h.test("Setup holds the rows that work, and the startup one is not always among them") { t in
+    var m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), config: Config()),
                       visibleRows: 10)
-    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Quit"],
-            "a row that leads into an empty level is worse than no row")
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"],
+            "Setup stays, on the strength of the one row that cannot be unavailable")
+    m.type("startup")
+    t.equal(m.visible.count, 0, "and the search cannot turn up the row that is not there")
 
-    var searching = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"), bindings: []),
-                              visibleRows: 10)
-    searching.type("startup")
-    t.equal(searching.visible.count, 0, "and the search cannot turn it up either")
+    var slide = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"),
+                                               config: Config()), visibleRows: 10)
+    slide.type("slide")
+    t.equal(slide.visible.map(\.subtitle), ["Setup"], "while the switch is found under Setup")
 }
 
 h.test("the second column never runs into the title") { t in
@@ -2573,7 +2609,7 @@ h.test("a filling row is the row cut off at the fraction") { t in
 }
 
 h.test("rebuilding under an open menu leaves you where you were standing") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(),
                                            style: downloadingStyle(fetching: 1, bytesDone: 0)), visibleRows: 10)
     // Down into Install › Style › Theme, the way a user gets to a theme they have not got.
     while m.selectedItem?.title != "Install" { m.move(by: 1) }
@@ -2588,7 +2624,7 @@ h.test("rebuilding under an open menu leaves you where you were standing") { t i
 
     // A picture lands. The whole tree is rebuilt, because the level in front of the user is two
     // rungs down and the menu cannot know which of MenuModel's builders made it.
-    m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [],
+    m.rebuild(root: MenuModel.root(loginItem: .off, config: Config(),
                                    style: downloadingStyle(fetching: 5, bytesDone: 2_400_000)))
     t.equal(m.breadcrumb, ["Install", "Style", "Theme"], "still on the level it was on")
     t.equal(m.selection, standingOn, "still on the row it was on")
@@ -2602,7 +2638,7 @@ h.test("a rebuild that cannot re-enter a level surfaces one rung up") { t in
     // none takes the level the user is standing in out from under them. Real, not defensive.
     let withPictures = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
                                  current: "gruvbox", backgrounds: ["1-a.jpg", "2-b.jpg"])
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: withPictures),
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: withPictures),
                       visibleRows: 10)
     while m.selectedItem?.title != "Style" { m.move(by: 1) }
     _ = m.activate()
@@ -2613,7 +2649,7 @@ h.test("a rebuild that cannot re-enter a level surfaces one rung up") { t in
 
     let withNone = StyleMenu(themes: [ThemeRef(slug: "vantablack", name: "Vantablack")],
                              current: "vantablack")
-    m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [], style: withNone))
+    m.rebuild(root: MenuModel.root(loginItem: .off, config: Config(), style: withNone))
     // Not an error and not an empty level: the deepest level that still exists.
     t.equal(m.breadcrumb, ["Style"], "the level went away, so the user comes up to Style")
     t.equal(m.visible.map(\.title), ["Theme"], "which no longer offers Background at all")
@@ -2621,21 +2657,21 @@ h.test("a rebuild that cannot re-enter a level surfaces one rung up") { t in
 }
 
 h.test("the fetching note appears and goes away without the menu being reopened") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(),
                                            style: StyleMenu(fetching: true)),
                       visibleRows: 10, path: ["Install", "Style", "Theme"])
     t.equal(m.visible.map(\.title), ["Fetching Omarchy's themes…"],
             "a machine with nothing yet, mid-fetch")
 
     // The catalogue arrives. This is what `ThemeCatalogue.onChange` now reaches.
-    m.rebuild(root: MenuModel.root(loginItem: .off, bindings: [], style: StyleMenu(
+    m.rebuild(root: MenuModel.root(loginItem: .off, config: Config(), style: StyleMenu(
         available: [RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])], fetching: false)))
     t.equal(m.visible.map(\.title), ["Nord"],
             "the note gives way to the themes it was waiting for")
 }
 
 h.test("the selection clamps at both ends") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: []), visibleRows: 10)
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 10)
     m.move(by: -1)
     t.equal(m.selection, 0, "up from the top stays at the top — a list is not a carousel")
     m.move(by: 99)
@@ -3574,11 +3610,11 @@ h.test("a backgrounds folder is filtered and sorted the same way twice") { t in
 
 h.test("Style is always at the root, because it is how you get a theme at all") { t in
     let m = MenuState(root: MenuModel.root(loginItem: .unavailable("needs /Applications"),
-                                           bindings: []), visibleRows: 10)
+                                           config: Config()), visibleRows: 10)
     // Unlike Setup, which goes when both its rows are unavailable, Style stays even on a
     // machine with no themes and no network: it is the level you go to *to* get one, so leaving
     // it out exactly when it is most needed would be the wrong way round.
-    t.equal(m.visible.map(\.title), ["Learn", "Trigger", "Style", "Quit"], "still there with nothing behind it")
+    t.equal(m.visible.map(\.title), ["Learn", "Style", "Setup", "Quit"], "still there with nothing behind it")
     t.equal(MenuModel.style(StyleMenu()).map(\.title), ["Theme"],
             "holding the theme list, and no Background row until there are pictures")
 }
@@ -3690,7 +3726,7 @@ h.test("the Background level is shaped like the Theme level above it") { t in
 
 h.test("a theme can be found by typing its name from the root") { t in
     let style = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")])
-    var m = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: style),
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: style),
                       visibleRows: 10)
     m.type("gruv")
     // Twice, because a theme on the disk is two rows now: the one that wears it and the one that
@@ -3701,7 +3737,7 @@ h.test("a theme can be found by typing its name from the root") { t in
             "and each says where it was found")
     t.equal(m.activate(), .run(.theme("gruvbox")), "the first is the one that wears it")
 
-    var picture = MenuState(root: MenuModel.root(loginItem: .off, bindings: [],
+    var picture = MenuState(root: MenuModel.root(loginItem: .off, config: Config(),
                                                  style: StyleMenu(current: "gruvbox",
                                                                   backgrounds: ["city.jpg"])),
                             visibleRows: 10)
@@ -3714,19 +3750,21 @@ h.test("a theme can be found by typing its name from the root") { t in
 h.test("the root is Omarchy's root, with what a Mac cannot do left out") { t in
     // Upstream's order is Apps, Learn, Trigger, Style, Setup, Install, Remove, Update, About,
     // System. Every row toe has an analogue for, in that order, and Quit — which has no
-    // counterpart, Omarchy's System being a power menu for the machine — last.
+    // counterpart, Omarchy's System being a power menu for the machine — last. Trigger is not
+    // among them: the eight rows upstream hangs off it are Linux tools bar one, and that one
+    // switch is a Setup row here rather than two levels of scaffolding holding it up.
     let full = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
                          available: [RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])],
                          current: "gruvbox", backgrounds: ["a.jpg"])
     let c = try Config.parse(Config.defaultTOML)
-    let rows = MenuModel.root(loginItem: .off, bindings: c.bindings, style: full, version: "0.9.7")
+    let rows = MenuModel.root(loginItem: .off, config: c, style: full, version: "0.9.7")
     t.equal(rows.map(\.title),
-            ["Learn", "Trigger", "Style", "Setup", "Install", "Remove", "About", "Quit"],
+            ["Learn", "Style", "Setup", "Install", "Remove", "About", "Quit"],
             "the same names at the same depth, in the same order")
     t.equal(rows.first { $0.title == "About" }?.value, "0.9.7",
             "About is the one fact toe can report about itself, in the second column")
     t.equal(rows.first { $0.title == "About" }?.action, .note, "and nothing to press")
-    t.expect(MenuModel.root(loginItem: .off, bindings: c.bindings, style: full)
+    t.expect(MenuModel.root(loginItem: .off, config: c, style: full)
                 .allSatisfy { $0.title != "About" },
              "a build with no stamped version leaves the row out rather than saying `unknown`")
 }
@@ -3745,7 +3783,7 @@ h.test("Learn is the keybindings and the three manuals that are about this machi
 h.test("a binding can open the menu at a level, the way omarchy-menu toggle does") { t in
     let style = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
                           current: "gruvbox", backgrounds: ["city.jpg", "coast.jpg"])
-    let root = MenuModel.root(loginItem: .off, bindings: [], style: style)
+    let root = MenuModel.root(loginItem: .off, config: Config(), style: style)
 
     var m = MenuState(root: root, visibleRows: 10, path: MenuRoute.background.path)
     t.equal(m.breadcrumb, ["Style", "Background"], "opened three rows in")
@@ -3756,7 +3794,7 @@ h.test("a binding can open the menu at a level, the way omarchy-menu toggle does
 
     // A route that does not resolve stops where it can rather than failing: Background exists
     // only while the current theme has pictures, and the key is bound whether it does or not.
-    let bare = MenuState(root: MenuModel.root(loginItem: .off, bindings: [], style: StyleMenu()),
+    let bare = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: StyleMenu()),
                          visibleRows: 10, path: MenuRoute.background.path)
     t.equal(bare.breadcrumb, ["Style"], "as deep as the tree goes, and no error")
     t.equal(MenuState(root: root, visibleRows: 10).breadcrumb, [],

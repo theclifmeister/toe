@@ -29,9 +29,9 @@ final class QuickMenu {
 
     /// Where a chosen row goes. `Coordinator` hands these straight to `dispatch`.
     var onCommand: ((Command) -> Void)?
-    /// The Trigger › Toggle row for the slide: flips the setting and answers the value now in
-    /// effect, which is what the level is rebuilt with. The Coordinator owns the config file.
-    var onToggleSlide: (() -> Bool)?
+    /// A Setup switch: flips the setting and answers the value now in effect, which is what the
+    /// level is rebuilt with. The Coordinator owns the config file.
+    var onToggleSetting: ((ConfigSwitch) -> Bool)?
 
     /// What the bundle was stamped with, for the `About` row. nil for a binary run straight out
     /// of `.build`, which has no Info.plist to have been stamped — and the row is then left out
@@ -68,6 +68,16 @@ final class QuickMenu {
     /// Who was in front when the menu opened, so a stray activation can be put back.
     private var frontmostAtOpen: pid_t?
     private var observers: [any NSObjectProtocol] = []
+    /// The display layout the menu was opened on — one frame per screen, in order.
+    ///
+    /// `didChangeScreenParameters` says rather less than its name suggests: auto-hiding the Dock
+    /// is a screen-parameters change too, because `visibleFrame` moves, and so the menu's own
+    /// Auto-hide Dock row closed the menu on the row you had just pressed while every other
+    /// switch left it up. A display coming, going or changing resolution moves a `frame`, and
+    /// that is the thing the menu cannot stay open across, so that is what is compared.
+    private var screenLayout: [CGRect] = []
+
+    private static var currentScreenLayout: [CGRect] { NSScreen.screens.map(\.frame) }
 
     var isVisible: Bool { panel.isVisible }
 
@@ -126,12 +136,12 @@ final class QuickMenu {
         loginItem = LoginItem.state()
         let items = route.page == .keybindings
             ? MenuModel.keybindings(config.bindings, superKey: config.superKey)
-            : MenuModel.root(loginItem: loginItem, bindings: config.bindings, style: style,
-                             version: QuickMenu.version,
-                             slideOnSwipe: config.animations.slideOnSwipe)
+            : MenuModel.root(loginItem: loginItem, config: config, style: style,
+                             version: QuickMenu.version)
         state = MenuState(root: items, visibleRows: 10, path: route.path)
 
         frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        screenLayout = Self.currentScreenLayout
         observe()
         layoutAndRender()
         panel.makeKeyAndOrderFront(nil)
@@ -179,9 +189,8 @@ final class QuickMenu {
         guard panel.isVisible, state != nil else { return }
         if fontChanged { measure() }
         if route.page == .root {
-            state?.rebuild(root: MenuModel.root(loginItem: loginItem, bindings: config.bindings,
-                                                style: style, version: QuickMenu.version,
-                                                slideOnSwipe: config.animations.slideOnSwipe))
+            state?.rebuild(root: MenuModel.root(loginItem: loginItem, config: config,
+                                                style: style, version: QuickMenu.version))
         }
         // Through the full path rather than straight to `render()`: a level that gained or lost
         // rows — the fetching note going away, a downloaded theme moving up into the installed
@@ -263,21 +272,22 @@ final class QuickMenu {
         case .toggleLoginItem:
             // Deliberately does not close: the value flips under the cursor, as omarchy-menu's
             // toggles do, so you can see what you just did.
-            let setup = MenuModel.setup(loginItem: LoginItem.toggle(),
-                                        bindings: config.bindings)
+            let setup = MenuModel.setup(loginItem: LoginItem.toggle(), config: config)
             // The level itself rather than a row of the root: Setup is not always in the same
             // place — Install and Remove come and go with the catalogue — and on the day the
             // toggle answers `unavailable` it is not there at all.
             if !setup.isEmpty { state?.replaceLevel(with: setup) }
             layoutAndRender()
-        case .toggleSlide:
+        case .toggleSetting(let setting):
             // Same shape as the login toggle: the value flips under the cursor and the menu
             // stays. The flip goes through the config file and a reload, and that reload has
             // already handed the new config to `update` by the time the callback returns; the
-            // level is replaced from the answer all the same, so the row is right even if the
-            // reload found nothing to do.
-            let on = onToggleSlide?() ?? config.animations.slideOnSwipe
-            state?.replaceLevel(with: MenuModel.toggles(slideOnSwipe: on))
+            // level is rebuilt from the answer all the same — written into a copy of the config
+            // first — so the row is right even if the reload found nothing to do.
+            let on = onToggleSetting?(setting) ?? setting.value(in: config)
+            var shown = config
+            setting.set(on, in: &shown)
+            state?.replaceLevel(with: MenuModel.setup(loginItem: loginItem, config: shown))
             layoutAndRender()
         case .run(let command):
             // Theme rows stay — `Command.keepsMenuOpen` says why at length. Everything else
@@ -349,9 +359,12 @@ final class QuickMenu {
         guard observers.isEmpty else { return }
         add(NSWindow.didResignKeyNotification, object: panel) { [weak self] _ in self?.close() }
         // A display coming or going moves the area the menu was centred on. Closing is honest;
-        // re-centring mid-keystroke is a menu that jumps out from under the pointer.
+        // re-centring mid-keystroke is a menu that jumps out from under the pointer. A Dock that
+        // just hid itself is not that — the screens are where they were, one of them has a strip
+        // back — and the menu stays where it is, which is where you are looking.
         add(NSApplication.didChangeScreenParametersNotification, object: nil) { [weak self] _ in
-            self?.close()
+            guard let self, Self.currentScreenLayout != self.screenLayout else { return }
+            self.close()
         }
     }
 

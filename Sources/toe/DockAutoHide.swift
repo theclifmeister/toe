@@ -26,6 +26,11 @@ import Foundation
 /// Like a symbolic hotkey, **this state outlives the process**, so it is handled the same way:
 /// journalled to disk *before* the change, and a journal found at startup is replayed, which is
 /// what repairs a crash, a force-quit or a logout.
+///
+/// **Two ways in, meaning two different things.** `enable`/`restore` are the config key being
+/// *maintained*: toe hands the strip back if you were not already hiding the Dock yourself, and
+/// gives back exactly what it took. `command` is the menu's switch being *thrown*: you are asking
+/// for the Dock to be a way, now, so it is told either way and toe stops owing you anything back.
 enum DockAutoHide {
 
     /// `Boolean` in C is an `unsigned char`, not a `_Bool`. The two are passed and returned
@@ -74,10 +79,12 @@ enum DockAutoHide {
     /// The read below is only safe because of *when* this is called. `CoreDockSetAutoHideEnabled`
     /// messages the Dock rather than writing a value, and `CoreDockGetAutoHideEnabled` lags that
     /// round trip by a few hundred milliseconds — so a read taken straight after a write reports
-    /// the old state. `applyMiscSettings` calls this at startup and on a config reload, where
-    /// nothing has just written, and `previous` short-circuits every call after the first. Anything
-    /// that wants to flip auto-hiding on demand — a binding, a menu row — must not re-read to find
-    /// out what it did; `previous` is the answer.
+    /// the old state. `applyMiscSettings` calls this at startup and on a config reload, and
+    /// `previous` short-circuits every call after the first. The one reload that *does* follow a
+    /// write is the menu's own switch, and the write there is `command`'s, which happens after
+    /// this has run: the next reload is another keystroke away, which is a long time beside a few
+    /// hundred milliseconds. Nothing here may re-read to find out what it just did — `previous` is
+    /// the answer.
     static func enable() {
         guard previous == nil, let getAutoHide, let setAutoHide else { return }
         guard getAutoHide() == 0 else { return }
@@ -102,6 +109,30 @@ enum DockAutoHide {
         previous = nil
         clearJournal()
         Log.info("dock: auto-hide restored")
+    }
+
+    /// The menu's switch, thrown: makes the Dock match, whatever the two above decided.
+    ///
+    /// Called after the config file has been written and reloaded, so `enable` or `restore` has
+    /// already run and has already done the right thing in every case where toe is the one
+    /// holding the setting. What is left is the case they deliberately leave alone — a Dock you
+    /// auto-hide yourself, which `restore` will not switch off because `enable` never switched it
+    /// on. Maintaining the config key, that silence is correct; it is not toe's preference to
+    /// take. A row you just pressed is not that: it is you asking, about your own Dock, so the
+    /// Dock is told.
+    ///
+    /// Nothing is journalled, and a journal that was there is dropped: throwing the switch by
+    /// hand hands the setting *to you*, so from here toe owes nothing back. Without that, a Dock
+    /// you asked to hide from the menu would be given back to you showing at quit — `enable`
+    /// having journalled `off` a moment earlier, on the strength of a state you had already
+    /// changed your mind about — and a switch that undoes itself when toe exits is the thing the
+    /// journal exists to prevent, pointed the wrong way.
+    static func command(_ on: Bool) {
+        guard let setAutoHide else { return }
+        setAutoHide(on ? 1 : 0)
+        previous = nil
+        clearJournal()
+        Log.info("dock: auto-hide \(on ? "on" : "off"), from the menu")
     }
 
     /// Replays a journal left behind by a toe that did not get to restore — a crash, a `kill -9`,

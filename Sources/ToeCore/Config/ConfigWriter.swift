@@ -17,7 +17,7 @@ import Foundation
 /// config is broken* into *toe declined to edit your config, and said so in the log*.
 ///
 /// Written for the theme (`ThemeWriter`), generalised the day the menu grew a second thing to
-/// write: the slide's `on`/`off` under Trigger › Toggle.
+/// write: the slide's `on`/`off` under Setup.
 public enum ConfigWriter {
 
     /// `literal` is written after the `=` exactly as given — `"gruvbox"` with its quotes, `true`
