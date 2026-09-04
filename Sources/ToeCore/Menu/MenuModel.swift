@@ -489,7 +489,7 @@ public enum MenuModel {
         case .workspace(.index): return 3
         case .moveToWorkspace:  return 4
         case .workspace:        return 5
-        case .killActive, .toggleFloating, .toggleSplit, .swapSplit: return 6
+        case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive: return 6
         case .theme, .removeTheme, .background, .nextBackground: return 7
         case .menu:             return 8
         case .reload, .quit:    return 9

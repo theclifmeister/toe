@@ -22,6 +22,8 @@ public enum CommandLabel {
         case .toggleFloating:       return "Cycle floating"
         case .toggleSplit:          return "Toggle split orientation"
         case .swapSplit:            return "Swap the split"
+        case .resizeActive(let dx, let dy): return resize(dx: dx, dy: dy)
+        case .growActive(let dx, let dy):   return grow(dx: dx, dy: dy)
         case .exec(let line):
             // The one exec the list can name for you: `SUPER`+`,` read as "Edit the config"
             // while toe owned the command, and a row that reads `Run open -a "Visual Studio
@@ -47,6 +49,42 @@ public enum CommandLabel {
         case .removeTheme(let slug): return "Remove the theme \(Slug.title(slug))"
         case .background(let file):  return "Background: \(ellipsised(file))"
         case .nextBackground:        return "Next background"
+        }
+    }
+
+    /// "Move the split 100 pt right" — where the split goes, not what happens to the window,
+    /// because the window is the half of it that depends on which side you are on. Someone who
+    /// pressed `=` and watched their window shrink comes to this list to find out why, and the
+    /// answer is the split.
+    private static func resize(dx: Double, dy: Double) -> String {
+        func travel(_ v: Double, _ positive: String, _ negative: String) -> String {
+            let n = abs(v)
+            let amount = n == n.rounded() ? String(Int(n)) : String(n)
+            return "\(amount) pt \(v < 0 ? negative : positive)"
+        }
+        switch (dx != 0, dy != 0) {
+        case (true, false):  return "Move the split " + travel(dx, "right", "left")
+        case (false, true):  return "Move the split " + travel(dy, "down", "up")
+        case (true, true):   return "Move the splits " + travel(dx, "right", "left")
+                                    + " and " + travel(dy, "down", "up")
+        case (false, false): return "Move the split nowhere"
+        }
+    }
+
+    /// "Make the window 100 pt wider" — what happens to the window you are in, which for this
+    /// verb is the whole of the meaning.
+    private static func grow(dx: Double, dy: Double) -> String {
+        func change(_ v: Double, _ more: String, _ less: String) -> String {
+            let n = abs(v)
+            let amount = n == n.rounded() ? String(Int(n)) : String(n)
+            return "\(amount) pt \(v < 0 ? less : more)"
+        }
+        switch (dx != 0, dy != 0) {
+        case (true, false):  return "Make the window " + change(dx, "wider", "narrower")
+        case (false, true):  return "Make the window " + change(dy, "taller", "shorter")
+        case (true, true):   return "Make the window " + change(dx, "wider", "narrower")
+                                    + " and " + change(dy, "taller", "shorter")
+        case (false, false): return "Leave the window its size"
         }
     }
 

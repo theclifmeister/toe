@@ -10,6 +10,17 @@ public struct Gaps: Equatable, Sendable {
     }
 }
 
+/// Which edges of a window are being pulled. Empty is Hyprland's `CORNER_NONE`: the keyboard
+/// case, where the nearest split of each orientation is the one that moves.
+public struct ResizeEdges: OptionSet, Sendable, Hashable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+    public static let left   = ResizeEdges(rawValue: 1 << 0)
+    public static let right  = ResizeEdges(rawValue: 1 << 1)
+    public static let top    = ResizeEdges(rawValue: 1 << 2)
+    public static let bottom = ResizeEdges(rawValue: 1 << 3)
+}
+
 /// One dwindle tree. There is exactly one of these per workspace.
 ///
 /// Direct port of `CHyprDwindleLayout` restricted to a single workspace, since on macOS
@@ -271,6 +282,143 @@ public final class DwindleLayout {
         let newRatio = exact ? delta : parent.splitRatio + delta
         parent.splitRatio = clampf(newRatio, 0.1, 1.9)
         parent.recalcSizePosRecursive(options)
+    }
+
+    /// Port of `resizeActiveWindow` — `resizeactive`, and the tiled half of a mouse resize.
+    ///
+    /// `dx` and `dy` are how far an edge moves, in points, positive right and down. That is the
+    /// pointer delta Hyprland feeds this from `IHyprLayout::onMouseMove`, and it is *not* the
+    /// change in the window's size: pulling a left edge leftwards is a negative `dx`, and the
+    /// `LEFT` branch below turns it into the left-hand neighbour giving up that much. With no
+    /// edges — the keyboard — the split moves by the amount, whichever side of it this window is
+    /// on, so `resizeactive 100 0` grows a left-hand window and shrinks a right-hand one. That
+    /// is Omarchy's binding and it is kept as it is.
+    ///
+    /// Hyprland ships `dwindle:smart_resizing = 1` and Omarchy leaves it, so this is that branch
+    /// and only that branch. The walk up the tree finds, per orientation, the *outer* split —
+    /// the first ancestor where this window's subtree sits on the near side of the edge being
+    /// pulled, so that moving the split moves the edge — and, on the way to it, an *inner*
+    /// split of the same orientation, whose ratio is then re-solved so the window's opposite
+    /// edge stays where it was. Without that correction the whole subtree would stretch in
+    /// proportion and the edge the user is not holding would drift, which is the difference
+    /// between a drag and a zoom. With no edges the first ancestor of each orientation is the
+    /// outer one and there is no inner.
+    ///
+    /// Measured on the un-gapped node boxes, the way Hyprland measures against the monitor's
+    /// reserved area: a gap is a constant inset, so an edge's displacement is the same number in
+    /// either space, and the node box is the one whose width the ratio is a fraction of.
+    ///
+    /// Returns false when nothing could move — the only window on the workspace, or a
+    /// side-by-side pair asked for the vertical axis — so the caller can skip the render.
+    @discardableResult
+    public func resizeActive(_ id: WindowID, dx: Double, dy: Double, edges: ResizeEdges) -> Bool {
+        guard let node = nodes[id] else { return false }
+
+        // An edge that is the display's edge cannot move, so pulling it pulls the other one —
+        // Hyprland's DISPLAYLEFT and friends, which is also why a `Super`+right-drag on a
+        // leftmost window resizes it from the right. A window spanning the full width has no
+        // horizontal freedom at all, and that axis is dropped rather than left to move a split.
+        let displayLeft   = STICKS(node.box.minX, area.minX)
+        let displayRight  = STICKS(node.box.maxX, area.maxX)
+        let displayTop    = STICKS(node.box.minY, area.minY)
+        let displayBottom = STICKS(node.box.maxY, area.maxY)
+
+        let dx = displayLeft && displayRight ? 0 : dx
+        let dy = displayTop && displayBottom ? 0 : dy
+
+        let none   = edges.isEmpty
+        let left   = edges.contains(.left)   || displayRight
+        let top    = edges.contains(.top)    || displayBottom
+        let right  = edges.contains(.right)  || displayLeft
+        let bottom = edges.contains(.bottom) || displayTop
+
+        // PVOUTER / PVINNER / PHOUTER / PHINNER. Each is the *child* on the path, not the split
+        // itself, because which child it is decides how the inner ratio is re-solved.
+        var vOuter: DwindleNode?, vInner: DwindleNode?
+        var hOuter: DwindleNode?, hInner: DwindleNode?
+
+        var current = node
+        while let parent = current.parent {
+            let first = parent.children.first === current
+            if vOuter == nil, parent.splitTop, none || (top && !first) || (bottom && first) {
+                vOuter = current
+            } else if vOuter == nil, vInner == nil, parent.splitTop {
+                vInner = current
+            } else if hOuter == nil, !parent.splitTop, none || (left && !first) || (right && first) {
+                hOuter = current
+            } else if hOuter == nil, hInner == nil, !parent.splitTop {
+                hInner = current
+            }
+            if vOuter != nil && hOuter != nil { break }
+            current = parent
+        }
+
+        var moved = false
+
+        if dx != 0, let outer = hOuter, let split = outer.parent, split.box.w > 0 {
+            split.splitRatio = clampf(split.splitRatio + dx * 2.0 / split.box.w, 0.1, 1.9)
+            if let inner = hInner, let innerSplit = inner.parent, innerSplit.box.w > 0 {
+                // Re-solve the inner split from what the inner child measured *before* the
+                // outer one moved: that width plus (or minus) the pull is the width that keeps
+                // the far edge still, and the ratio is that width as a fraction of the half.
+                let original = inner.box.w
+                split.recalcSizePosRecursive(options)
+                if innerSplit.children.first === inner {
+                    innerSplit.splitRatio = clampf((original - dx) / innerSplit.box.w * 2.0, 0.1, 1.9)
+                } else {
+                    innerSplit.splitRatio = clampf(2.0 - (original + dx) / innerSplit.box.w * 2.0, 0.1, 1.9)
+                }
+                innerSplit.recalcSizePosRecursive(options)
+            } else {
+                split.recalcSizePosRecursive(options)
+            }
+            moved = true
+        }
+
+        if dy != 0, let outer = vOuter, let split = outer.parent, split.box.h > 0 {
+            split.splitRatio = clampf(split.splitRatio + dy * 2.0 / split.box.h, 0.1, 1.9)
+            if let inner = vInner, let innerSplit = inner.parent, innerSplit.box.h > 0 {
+                let original = inner.box.h
+                split.recalcSizePosRecursive(options)
+                if innerSplit.children.first === inner {
+                    innerSplit.splitRatio = clampf((original - dy) / innerSplit.box.h * 2.0, 0.1, 1.9)
+                } else {
+                    innerSplit.splitRatio = clampf(2.0 - (original + dy) / innerSplit.box.h * 2.0, 0.1, 1.9)
+                }
+                innerSplit.recalcSizePosRecursive(options)
+            } else {
+                split.recalcSizePosRecursive(options)
+            }
+            moved = true
+        }
+
+        return moved
+    }
+
+    /// `growactive`: `dx` and `dy` are how much *this window* grows, whichever side of its
+    /// splits it is on. Not a Hyprland dispatcher — `resizeactive` moves the split, and from the
+    /// right-hand window the key labelled `=` therefore shrinks the window you are in, which is
+    /// the surprise this exists to remove. It is `resizeActive` with the sign settled here: a
+    /// window on the first side of a split (left, top) grows when the split moves away from it
+    /// in the positive direction, a window on the second side grows when it moves the other
+    /// way. The split found is the same one `resizeActive` finds with no edges — the nearest
+    /// ancestor of that orientation — so the two verbs never disagree about *which* split.
+    @discardableResult
+    public func growActive(_ id: WindowID, dx: Double, dy: Double) -> Bool {
+        guard let node = nodes[id] else { return false }
+        // Which child of the nearest split of an orientation this window's subtree is. Nil when
+        // there is none — that axis then has nothing to move, and `resizeActive` says so.
+        func onFirstSide(ofSplitTop splitTop: Bool) -> Bool? {
+            var current = node
+            while let parent = current.parent {
+                if parent.splitTop == splitTop { return parent.children.first === current }
+                current = parent
+            }
+            return nil
+        }
+        let h = onFirstSide(ofSplitTop: false)
+        let v = onFirstSide(ofSplitTop: true)
+        return resizeActive(id, dx: h == false ? -dx : dx, dy: v == false ? -dy : dy, edges: [])
     }
 
     // MARK: - Output

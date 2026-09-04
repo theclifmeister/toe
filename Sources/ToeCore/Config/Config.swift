@@ -210,8 +210,8 @@ public struct Config: Equatable {
     /// competing with yours, so the bar is high: either the binding is an escape hatch — a config
     /// which forgot it leaves you stuck, in the same spirit as keeping the last good config when
     /// a new one will not parse — or it is a key that has no other way of ever reaching an
-    /// install that predates it *and* is worth that. Four of the five below are the first kind;
-    /// `nextbackground` is the second, and the note beside it says why it cleared the bar.
+    /// install that predates it *and* is worth that. The first four below are the first kind;
+    /// the rest are the second, and the notes beside them say why they cleared the bar.
     ///
     /// The bar matters more than the list. Every binding toe adds from here on will have this
     /// same argument available to it — "existing configs will never see it" is true of all of
@@ -242,7 +242,28 @@ public struct Config: Equatable {
         // never had the key gets Omarchy's picker.
         ("super-ctrl-space", .menu(.background)),
         ("super-shift-ctrl-space", .menu(.theme)),
+        // The resize keys, for the reason the two above are here: they arrived after every
+        // existing config was written, and a way of changing a window's size is the sort of thing
+        // a tiling window manager is expected to have on a key without a trip to the file. All
+        // four go together — `-` without `=` is half a feature — and they stand aside for any
+        // resizing verb at all, not only for one with these amounts; see `bound(_:in:)`.
+        ("super-minus", .growActive(dx: -100, dy: 0)),
+        ("super-equal", .growActive(dx: 100, dy: 0)),
+        ("super-shift-minus", .growActive(dx: 0, dy: -100)),
+        ("super-shift-equal", .growActive(dx: 0, dy: 100)),
     ]
+
+    /// Whether a binding already answers for a fallback's command. Equality, except that any
+    /// resizing verb answers for every resizing verb: the four resize fallbacks differ only in
+    /// their amounts, and a config that has `resizeactive 50 0` on a key of its own has already
+    /// decided how it resizes — handing it `growactive 100 0` on four more keys would be the
+    /// second config competing with yours that the list exists not to be.
+    static func bound(_ command: Command, in bindings: [Binding]) -> Bool {
+        bindings.contains { existing in
+            if existing.command.resizes && command.resizes { return true }
+            return existing.command == command
+        }
+    }
 
     public static let defaultFloatRules: [FloatRule] = [
         FloatRule(app: "com.apple.systempreferences"),
@@ -586,8 +607,12 @@ public struct Config: Equatable {
         // A fallback whose own combination you have already used for something else is dropped
         // rather than registered twice: your binding wins, and the alternative is a duplicate the
         // system would refuse anyway.
-        for fallback in Config.fallbackBindings
-        where !config.bindings.contains(where: { $0.command == fallback.command }) {
+        //
+        // Whether a command is bound is asked of the bindings *you* wrote, not of the list as it
+        // grows: the resize fallbacks answer for one another, and asked of the growing list the
+        // first to land would have kept the other three out.
+        let own = config.bindings
+        for fallback in Config.fallbackBindings where !Config.bound(fallback.command, in: own) {
             guard let (mods, code, keyName) = try? BindingParser.parse(fallback.spec,
                                                                        superKey: config.superKey),
                   !config.bindings.contains(where: { $0.modifiers == mods && $0.keyCode == code })

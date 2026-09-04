@@ -247,6 +247,17 @@ font_size  = 18
 "super-j"       = "togglesplit"
 "super-t"       = "togglefloating"
 
+# ── Resize — SUPER + - / =, SHIFT for the vertical axis ───────────────────────
+# growactive: the number is how much the focused window grows, whichever side of its split it
+# is on — = is always bigger, - always smaller. Omarchy binds Hyprland's resizeactive here
+# instead, where the number is how far the *split* moves, so = grows a left-hand window and
+# shrinks a right-hand one; that verb works too, for a config copied across. Dragging a tiled
+# window's edge with the mouse does the same thing without a key.
+"super-minus"       = "growactive -100 0"
+"super-equal"       = "growactive 100 0"
+"super-shift-minus" = "growactive 0 -100"
+"super-shift-equal" = "growactive 0 100"
+
 # ── toe itself ────────────────────────────────────────────────────────────────
 # The menu bar item is only the workspace strip — waybar's has nothing behind it either — so
 # these are the way in to everything toe can do to itself.

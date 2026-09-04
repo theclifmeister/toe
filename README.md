@@ -79,6 +79,8 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 | `SUPER` + `SHIFT` + `ENTER` | New browser window |
 | `SUPER` + `W` | Close window |
 | `SUPER` + `J` | Toggle split orientation |
+| `SUPER` + `-` / `=` | Make the window 100 pt narrower / wider |
+| `SUPER` + `SHIFT` + `-` / `=` | Make it 100 pt shorter / taller |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
 | `SUPER` + `SPACE` | The quick menu |
 | `SUPER` + `CTRL` + `SPACE` | The background picker, when the theme has pictures |
@@ -87,6 +89,7 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 | `SUPER` + `,` | Edit the config |
 | `SUPER` + `SHIFT` + `R` / `Q` | Reload the config / quit toe |
 | Drag a tiled window | Swap it with the tile you drag it over |
+| Drag a tiled window's edge | Resize it; the neighbours follow when you let go |
 
 **The layout.** A new window splits the focused one and takes the right or bottom half. A split's
 orientation is decided once, from the shape of the space it is in, and then kept, so the layout
@@ -139,8 +142,10 @@ app = "com.apple.ActivityMonitor"
 Binding specs accept the dash spelling and Omarchy's, so `"alt-shift-1"`, `"super+shift+1"` and
 `"SUPER SHIFT, 1"` all mean the same. The commands are `movefocus`, `swapwindow`, `movewindow`,
 `workspace`, `movetoworkspace`, `movetoworkspacesilent`, `killactive`, `togglefloating`,
-`togglesplit`, `swapsplit`, `exec`, `reload`, `menu`, `keybindings`, `theme`, `removetheme`,
-`background`, `nextbackground` and `quit`.
+`togglesplit`, `swapsplit`, `growactive`, `resizeactive`, `exec`, `reload`, `menu`, `keybindings`,
+`theme`, `removetheme`, `background`, `nextbackground` and `quit`. `growactive <dx> <dy>` grows the
+focused window by that much; Hyprland's `resizeactive` moves the split by that much instead, which
+from a right-hand window is the other way round, and is accepted for configs copied from Omarchy.
 
 Other sections worth knowing about:
 
@@ -176,8 +181,8 @@ log stream --predicate 'subsystem == "com.clifmeister.toe"' --level info
 
 ## Not included
 
-By design: no scratchpads, no binding modes, no scripting API, no resize bindings, no window
-groups. It is a layout engine and the bindings that drive it.
+By design: no scratchpads, no binding modes, no scripting API, no window groups. It is a
+layout engine and the bindings that drive it.
 
 ## License
 

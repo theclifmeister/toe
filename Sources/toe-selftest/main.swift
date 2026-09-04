@@ -273,6 +273,128 @@ h.test("togglesplit flips the parent split") { t in
     t.equalBox(l.idealBox(of: 2), box(0, 491, 1512, 491), "now stacked")
 }
 
+// MARK: - resizeactive
+
+h.test("resizeactive moves the split, whichever side of it the window is on") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    t.equal(l.resizeActive(2, dx: 100, dy: 0, edges: []), true, "from the right-hand window")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 856, 982), "the split went 100 right: w1 grew")
+    t.equalBox(l.idealBox(of: 2), box(856, 0, 656, 982), "and w2 shrank — Omarchy's =, not 'grow me'")
+
+    let m = omarchyLayout()
+    m.insert(1, anchor: nil)
+    m.insert(2, anchor: 1)
+    m.resizeActive(1, dx: 100, dy: 0, edges: [])
+    t.equalBox(m.idealBox(of: 1), box(0, 0, 856, 982), "the same press from the left-hand window")
+    t.equalBox(m.idealBox(of: 2), box(856, 0, 656, 982), "is the same result")
+
+    t.equal(m.resizeActive(1, dx: 0, dy: 50, edges: []), false,
+            "a side-by-side pair has no vertical split to move")
+    t.equalBox(m.idealBox(of: 1), box(0, 0, 856, 982), "and nothing moved")
+    t.equal(m.resizeActive(9, dx: 50, dy: 0, edges: []), false, "a window the tree does not hold")
+
+    let one = omarchyLayout()
+    one.insert(1, anchor: nil)
+    t.equal(one.resizeActive(1, dx: 50, dy: 50, edges: []), false, "the only window has no split at all")
+    t.equalBox(one.idealBox(of: 1), AREA, "and keeps the whole area")
+}
+
+h.test("growactive grows the window you are in, whichever side of the split it is on") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    t.equal(l.growActive(2, dx: 100, dy: 0), true, "from the right-hand window")
+    t.equalBox(l.idealBox(of: 2), box(656, 0, 856, 982), "w2 grew: the split went *left*")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 656, 982), "at w1's expense")
+    t.equal(l.growActive(1, dx: 100, dy: 0), true, "and from the left-hand one")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 756, 982), "w1 grew back: the split went right")
+    t.equal(l.growActive(1, dx: 0, dy: 100), false, "no vertical split, nothing to grow into")
+
+    // w1 | (w2 / w3): w3 is the bottom child, so taller means the split above it moving up.
+    let m = omarchyLayout()
+    m.insert(1, anchor: nil)
+    m.insert(2, anchor: 1)
+    m.insert(3, anchor: 2)
+    m.growActive(3, dx: 0, dy: 50)
+    t.equalBox(m.idealBox(of: 3), box(756, 441, 756, 541), "w3 is 50 taller")
+    t.equalBox(m.idealBox(of: 2), box(756, 0, 756, 441), "w2 gave it up")
+    m.growActive(2, dx: 0, dy: 50)
+    t.equalBox(m.idealBox(of: 2), box(756, 0, 756, 491), "and takes it back — the split goes down for w2")
+    m.growActive(3, dx: 100, dy: 0)
+    t.equalBox(m.idealBox(of: 1), box(0, 0, 656, 982),
+               "wider for w3 is the root split moving left, though w3 is not its direct child")
+    t.equalBox(m.idealBox(of: 3), box(656, 491, 856, 491), "and w3 has the width")
+}
+
+h.test("resizeactive finds the nearest split of each orientation") { t in
+    // w1 | (w2 / w3): the vertical axis lives one level down, the horizontal one at the root.
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    l.insert(3, anchor: 2)
+    t.equalBox(l.idealBox(of: 3), box(756, 491, 756, 491), "fixture: w3 under w2")
+
+    t.equal(l.resizeActive(3, dx: 0, dy: -50, edges: []), true, "up")
+    t.equalBox(l.idealBox(of: 2), box(756, 0, 756, 441), "the w2/w3 split went 50 up")
+    t.equalBox(l.idealBox(of: 3), box(756, 441, 756, 541), "so w3 grew")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 756, 982), "and w1 never noticed")
+
+    let m = omarchyLayout()
+    m.insert(1, anchor: nil)
+    m.insert(2, anchor: 1)
+    m.insert(3, anchor: 2)
+    t.equal(m.resizeActive(3, dx: 40, dy: 0, edges: []), true, "right")
+    t.equalBox(m.idealBox(of: 1), box(0, 0, 796, 982), "the root split went 40 right")
+    t.equalBox(m.idealBox(of: 2), box(796, 0, 716, 491), "w2 gave the width up")
+    t.equalBox(m.idealBox(of: 3), box(796, 491, 716, 491), "and so did w3, its height untouched")
+}
+
+h.test("pulling an edge keeps the far edge still — Hyprland's smart_resizing") { t in
+    // w1 | (w2 | w3) on a wide display, so the second split is side by side too. Pulling
+    // w2's left edge outwards has to move the root split *and* re-solve the inner one, or w3
+    // would stretch along with everything under that split.
+    let l = omarchyLayout(area: box(0, 0, 3000, 600))
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    l.insert(3, anchor: 2)
+    t.equalBox(l.idealBox(of: 2), box(1500, 0, 750, 600), "fixture: w2")
+    t.equalBox(l.idealBox(of: 3), box(2250, 0, 750, 600), "fixture: w3")
+
+    t.equal(l.resizeActive(2, dx: -100, dy: 0, edges: [.left]), true, "w2's left edge, 100 outwards")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 1400, 600), "w1 gave up the 100")
+    t.equalBox(l.idealBox(of: 2), box(1400, 0, 850, 600), "w2 took it")
+    t.equalBox(l.idealBox(of: 3), box(2250, 0, 750, 600), "and w3 is exactly where it was")
+}
+
+h.test("an edge on the display's edge pulls the other one, as Hyprland's does") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    // The left edge of the leftmost window cannot move; DISPLAYLEFT turns the pull into a
+    // RIGHT one and the split on its other side moves instead. That is what a Super+right-drag
+    // does at a screen edge upstream, and it is kept on purpose rather than special-cased.
+    t.equal(l.resizeActive(1, dx: 50, dy: 0, edges: [.left]), true, "w1's left edge, 50 inwards")
+    t.equalBox(l.idealBox(of: 1), box(0, 0, 806, 982), "the split on its right went 50 right")
+    t.equalBox(l.idealBox(of: 2), box(806, 0, 706, 982), "at w2's expense")
+
+    l.toggleSplit(2)
+    t.equal(l.resizeActive(2, dx: 50, dy: 0, edges: []), false,
+            "a window spanning the full width has no horizontal freedom, and that axis is dropped")
+}
+
+h.test("resizeactive clamps at Hyprland's 0.1 … 1.9") { t in
+    let l = omarchyLayout()
+    l.insert(1, anchor: nil)
+    l.insert(2, anchor: 1)
+    l.resizeActive(1, dx: 5000, dy: 0, edges: [])
+    t.equal(l.node(for: 1)?.parent?.splitRatio, 1.9, "as far right as it goes")
+    t.equalBox(l.idealBox(of: 2), box(1436.4, 0, 75.6, 982), "w2 keeps a sliver")
+    l.resizeActive(1, dx: -9000, dy: 0, edges: [])
+    t.equal(l.node(for: 1)?.parent?.splitRatio, 0.1, "and as far left")
+}
+
 // MARK: - Workspaces
 
 h.test("workspaces stash and restore exactly") { t in
@@ -862,6 +984,63 @@ h.test("only tiled windows are dragged, and only onto tiles") { t in
             "a pointer on no monitor at all is not a drop target")
 }
 
+// MARK: - Resizing by hand
+
+h.test("a resize gesture names the edge that moved, and how far it went") { t in
+    let tile = box(15, 15, 733, 952)
+    func d(_ frame: Box) -> (edges: ResizeEdges, dx: Double, dy: Double)? {
+        ResizeGesture.delta(from: tile, to: frame)
+    }
+    t.equal(d(box(15, 15, 833, 952))?.edges, [.right], "the right edge pulled out")
+    t.equal(d(box(15, 15, 833, 952))?.dx, 100, "by 100")
+    t.equal(d(box(65, 15, 683, 952))?.edges, [.left], "the left edge pulled in: x and w both change")
+    t.equal(d(box(65, 15, 683, 952))?.dx, 50, "and the edge went 50 right — not 'the width lost 50'")
+    t.equal(d(box(-35, 15, 783, 952))?.dx, -50, "pulled out, the same edge goes left")
+    t.equal(d(box(15, 15, 833, 1052))?.edges, [.right, .bottom], "a corner")
+    t.equal(d(box(15, 15, 833, 1052))?.dy, 100, "with its own amount")
+    t.equal(d(box(315, 215, 733, 952)) == nil, true, "a move is not a resize, however far it went")
+    t.equal(d(box(15, 15, 734, 952)) == nil, true, "an app rounding a point off is not one either")
+    t.equal(d(box(-35, 15, 784, 952))?.edges, [.left],
+            "the left edge dragged while the right one drifts a point: still the left edge")
+}
+
+h.test("letting go of an edge moves the split to where the window now ends") { t in
+    let wm = draggingFixture()
+    let before = wm.render().frames
+    t.equalBox(before[1], box(15, 15, 733, 952), "fixture: w1's frame, gaps applied")
+    t.equalBox(before[2], box(764, 15, 733, 468), "fixture: w2's")
+
+    // The user pulled w1's right edge 100 to the right and let go.
+    let held = box(15, 15, 833, 952)
+    guard let gesture = ResizeGesture.delta(from: before[1]!, to: held) else {
+        t.expect(false, "the gesture reads as a resize"); return
+    }
+    t.equal(wm.resizeWindow(1, dx: gesture.dx, dy: gesture.dy, edges: gesture.edges), true, "it moved")
+
+    let after = wm.render().frames
+    t.equalBox(after[1], held, "w1's tile is the frame the user let go of")
+    t.equalBox(after[2], box(864, 15, 633, 468), "w2's left edge followed by the same 100")
+    t.equalBox(after[3], box(864, 499, 312, 468), "so did w3's")
+    t.equal(after[4]?.maxX, before[4]?.maxX, "and nothing on the far side of the display moved")
+}
+
+h.test("resizeactive grows a floating window in place") { t in
+    let wm = draggingFixture()
+    wm.toggleFloating(4)
+    guard let before = wm.render().floating[4] else { t.expect(false, "w4 floats"); return }
+    t.equal(wm.resizeWindow(4, dx: 50, dy: 20), true, "a float takes the delta as size")
+    guard let after = wm.render().floating[4] else { t.expect(false, "w4 still floats"); return }
+    t.equal(after.w, before.w + 50, "wider by 50")
+    t.equal(after.h, before.h + 20, "taller by 20")
+    t.equal(after.x, before.x, "the corner stayed where it was")
+    t.equal(after.y, before.y, "in both axes")
+
+    wm.resizeWindow(4, dx: -5000, dy: -5000)
+    t.equal(wm.render().floating[4]?.w, 100, "and it cannot be shrunk out of reach")
+    t.equal(wm.growWindow(4, dx: 30, dy: 0), true, "growactive on a float")
+    t.equal(wm.render().floating[4]?.w, 130, "is the same thing — a float has no split to be relative to")
+}
+
 // MARK: - Dock swipes
 
 // The numbers `DockSwipeTap` reads off the event, by name.
@@ -1006,6 +1185,12 @@ h.test("the shipped default config parses cleanly") { t in
 
     t.equal(binding("super-t")?.command, .toggleFloating, "SUPER+T floats")
     t.equal(binding("super-t")?.keyCode, 0x11, "T key code")
+    t.equal(binding("super-equal")?.command, .growActive(dx: 100, dy: 0), "SUPER+= makes the window wider")
+    t.equal(binding("super-equal")?.keyCode, 0x18, "= key code")
+    t.equal(binding("super-minus")?.command, .growActive(dx: -100, dy: 0), "SUPER+- narrower")
+    t.equal(binding("super-shift-minus")?.command, .growActive(dx: 0, dy: -100), "SHIFT for the vertical axis")
+    t.equal(binding("super-shift-minus")?.modifiers, [.option, .shift], "SUPER+SHIFT")
+    t.equal(binding("super-shift-equal")?.command, .growActive(dx: 0, dy: 100), "Omarchy's four keys")
     t.equal(binding("super-shift-v"), nil, "SUPER+SHIFT+V is no longer bound")
 
     // Everything the menu bar item used to offer, now that it offers nothing.
@@ -1190,7 +1375,8 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
 
     // The shipped config binds them itself, so nothing should be duplicated.
     let shipped = try Config.parse(Config.defaultTOML)
-    for command in [Command.quit, .reload, .menu(.background), .menu(.theme)] {
+    for command in [Command.quit, .reload, .menu(.background), .menu(.theme),
+                    .growActive(dx: 100, dy: 0), .growActive(dx: 0, dy: 100)] {
         t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
                 "the shipped config binds \(command) exactly once")
     }
@@ -1214,6 +1400,25 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     t.equal(moved.bindings.filter { $0.command == .menu(.background) }.count, 1, "and not twice")
     let taken = try Config.parse("[binds]\n\"super-ctrl-space\" = \"killactive\"\n")
     t.equal(binding(taken, .menu(.background)), nil, "and a key you already use is left alone")
+
+    // The resize keys are on the list on the same terms. All four of them, because a config that
+    // predates them has none, and one without the other would be half a feature.
+    t.equal(binding(old, .growActive(dx: 100, dy: 0))?.source, "super-equal",
+            "a config written before resizing existed still gets Omarchy's key for it")
+    t.equal(binding(old, .growActive(dx: -100, dy: 0))?.source, "super-minus", "and its pair")
+    t.equal(binding(old, .growActive(dx: 0, dy: -100))?.source, "super-shift-minus", "and the vertical pair")
+    t.equal(binding(old, .growActive(dx: 0, dy: 100))?.source, "super-shift-equal", "all four")
+    // Any resizing verb at all is an answer, whatever its amount or its sign convention: a
+    // config that has Hyprland's resizeactive by 50 on its own keys has decided how it resizes
+    // and is not handed growactive 100 on four more.
+    let fifty = try Config.parse("[binds]\n\"super-l\" = \"resizeactive 50 0\"\n")
+    t.equal(fifty.bindings.filter { $0.command.resizes }.count, 1, "your own resize binding stands alone")
+    t.equal(binding(fifty, .resizeActive(dx: 50, dy: 0))?.source, "super-l", "on your key")
+    // And a resize key already used for something else stays that way; the other three land.
+    let equal = try Config.parse("[binds]\n\"super-equal\" = \"killactive\"\n")
+    t.equal(binding(equal, .killActive)?.source, "super-equal", "SUPER+= stays yours")
+    t.equal(binding(equal, .growActive(dx: 100, dy: 0)), nil, "and is not given the resize on top")
+    t.equal(binding(equal, .growActive(dx: -100, dy: 0))?.source, "super-minus", "while SUPER+- still lands")
     t.equal(binding(taken, .killActive)?.source, "super-ctrl-space", "still doing what you asked")
 }
 
@@ -2393,7 +2598,8 @@ h.test("every command has a label a reader could use") { t in
         .moveFocus(.left), .swapWindow(.up), .moveWindow(.down),
         .workspace(.index(3)), .workspace(.next), .workspace(.previous), .workspace(.former),
         .moveToWorkspace(5, follow: true), .moveToWorkspace(5, follow: false),
-        .killActive, .toggleFloating, .toggleSplit, .swapSplit,
+        .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive(dx: 100, dy: 0),
+        .growActive(dx: 100, dy: 0),
         .exec("open -a Safari"), .reload, .quit,
         .menu(.root), .menu(.keybindings), .menu(.theme), .menu(.background),
         .theme("gruvbox"), .theme(""), .removeTheme("gruvbox"),
@@ -2417,6 +2623,16 @@ h.test("every command has a label a reader could use") { t in
     t.equal(CommandLabel.describe(.theme("")), "Use your own colours",
             "clearing the theme reads as what it does, not as an empty name")
     t.equal(CommandLabel.describe(.nextBackground), "Next background", "and the cycle")
+    t.equal(CommandLabel.describe(.resizeActive(dx: 100, dy: 0)), "Move the split 100 pt right",
+            "a resize names where the split goes — the window's fate depends on which side you are on")
+    t.equal(CommandLabel.describe(.resizeActive(dx: 0, dy: -100)), "Move the split 100 pt up", "and up")
+    t.equal(CommandLabel.describe(.resizeActive(dx: 100, dy: 50)),
+            "Move the splits 100 pt right and 50 pt down", "both axes, both named")
+    t.equal(CommandLabel.describe(.growActive(dx: 100, dy: 0)), "Make the window 100 pt wider",
+            "growactive names what happens to the window, which is the whole of its meaning")
+    t.equal(CommandLabel.describe(.growActive(dx: 0, dy: -100)), "Make the window 100 pt shorter", "and shorter")
+    t.equal(CommandLabel.describe(.growActive(dx: -100, dy: 50)),
+            "Make the window 100 pt narrower and 50 pt taller", "both axes")
 }
 
 h.test("the binding that opens the config is named rather than spelled out") { t in
@@ -2594,6 +2810,23 @@ h.test("a menu binding opens the level Omarchy's own key opens") { t in
             "slugified at the door, because the name is about to be joined onto a path")
     t.expect((try? CommandParser.parse("removetheme")) == nil,
              "and it needs an argument — there is no theme called nothing to delete")
+}
+
+h.test("resizeactive takes Hyprland's two numbers and nothing else") { t in
+    t.equal(try CommandParser.parse("resizeactive 100 0"), .resizeActive(dx: 100, dy: 0), "plain")
+    t.equal(try CommandParser.parse("resizeactive, -100 0"), .resizeActive(dx: -100, dy: 0),
+            "Hyprland's comma after the verb")
+    t.equal(try CommandParser.parse("resizeactive 0, 100"), .resizeActive(dx: 0, dy: 100),
+            "or between the numbers")
+    t.expect((try? CommandParser.parse("resizeactive")) == nil, "it needs an argument")
+    t.expect((try? CommandParser.parse("resizeactive 100")) == nil, "two of them")
+    t.expect((try? CommandParser.parse("resizeactive exact 100 100")) == nil,
+             "and not Hyprland's exact form: a tile's size is the tree's to decide")
+    t.expect((try? CommandParser.parse("resizeactive 10% 0")) == nil, "nor a percentage")
+    t.expect((try? CommandParser.parse("resizeactive 1e309 0")) == nil, "nor a number that overflowed")
+    t.equal(try CommandParser.parse("growactive 100 0"), .growActive(dx: 100, dy: 0),
+            "growactive takes the same two numbers, meaning the window rather than the split")
+    t.expect((try? CommandParser.parse("growactive 100")) == nil, "and is as strict about them")
 }
 
 // MARK: - Themes

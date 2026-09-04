@@ -206,10 +206,17 @@ final class Coordinator: WindowTrackerDelegate {
         // Dragging a tiled window over another one trades their places, live, the way
         // Hyprland's `IHyprLayout::onMouseMove` does.
         drag.onMove = { [weak self] id, point in
-            guard let self, self.workspaces.swapWithWindow(at: point, dragging: id) else { return }
+            // Not while an edge is in hand: the pointer is on the seam between two tiles, which
+            // is to say at the neighbour's edge, and a swap there would trade the two windows
+            // the user is trying to resize. For a left- or top-edge drag both Accessibility
+            // notifications are queued ahead of the first `mouseDragged` the monitor sees, so
+            // the promotion lands first; if it ever did not, the cost is one swap — today's
+            // behaviour, not a new one.
+            guard let self, self.drag.kind == .move,
+                  self.workspaces.swapWithWindow(at: point, dragging: id) else { return }
             self.apply(refocus: false)
         }
-        drag.onEnd = { [weak self] id in self?.endDrag(id) }
+        drag.onEnd = { [weak self] id, kind, origin in self?.endDrag(id, kind: kind, origin: origin) }
         hideBlocker.onRestored = { [weak self] pid in self?.relayoutAfterUnhide(pid) }
         // A sideways dock swipe is `workspace e+1` / `e-1` from the trackpad. Only while
         // `gestures.swallow_dock_swipes` is on, and no `if` here says so: `applyDockSwipeSetting`
@@ -1201,7 +1208,7 @@ final class Coordinator: WindowTrackerDelegate {
     /// after the window is created, clobbering the frame toe just wrote. Re-asserting on the
     /// move/resize notification is what actually makes those apps tile — and it doubles as
     /// snap-back when a window is dragged out of its tile.
-    func windowFrameChangedExternally(_ id: WindowID) {
+    func windowFrameChangedExternally(_ id: WindowID, resized: Bool) {
         guard let window = tracker.window(id) else { return }
         guard !window.isStashed else {
             // Coming out of fullscreen is a move and a resize, and it arrives after the Space
@@ -1212,7 +1219,11 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
         // A move the user is making by hand hides the border until they let go; see DragMonitor.
-        if id == workspaces.focusedWindow { drag.noteExternalFrameChange(id) }
+        // `desired[id]` is the tile they took hold of, and a float — which has none — passes nil,
+        // so a resize of one is never measured against anything.
+        if id == workspaces.focusedWindow {
+            drag.noteExternalFrameChange(id, resized: resized, tile: desired[id])
+        }
 
         if workspaces.isFloating(id) {
             workspaces.floatingFrames[id] = window.element.frame
@@ -1380,6 +1391,17 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
 
+        // An edge in the user's hand gets no border at all, and the decision is made here,
+        // before the round trip below, because `windowFrameChangedExternally` comes through on
+        // every notification of a live resize. The tile is the one thing the user is changing,
+        // so a ring around it would mark exactly the wrong rectangle, and the window trails its
+        // notifications by too much to follow — the same reasoning that leaves a floating drag
+        // without one. The `apply` in `endDrag` brings it back.
+        if focused == draggedWindow, drag.kind == .resize {
+            border.hide()
+            return
+        }
+
         // Read once, after the cheap conditions rather than among them: it costs a
         // cross-process Accessibility round trip, and the guard above already turns the border
         // off in every case where there was nothing to draw. Both `show` paths below test
@@ -1486,7 +1508,19 @@ final class Coordinator: WindowTrackerDelegate {
     /// clearing `desired` is what makes `apply` write it into whichever tile it now owns —
     /// its own, if the drag never crossed another one. `apply` ends in `updateBorder`, which
     /// brings the focus border back now that the drag is over.
-    private func endDrag(_ id: WindowID) {
+    ///
+    /// An edge that was let go of moves the split first, so that the tile `apply` then writes
+    /// is the frame the window already has, give or take the ratio clamp and the rounding in
+    /// `frames(gaps:)` — and every neighbour is written once, into the space that is left. The
+    /// frame is read here, after the fact, whichever way the drag ended: the mouse-up monitor,
+    /// or a trailing notification that found the button already up. Nothing to move — a
+    /// window with no neighbour on that axis, or a drag that turned out to be a move after all
+    /// — falls through to the snap-back this always was.
+    private func endDrag(_ id: WindowID, kind: DragMonitor.Kind, origin: Box?) {
+        if kind == .resize, let origin, let have = tracker.window(id)?.element.frame,
+           let gesture = ResizeGesture.delta(from: origin, to: have) {
+            workspaces.resizeWindow(id, dx: gesture.dx, dy: gesture.dy, edges: gesture.edges)
+        }
         desired.removeValue(forKey: id)
         corrections.removeValue(forKey: id)
         apply(refocus: false)
@@ -1669,6 +1703,26 @@ final class Coordinator: WindowTrackerDelegate {
             guard let id = workspaces.focusedWindow,
                   let index = workspaces.workspaceIndex(of: id) else { return }
             workspaces.workspaces[index]?.layout.swapSplit(id)
+            apply(refocus: false)
+
+        case .resizeActive(let dx, let dy), .growActive(let dx, let dy):
+            // A float grows in place and `apply` writes the new frame the way it writes any
+            // floating one — on a real difference, outside `desired`.
+            guard let id = workspaces.focusedWindow else { return }
+            let moved: Bool
+            if case .growActive = command {
+                moved = workspaces.growWindow(id, dx: dx, dy: dy)
+            } else {
+                moved = workspaces.resizeWindow(id, dx: dx, dy: dy)
+            }
+            guard moved else {
+                // The one command whose doing nothing is easy to mistake for not working: the
+                // only window on a workspace has no split to move, and neither has a
+                // side-by-side pair asked for the vertical axis. Say so where `log stream`
+                // can see it.
+                Log.info("\(CommandLabel.describe(command)): nothing to move for window \(id) — no split on that axis")
+                return
+            }
             apply(refocus: false)
 
         case .exec(let commandLine):
