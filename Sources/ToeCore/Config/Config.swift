@@ -125,6 +125,10 @@ public struct MiscConfig: Equatable {
     /// off-screen stash alike, and macOS decides that inside WindowManager rather than from an
     /// event any tap could swallow — so it is switched off through its preference instead.
     public var disableWallpaperClick: Bool = true
+    /// Dragging a window to the side of the display tiles it to that half and dragging it to the
+    /// menu bar fills the screen — macOS placing a window toe is meant to be placing, after the
+    /// mouse has already come up. Switched off through its two preferences; see `EdgeTiling`.
+    public var disableEdgeTiling: Bool = true
     /// A visible Dock is a strip of screen the tiles never get, for something `SUPER`+`SPACE`
     /// reaches instead. Switched on through `CoreDockSetAutoHideEnabled` — see `DockAutoHide`.
     public var autohideDock: Bool = true
@@ -558,6 +562,13 @@ public struct Config: Equatable {
                     config.misc.disableWallpaperClick = v
                 } else {
                     config.warnings.append("misc.disable_wallpaper_click: must be true or false, using \(config.misc.disableWallpaperClick)")
+                }
+            }
+            if let raw = m["disable_edge_tiling"] {
+                if let v = raw.boolValue {
+                    config.misc.disableEdgeTiling = v
+                } else {
+                    config.warnings.append("misc.disable_edge_tiling: must be true or false, using \(config.misc.disableEdgeTiling)")
                 }
             }
             if let raw = m["autohide_dock"] {

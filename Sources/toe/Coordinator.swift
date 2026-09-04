@@ -107,24 +107,25 @@ final class Coordinator: WindowTrackerDelegate {
     private var isSettlingSession = false
     /// Pending debounced write. See `scheduleSessionSave`.
     private var sessionSave: DispatchWorkItem?
-    /// Pending settles, one per floating window. See `scheduleFloatSettle`.
-    private var floatSettle: [WindowID: DispatchWorkItem] = [:]
-    /// How many times in a row a float has been brought back inside the margin without it
-    /// staying there. `corrections` is the same idea for tiles, and is deliberately not reused:
-    /// that one re-asserts a frame toe chose, and pointing it at a float would fight the user's
-    /// drags. This only ever moves a window that is out of bounds, and only counts so that an
-    /// app which insists on its own position is left to it rather than ping-ponged with.
-    private var floatSettleAttempts: [WindowID: Int] = [:]
-    /// How long a float's frame has to hold still before the frame it landed on is taken as
-    /// final. Not the length of macOS's edge-snap animation but a quiet period after it: the
-    /// deadline is pushed back by every notification that arrives.
+    /// Pending settles, one per window. See `scheduleSettle`.
+    private var settleWork: [WindowID: DispatchWorkItem] = [:]
+    /// How many times in a row a window has been put back where toe wants it without it staying
+    /// there. `corrections` is the same idea and is deliberately not reused: that one answers an
+    /// app re-asserting its own geometry the instant it does it, so it is spent on frames that
+    /// are still moving — which is exactly how macOS's edge-snap exhausts it, see `settle`. This
+    /// one is spent only on frames that have already held still, and only counts so that an app
+    /// which insists on its own position is left to it rather than ping-ponged with.
+    private var settleAttempts: [WindowID: Int] = [:]
+    /// How long a frame has to hold still before the place it landed is taken as final. Not the
+    /// length of macOS's edge-snap animation but a quiet period after it: the deadline is pushed
+    /// back by every notification that arrives.
     ///
     /// Measured, not reasoned about. 0.1 is too tight — macOS's edge-snap does not deliver a
     /// notification every animation frame, and the gaps in the middle of one are long enough
-    /// to be taken for its end, at which point toe writes the margin under a window that is
-    /// still moving and macOS puts it back flush. The window twitches and the correction is
-    /// lost, since the attempt cap counts a write that landed nowhere. 0.2 clears those gaps.
-    private static let floatSettleLatency: TimeInterval = 0.2
+    /// to be taken for its end, at which point toe writes under a window that is still moving
+    /// and macOS puts it back flush. The window twitches and the correction is lost, since the
+    /// attempt cap counts a write that landed nowhere. 0.2 clears those gaps.
+    private static let settleLatency: TimeInterval = 0.2
     /// The window the user has hold of. Its frame is theirs until they let go: toe neither
     /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
     /// to a floating window.
@@ -183,7 +184,10 @@ final class Coordinator: WindowTrackerDelegate {
         // Same reasoning, same shape: the reveal-desktop preference is the window server's, not
         // toe's, so a copy that was killed rather than quit may have left it switched off.
         WallpaperClick.repairAfterUncleanExit()
-        // And the third of them: the Dock's auto-hide setting is the Dock's own, so a copy that
+        // And again for macOS's drag-to-edge tiling, which is two more WindowManager preferences
+        // of exactly the same kind.
+        EdgeTiling.repairAfterUncleanExit()
+        // And the last of them: the Dock's auto-hide setting is the Dock's own, so a copy that
         // was killed rather than quit may have left the Dock hiding itself.
         DockAutoHide.repairAfterUncleanExit()
         // Not the same thing as those three — the desktop picture is not given back on the way
@@ -842,6 +846,12 @@ final class Coordinator: WindowTrackerDelegate {
             WallpaperClick.restore()
         }
 
+        if config.misc.disableEdgeTiling {
+            EdgeTiling.disable()
+        } else {
+            EdgeTiling.restore()
+        }
+
         if config.misc.autohideDock {
             DockAutoHide.enable()
         } else {
@@ -1206,8 +1216,8 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.floatingFrames.removeValue(forKey: id)
         desired.removeValue(forKey: id)
         corrections.removeValue(forKey: id)
-        floatSettle.removeValue(forKey: id)?.cancel()
-        floatSettleAttempts.removeValue(forKey: id)
+        settleWork.removeValue(forKey: id)?.cancel()
+        settleAttempts.removeValue(forKey: id)
         if focusApplied == id { focusApplied = nil }
         apply(refocus: false)
     }
@@ -1247,7 +1257,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         if workspaces.isFloating(id) {
             workspaces.floatingFrames[id] = window.element.frame
-            scheduleFloatSettle(id)
+            scheduleSettle(id)
             if id == workspaces.focusedWindow { updateBorder() }
             return
         }
@@ -1265,9 +1275,19 @@ final class Coordinator: WindowTrackerDelegate {
         guard let want = desired[id], let have = window.element.frame else { return }
         if Self.settled(have, want) {
             corrections[id] = 0
+            settleAttempts.removeValue(forKey: id)
             if id == workspaces.focusedWindow { updateBorder() }
             return
         }
+
+        // The correction below is immediate because the app it is aimed at is: Chromium writes
+        // its remembered geometry once, and answering it a notification later would show the
+        // wrong frame for as long as it took. macOS's edge-snap is the opposite — it animates,
+        // and the three attempts go on frames that had not finished moving, after which toe has
+        // given up and the window stays flush with the display edge while the tree is still laid
+        // out around the tile it left. So the tile is asserted once more when the window has
+        // stopped moving, which is the one moment a write can hold.
+        scheduleSettle(id)
 
         let attempts = corrections[id, default: 0]
         guard attempts < 3 else { return }   // the app will not comply; stop fighting it
@@ -1276,48 +1296,84 @@ final class Coordinator: WindowTrackerDelegate {
         if id == workspaces.focusedWindow { updateBorder() }
     }
 
-    /// Brings a float back inside `gaps_out` once whatever moved it has finished.
+    /// Puts a window back where toe wants it once whatever moved it has finished: a float back
+    /// inside `gaps_out`, a tile back in its tile.
     ///
     /// `endDrag` already settles the frame the user let go of, and for a drag that is the end of
     /// it. macOS's own edge-snap is what this is for: dragging a window to the side of the
     /// display tiles it to that half — and dragging it to the top fills the screen — *after* the
     /// mouse comes up, over the top of the frame the release settled, flush with the display
     /// edge where every tile around it keeps the margin clear. That frame arrives here like any
-    /// other external move, so it is settled like any other: the snap keeps the half of the
-    /// display it chose, inset to the margin.
+    /// other external move, so it is settled like any other. What that means differs by what the
+    /// window is: a float keeps the half of the display the snap chose, inset to the margin,
+    /// because a float is the user's to place — while a tile is not, so it goes back into the
+    /// tile the tree still has it in, which is the only frame that leaves the layout whole.
     ///
     /// Debounced, because the snap animates and each frame of it arrives separately — settling
     /// the first would have toe writing one position while macOS writes the next, and would
     /// spend the attempt cap below on frames of an animation that had not finished moving.
-    /// Debouncing
-    /// also keeps it clear of a live drag: the guard below is what actually decides, but a
-    /// user who pauses mid-drag would otherwise reach the deadline while still holding on.
-    private func scheduleFloatSettle(_ id: WindowID) {
-        floatSettle[id]?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.settleFloat(id) }
-        floatSettle[id] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.floatSettleLatency, execute: work)
+    /// Debouncing also keeps it clear of a live drag: the guard below is what actually decides,
+    /// but a user who pauses mid-drag would otherwise reach the deadline while still holding on.
+    private func scheduleSettle(_ id: WindowID) {
+        settleWork[id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.settle(id) }
+        settleWork[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleLatency, execute: work)
     }
 
-    private func settleFloat(_ id: WindowID) {
-        floatSettle.removeValue(forKey: id)
-        guard id != draggedWindow, workspaces.isFloating(id),
-              let window = tracker.window(id), !window.isStashed
+    private func settle(_ id: WindowID) {
+        settleWork.removeValue(forKey: id)
+        guard id != draggedWindow, let window = tracker.window(id), !window.isStashed
         else { return }
+        if workspaces.isFloating(id) {
+            settleFloat(id, window)
+        } else {
+            settleTile(id, window)
+        }
+    }
+
+    private func settleFloat(_ id: WindowID, _ window: ManagedWindow) {
         // Read afresh: the deadline is long enough for the frame recorded on the notification
         // that scheduled this to be a frame of an animation that has since finished.
         if let have = window.element.frame { workspaces.floatingFrames[id] = have }
         guard workspaces.settleFloat(id) else {
-            floatSettleAttempts.removeValue(forKey: id)
+            settleAttempts.removeValue(forKey: id)
             return
         }
-        let attempts = floatSettleAttempts[id, default: 0]
+        let attempts = settleAttempts[id, default: 0]
         guard attempts < 3 else { return }   // the app will not comply; stop fighting it
-        floatSettleAttempts[id] = attempts + 1
+        settleAttempts[id] = attempts + 1
         // A window moving with nobody touching it is the kind of thing that wants an answer in
         // the log rather than a guess: this is the one place toe moves a float of its own accord.
         Log.info("brought floating window \(id) back inside gaps_out")
         apply(refocus: false)
+    }
+
+    /// The tile is written here rather than through `apply`, which would not do it: nothing about
+    /// the plan has changed — the tree never heard about the snap — so `desired[id]` still holds
+    /// the frame this window is supposed to have and `apply` skips every window it already
+    /// matches. This is the same write `windowFrameChangedExternally` makes, taken once more now
+    /// that the window has stopped moving.
+    private func settleTile(_ id: WindowID, _ window: ManagedWindow) {
+        // Read afresh: the deadline is long enough for the frame on the notification that
+        // scheduled this to be a frame of an animation that has since finished.
+        guard let want = desired[id], let have = window.element.frame, !Self.settled(have, want)
+        else {
+            settleAttempts.removeValue(forKey: id)
+            return
+        }
+        // Three, as everywhere else, and a snap spends two of them: macOS pushes the window
+        // back to the half it chose once, about a fifth of a second after the first write, and
+        // lets go of it after the second. The third is what is left for an app that will not
+        // comply — one whose minimum size exceeds its tile — which is where this stops.
+        let attempts = settleAttempts[id, default: 0]
+        guard attempts < 3 else { return }
+        settleAttempts[id] = attempts + 1
+        // Same reasoning as the float above: a window that moved with nobody touching it wants
+        // an answer in the log.
+        Log.info("put tiled window \(id) back in its tile")
+        WindowMover.setFrame(want, element: window.element, pid: window.pid)
+        if id == workspaces.focusedWindow { updateBorder() }
     }
 
     /// Apps round and clamp the frames they are given; two frames within 2pt of each other are
@@ -1613,11 +1669,12 @@ final class Coordinator: WindowTrackerDelegate {
         // WindowServer, so it is taken down deliberately rather than left to process death.
         dockSwipes.stop()
         hideBlocker.stop()
-        // The three that would otherwise outlive toe: the window server keeps a symbolic hotkey
-        // switched off until something switches it back on, and the reveal-desktop and Dock
-        // auto-hide preferences are written to the user's settings.
+        // The four that would otherwise outlive toe: the window server keeps a symbolic hotkey
+        // switched off until something switches it back on, and the reveal-desktop, edge-tiling
+        // and Dock auto-hide preferences are written to the user's settings.
         SymbolicHotkeys.restoreAll()
         WallpaperClick.restore()
+        EdgeTiling.restore()
         DockAutoHide.restore()
     }
 
