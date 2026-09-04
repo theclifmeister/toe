@@ -1265,6 +1265,33 @@ h.test("the swipe follows Natural scrolling the way the Spaces swipe does") { t 
     t.equal(WorkspaceTarget.swipe(.right, naturalScrolling: false), .next, "and the other way")
 }
 
+// MARK: - The fullscreen freeze
+
+h.test("a fullscreen window suspends the verbs that act on the Space underneath") { t in
+    // The list the coordinator refuses while a native-fullscreen window holds the focus. Its
+    // whole content is "would this happen on the Space underneath, where nobody can see it".
+    // `killactive` is in it because the window it would close is the tile that held the focus
+    // before fullscreen, not the fullscreen window the user is looking at.
+    for command: Command in [.moveFocus(.left), .swapWindow(.up), .moveWindow(.down),
+                             .workspace(.next), .workspace(.index(3)), .workspace(.former),
+                             .moveToWorkspace(2, follow: true),
+                             .moveToWorkspace(2, follow: false), .killActive] {
+        t.equal(command.suspendedByFullscreen, true,
+                "\(CommandLabel.describe(command)) moves, or closes, a window nobody can see")
+    }
+
+    // Everything else goes through: a size, a theme, a menu, a shell line — nothing that leaves
+    // the user with a screen they did not arrange.
+    for command: Command in [.toggleFloating, .toggleSplit, .swapSplit,
+                             .growActive(dx: 100, dy: 0), .resizeActive(dx: 100, dy: 0),
+                             .exec("ghostty"), .reload, .menu(.root), .quit,
+                             .theme("tokyo-night"), .removeTheme("tokyo-night"),
+                             .background("1.png"), .nextBackground] {
+        t.equal(command.suspendedByFullscreen, false,
+                "\(CommandLabel.describe(command)) is nothing a fullscreen window hides")
+    }
+}
+
 // MARK: - Config
 
 h.test("the second floating size is configurable, and a bad one warns") { t in

@@ -77,6 +77,35 @@ public extension Command {
         }
     }
 
+    /// The verbs a native-fullscreen window suspends: everything that moves the focus or a
+    /// window, and the one that closes one.
+    ///
+    /// macOS gives a fullscreen window a Space of its own, and toe manages nothing on it —
+    /// `isManageable` turns fullscreen windows away — so while one has the focus `focusedWindow`
+    /// still names some tile on the Space *underneath* it. Every verb in this list would then
+    /// act out of sight: `movefocus` hands the focus to a window behind a Space, `workspace`
+    /// changes which windows are showing on a screen nobody can see, and `swapwindow` and
+    /// `movewindow` rearrange a layout the user will not meet again until they leave fullscreen
+    /// — by which time they have no idea what moved. The keypress looks dead either way; doing
+    /// nothing is the version that leaves nothing to undo.
+    ///
+    /// `killactive` is here because it is the same mistake with no undo at all: the window it
+    /// would close is not the fullscreen one the user is looking at — that one is unmanaged and
+    /// `focusedWindow` has never named it — but whichever tile held the focus before they went
+    /// fullscreen, closed unseen and unasked. Every other verb acts on the window's size, the
+    /// theme, or a menu, and none of those is a window vanishing.
+    ///
+    /// The way out is the way in: leave fullscreen, or click a window on another display, and
+    /// the keys work again with nothing to put back.
+    var suspendedByFullscreen: Bool {
+        switch self {
+        case .moveFocus, .swapWindow, .moveWindow, .workspace, .moveToWorkspace, .killActive:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Whether the quick menu stays up after running this.
     ///
     /// Every row used to dismiss the panel, which is right for almost all of them: `exec` brings
