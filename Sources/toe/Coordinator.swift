@@ -126,10 +126,24 @@ final class Coordinator: WindowTrackerDelegate {
     /// and macOS puts it back flush. The window twitches and the correction is lost, since the
     /// attempt cap counts a write that landed nowhere. 0.2 clears those gaps.
     private static let settleLatency: TimeInterval = 0.2
+    /// How long after the last Space notification the border waits before deciding again.
+    ///
+    /// A fullscreen transition is not one Space change but three or four, spread across the
+    /// animation — measured here at 33.852, 34.569 and 34.828 on the way in — and for the whole
+    /// of it the window is somewhere between its tile and the display, with Accessibility
+    /// answering for neither: `AXFrame` hangs until the messaging timeout and comes back nil,
+    /// `AXFullScreen` says false. So the border has nothing to draw itself around until the
+    /// Space stops moving, and this is how long "stopped" is. Pushed back by every notification,
+    /// like `settleLatency`, because it is the quiet after the last one that matters.
+    private static let spaceSettleLatency: TimeInterval = 0.3
     /// The window the user has hold of. Its frame is theirs until they let go: toe neither
     /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
     /// to a floating window.
     private var draggedWindow: WindowID? { drag.isDragging ? drag.window : nil }
+    /// Set while the Spaces are moving; see `spaceSettleLatency`. The border draws nothing
+    /// while it is, which is the whole of its job — a ring that keeps its old position through
+    /// a fullscreen animation is a ring painted over somebody's fullscreen window.
+    private var spaceSettle: DispatchWorkItem?
     /// Where a swipe's slide has got to. See `swipeToWorkspace` for the sequence and `apply`
     /// for the two phases a render from elsewhere cuts short.
     private enum SlidePhase {
@@ -1042,6 +1056,12 @@ final class Coordinator: WindowTrackerDelegate {
     /// as a side effect, and two workspaces whose windows happen to tile alike would read as
     /// unchanged when the screen has in fact changed.
     private func swipeToWorkspace(_ target: WorkspaceTarget) {
+        // The rule `dispatch` applies to the bound keys, at the door the trackpad comes in by:
+        // a workspace switch behind a fullscreen Space is one the user cannot see happening.
+        // The gesture is swallowed either way — the tap takes every sideways dock swipe, so
+        // refusing to act on this one strands nobody who was trying to leave fullscreen.
+        guard AX.frontmostFullscreenFrame == nil else { return }
+
         // Whatever slide is in flight, the screen under it is already the end of that switch.
         cancelSlide()
 
@@ -1072,14 +1092,6 @@ final class Coordinator: WindowTrackerDelegate {
             apply(refocus: true)
             return
         }
-
-        // A native-fullscreen window on this display means the swipe is switching workspaces
-        // behind a Space the user cannot see them on; a panel over it would be the one thing
-        // they did see. The border's rule, and its helper: scoped to a display, never "is
-        // anything fullscreen".
-        guard !BorderGeometry.isBehindFullscreen(window: monitor.usable,
-                                                  fullscreen: AX.frontmostFullscreenFrame)
-        else { apply(refocus: true); return }
 
         beginSlide(direction, on: monitor, leaving: leaving)
     }
@@ -1420,6 +1432,17 @@ final class Coordinator: WindowTrackerDelegate {
     /// so the floats are left exactly where they are — the border is the only thing that cares,
     /// because the window now in front may be a fullscreen one it must not draw over.
     func activeSpaceChanged() {
+        // The border is put away for the length of the transition, before anything is asked of
+        // Accessibility, and it is a *period* rather than a single hide because a fullscreen
+        // transition arrives here three or four times over. Hiding once let the next callback
+        // in the same animation show the ring again — the blink — and asking Accessibility
+        // first is no good either: entering fullscreen is a Space change delivered at the
+        // *start* of the animation, and by the time the window has answered where it is, ~560
+        // ms of it has gone by with the ring still on screen. So: hide now, decide later.
+        //
+        // Cheap on every ordinary path. toe's own workspaces are not Spaces, so nothing routine
+        // comes through this callback at all.
+        beginSpaceSettle()
         // Before the border, because it may be about to change which workspace is showing:
         // leaving a fullscreen Space is a Space change, and it is the moment a window that went
         // fullscreen on a since-hidden workspace asks for its workspace back.
@@ -1430,6 +1453,18 @@ final class Coordinator: WindowTrackerDelegate {
         // changed is still showing the old one. `reapply` checks before it writes, which is what
         // makes this affordable on a callback that fires every time you change Space.
         wallpaper.reapply()
+    }
+
+    /// Opens — or extends — the quiet period the border sits out. See `spaceSettleLatency`.
+    private func beginSpaceSettle() {
+        spaceSettle?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.spaceSettle = nil
+            self.updateBorder()
+        }
+        spaceSettle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spaceSettleLatency, execute: work)
     }
 
     // MARK: - Applying the layout
@@ -1512,6 +1547,15 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     private func updateBorder() {
+        // The Spaces are moving: nothing is where Accessibility says it is, and the answer for
+        // every window is the same one. Ahead of the round trips deliberately — being early is
+        // the entire point — and ahead of the `draggedWindow` branch too, which cannot be true
+        // during a Space change anyway.
+        guard spaceSettle == nil else {
+            border.hide()
+            return
+        }
+
         guard config.border.enabled,
               let focused = draggedWindow ?? workspaces.focusedWindow,
               let window = tracker.window(focused),
@@ -1556,8 +1600,13 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
 
-        // Prefer the frame we wrote; fall back to asking the window for floating ones.
-        if let box = window.element.frame ?? desired[focused],
+        // The window's own frame, and nothing else. `desired` used to stand in when the window
+        // would not answer, which is right for a tile sitting still and exactly wrong for the
+        // moment it stops answering: a window mid-transition is one whose last known tile is on
+        // a Space it has already left, and drawing there is a ring over somebody's fullscreen
+        // window. A window that will not say where it is gets no border until it does — the
+        // next notification, which for a fullscreen window is the one that hides it for good.
+        if let box = window.element.frame,
            !BorderGeometry.isBehindFullscreen(window: box, fullscreen: fullscreen) {
             border.show(around: box, of: focused, depth: borderDepth(around: box, of: focused))
         } else {
@@ -1798,6 +1847,22 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     func dispatch(_ command: Command) {
+        // A native-fullscreen window has a display and a Space of its own, and toe manages
+        // nothing on it. Everything `suspendedByFullscreen` covers would therefore happen on the
+        // workspace *behind* it — invisibly, and with no way to see what moved, or what closed,
+        // until the user leaves fullscreen and meets a screen they did not arrange. So those
+        // verbs are refused for as long as a fullscreen window holds the focus; leaving
+        // fullscreen, or clicking a window on another display, hands the keys straight back
+        // with nothing to undo.
+        //
+        // The Accessibility round trip sits behind the cheap test on purpose: the property
+        // rules out the menu, the theme rows and every `exec` before anything is asked of the
+        // system, so the common keypress costs what it always did.
+        if command.suspendedByFullscreen, AX.frontmostFullscreenFrame != nil {
+            Log.info("\(CommandLabel.describe(command)): ignored — a fullscreen window has the focus")
+            return
+        }
+
         switch command {
         case .moveFocus(let direction):
             if let target = workspaces.windowInDirection(direction) { focus(target) }
