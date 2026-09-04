@@ -14,9 +14,10 @@
 # it leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab alone. Also accepts "cmd" or "ctrl".
 super_key = "alt"
 
-# Omarchy: gaps_in = 5, gaps_out = 10
-gaps_in  = 5
-gaps_out = 10
+# Omarchy ships gaps_in = 5, gaps_out = 10; a little wider here, since macOS windows bring
+# their own rounded corners and shadows and the tiles read as touching at Omarchy's values.
+gaps_in  = 8
+gaps_out = 15
 
 [dwindle]
 # Both of these are Omarchy's settings, and together they are what makes dwindle feel right:

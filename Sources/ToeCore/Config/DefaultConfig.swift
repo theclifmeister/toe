@@ -1,8 +1,10 @@
 /// The config written to ~/.config/toe/toe.toml on first run.
 ///
-/// Values match Omarchy's Hyprland defaults exactly:
-///   default/hypr/looknfeel.conf  →  gaps_in = 5, gaps_out = 10, border 2px, dwindle
-///                                   preserve_split = true, force_split = 2
+/// Values match Omarchy's Hyprland defaults, with one deliberate departure:
+///   default/hypr/looknfeel.conf  →  border 2px, dwindle, preserve_split = true, force_split = 2
+///                                   (Omarchy's gaps_in = 5, gaps_out = 10 are widened to 8 / 15:
+///                                   macOS windows carry their own rounded corners and shadows,
+///                                   and at 5 / 10 the tiles read as touching)
 ///   default/hypr/bindings/tiling.conf → the bindings below
 let defaultConfigText = #"""
 # toe — The Opinionated Experience
@@ -21,9 +23,10 @@ let defaultConfigText = #"""
 # it leaves ⌘S ⌘F ⌘T ⌘W ⌘1-9 ⌘Tab alone. Also accepts "cmd" or "ctrl".
 super_key = "alt"
 
-# Omarchy: gaps_in = 5, gaps_out = 10
-gaps_in  = 5
-gaps_out = 10
+# Omarchy ships gaps_in = 5, gaps_out = 10; a little wider here, since macOS windows bring
+# their own rounded corners and shadows and the tiles read as touching at Omarchy's values.
+gaps_in  = 8
+gaps_out = 15
 
 [dwindle]
 # Both of these are Omarchy's settings, and together they are what makes dwindle feel right:

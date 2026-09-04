@@ -181,7 +181,7 @@ public struct Config: Equatable {
     public static let fileName = "toe.toml"
 
     public var superKey: Modifiers = .option
-    public var gaps: Gaps = Gaps(inner: 5, outer: 10)
+    public var gaps: Gaps = Gaps(inner: 8, outer: 15)
     public var dwindle: DwindleOptions = DwindleOptions()
     public var border: BorderConfig = BorderConfig()
     public var bar: BarConfig = BarConfig()
