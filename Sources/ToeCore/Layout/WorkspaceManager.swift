@@ -138,9 +138,22 @@ public final class WorkspaceManager {
         workspaces.first { $0.value.windows.contains(id) }?.key
     }
 
+    /// The window every command acts on: the most recently focused window on the workspace the
+    /// focused monitor is showing.
+    ///
+    /// That workspace and not every visible one. `visibleWindows()` is the union across every
+    /// monitor, and on two displays it therefore held the other display's windows too — so
+    /// bringing an empty workspace up on one monitor handed the focus to whichever window on
+    /// the *other* was most recently used, and `movefocus`, `swapwindow`, `movetoworkspace` and
+    /// `killactive` all worked from there. On one display the two sets are the same set, which
+    /// is why this went unnoticed.
+    ///
+    /// An empty workspace therefore has no focused window and those commands do nothing on it,
+    /// which is what Hyprland does: `workspace` moves the focus to the monitor, and an empty
+    /// workspace has no window to give it to. It is also what one display already did.
     public var focusedWindow: WindowID? {
-        let visible = visibleWindows()
-        return focusHistory.first { visible.contains($0) }
+        let mine = focusedWorkspace.windows
+        return focusHistory.first { mine.contains($0) }
     }
 
     public func visibleWindows() -> Set<WindowID> {
@@ -458,10 +471,17 @@ public final class WorkspaceManager {
         }
     }
 
+    /// Focus the most recently used window on the workspace `focusedMonitorID` is now showing.
+    ///
+    /// Scoped to that workspace, not to everything visible: `visibleWindows()` spans every
+    /// monitor, and the window you are standing on is by definition the head of the history and
+    /// still visible on its own display — so an unscoped scan re-selected the window it was
+    /// supposed to be moving away from, and `workspace <n>` aimed at the other display moved
+    /// the strip's marker and nothing else. On an empty workspace this finds nothing and leaves
+    /// the history alone; `focusedWindow` then answers nil, and the coordinator focuses nothing.
     private func refocusVisible() {
-        // Focus the most recently used window that is now visible.
-        let visible = visibleWindows()
-        if let next = focusHistory.first(where: { visible.contains($0) }) {
+        let mine = focusedWorkspace.windows
+        if let next = focusHistory.first(where: { mine.contains($0) }) {
             noteFocusWithoutMonitorChange(next)
         }
     }
