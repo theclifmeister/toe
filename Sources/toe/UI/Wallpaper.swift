@@ -25,7 +25,6 @@ final class Wallpaper {
     /// `SessionStore.monitorKey` derives — a `CGDirectDisplayID` is handed out per connection and
     /// would name the wrong screen after a replug.
     private var previous: [String: String] = [:]
-    private var didJournal = false
 
     /// What toe last set, so a new display or a Space that has not seen it yet can be caught up.
     private var current: URL?
@@ -79,7 +78,6 @@ final class Wallpaper {
         defer {
             previous.removeAll()
             current = nil
-            didJournal = false
             Self.clearJournal()
         }
         guard !saved.isEmpty else { return }
@@ -128,7 +126,6 @@ final class Wallpaper {
             added = true
         }
         guard added else { return }
-        didJournal = true
         Self.writeJournal(previous)                    // before the change, never after
     }
 

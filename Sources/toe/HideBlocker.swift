@@ -26,7 +26,10 @@ final class HideBlocker {
     /// The applications toe is in the middle of putting back. An unhide toe did not ask for — the
     /// user picking the app out of the Dock — must be left entirely alone.
     private var pending: Set<pid_t> = []
-    private var unhidden = 0
+    /// Whether the first unhide since `start()` has been logged. Once per run rather than once
+    /// per hide: `⌘⌥H` arrives as one notification per application, and a line for each would be
+    /// noise saying the same thing.
+    private var announced = false
 
     var isRunning: Bool { !observers.isEmpty }
 
@@ -41,8 +44,10 @@ final class HideBlocker {
             // The notification arrives after the hide, so this is an undo rather than a veto: the
             // windows are gone for a frame before they come back.
             app.unhide()
-            if self.unhidden == 0 { Log.info("hide blocker: unhiding applications as they are hidden") }
-            self.unhidden &+= 1
+            if !self.announced {
+                Log.info("hide blocker: unhiding applications as they are hidden")
+                self.announced = true
+            }
         }
 
         observe(NSWorkspace.didUnhideApplicationNotification) { [weak self] app in
@@ -60,7 +65,7 @@ final class HideBlocker {
         for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         observers.removeAll()
         pending.removeAll()
-        unhidden = 0
+        announced = false
         Log.info("hide blocker: stopped")
     }
 
