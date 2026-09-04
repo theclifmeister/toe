@@ -33,6 +33,7 @@ as the defaults.
 | `SUPER` + `1`…`9`, `0` | Switch to workspace 1…10 |
 | `SUPER` + `SHIFT` + `1`…`9`, `0` | Move window to workspace and follow it |
 | `SUPER` + `TAB` / `SHIFT`+`TAB` / `CTRL`+`TAB` | Next / previous workspace in use, former workspace |
+| Sideways swipe on the trackpad | Next / previous workspace in use, the way it moves between Spaces |
 | `SUPER` + `ENTER` | New terminal window — Ghostty |
 | `SUPER` + `SHIFT` + `ENTER` | New browser window — Safari |
 | `SUPER` + `W` | Close window |
@@ -202,10 +203,19 @@ anything that does not positively identify itself as a dock swipe is passed stra
 worst a wrong guess there can do is drop a gesture: no keystroke, click or scroll can reach a tap
 masked this way. `gestures.swallow_dock_swipes = false` turns it off.
 
+The sideways swipe is not left doing nothing: its destination was the problem, not the gesture,
+so toe points it at its own workspaces. One swipe is one step to the next or previous workspace
+in use — the same ring `SUPER`+`TAB` walks, so on a session with everything on one workspace it
+stays put and says so in the log — and it follows *Natural scrolling* the way the Spaces swipe
+does. The tap already had to read the gesture's phase and direction to swallow it as a unit, so
+this reads no new field; the one-step-per-gesture latch is `DockSwipe` in ToeCore, where the
+selftest can reach it. The swipe up stays swallowed and silent, because Mission Control is what
+shows the stash and toe has nothing to put in its place.
+
 The cost is that swiping between Spaces is gone, including swiping out of a natively-fullscreen
 app's Space — and natively-fullscreen windows are one of the things toe leaves alone. `Ctrl`+`←`/`→`
 still switches Spaces and `⌃⌘F` still leaves fullscreen; the config key is there for anyone who
-would rather have the swipe.
+would rather have macOS's swipe than toe's.
 
 The swipe is not the only way in: `Ctrl`+`↑` and `Ctrl`+`↓` open the same two views. Those are
 *symbolic hotkeys*, resolved inside the window server well before any event tap sees a key, so the

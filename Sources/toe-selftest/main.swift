@@ -818,6 +818,103 @@ h.test("only tiled windows are dragged, and only onto tiles") { t in
             "a pointer on no monitor at all is not a drop target")
 }
 
+// MARK: - Dock swipes
+
+// The numbers `DockSwipeTap` reads off the event, by name.
+let began = DockSwipe.Phase.began, changed = DockSwipe.Phase.changed
+let ended = DockSwipe.Phase.ended, cancelled = DockSwipe.Phase.cancelled
+let horizontal = DockSwipe.Motion.horizontal, vertical = DockSwipe.Motion.vertical
+
+h.test("a sideways swipe steps once, however long it runs") { t in
+    var swipe = DockSwipe()
+    t.equal(swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none), nil,
+            "began, before the trackpad has settled on an axis")
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: horizontal), .left,
+            "the first horizontal report is the step")
+    for _ in 0..<40 {
+        t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: horizontal), nil,
+                "the rest of the run is silent — one flick is not ten workspaces")
+    }
+    t.equal(swipe.feed(phase: ended, swipeMask: DockSwipe.Mask.left, motion: horizontal), nil, "ended")
+}
+
+h.test("a swipe whose direction is known on began steps on began") { t in
+    var swipe = DockSwipe()
+    t.equal(swipe.feed(phase: began, swipeMask: DockSwipe.Mask.right, motion: horizontal), .right,
+            "no need to wait for a changed")
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.right, motion: horizontal), nil, "and only once")
+}
+
+h.test("a vertical swipe is swallowed and never steps") { t in
+    var swipe = DockSwipe()
+    t.equal(swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none), nil, "began")
+    for mask in [DockSwipe.Mask.up, DockSwipe.Mask.down] {
+        for _ in 0..<5 {
+            t.equal(swipe.feed(phase: changed, swipeMask: mask, motion: vertical), nil, "vertical, mask \(mask)")
+        }
+    }
+    t.equal(swipe.feed(phase: ended, swipeMask: DockSwipe.Mask.up, motion: vertical), nil, "ended")
+}
+
+h.test("the axis and the direction have to agree before a swipe steps") { t in
+    var swipe = DockSwipe()
+    _ = swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none)
+    t.equal(swipe.feed(phase: changed, swipeMask: 0, motion: horizontal), nil,
+            "horizontal, but no direction yet — not yet, rather than no")
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: DockSwipe.Motion.none), nil,
+            "a direction with no motion behind it")
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left | DockSwipe.Mask.right, motion: horizontal), nil,
+            "both bits is not a direction")
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.up, motion: horizontal), nil,
+            "an up mask on a horizontal motion is nothing this code knows")
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.right, motion: horizontal), .right,
+            "still armed through all of that, so the first real answer steps")
+}
+
+h.test("ended and cancelled both release the latch for the next gesture") { t in
+    var swipe = DockSwipe()
+    for release in [ended, cancelled] {
+        _ = swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none)
+        t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: horizontal), .left, "steps")
+        _ = swipe.feed(phase: release, swipeMask: DockSwipe.Mask.left, motion: horizontal)
+        t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: horizontal), nil,
+                "a changed after \(release) belongs to no gesture")
+    }
+    _ = swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none)
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.right, motion: horizontal), .right,
+            "the next began arms afresh")
+}
+
+h.test("a gesture the tap joined half-way through does not step") { t in
+    var swipe = DockSwipe()
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: horizontal), nil,
+            "no began was seen — the tap was started mid-swipe")
+    _ = swipe.feed(phase: ended, swipeMask: DockSwipe.Mask.left, motion: horizontal)
+    _ = swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none)
+    t.equal(swipe.feed(phase: changed, swipeMask: DockSwipe.Mask.left, motion: horizontal), .left,
+            "the next whole gesture does")
+}
+
+h.test("a phase this code does not know neither arms nor releases") { t in
+    var swipe = DockSwipe()
+    _ = swipe.feed(phase: began, swipeMask: 0, motion: DockSwipe.Motion.none)
+    t.equal(swipe.feed(phase: 16, swipeMask: DockSwipe.Mask.left, motion: horizontal), .left,
+            "an unknown phase is treated as changed: still armed, so a horizontal report steps")
+    _ = swipe.feed(phase: 16, swipeMask: DockSwipe.Mask.left, motion: horizontal)
+    var fresh = DockSwipe()
+    t.equal(fresh.feed(phase: 16, swipeMask: DockSwipe.Mask.left, motion: horizontal), nil,
+            "but it does not arm — a renumbered phase field degrades to swallow-only")
+}
+
+h.test("the swipe follows Natural scrolling the way the Spaces swipe does") { t in
+    t.equal(WorkspaceTarget.swipe(.left, naturalScrolling: true), .next,
+            "content tracks the fingers: dragging the desktop left pulls the next workspace in from the right")
+    t.equal(WorkspaceTarget.swipe(.right, naturalScrolling: true), .previous, "and the other way")
+    t.equal(WorkspaceTarget.swipe(.left, naturalScrolling: false), .previous,
+            "with the setting off macOS reverses its Spaces swipe, and so does toe")
+    t.equal(WorkspaceTarget.swipe(.right, naturalScrolling: false), .next, "and the other way")
+}
+
 // MARK: - Config
 
 h.test("the second floating size is configurable, and a bad one warns") { t in

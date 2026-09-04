@@ -96,11 +96,13 @@ large_height = 0.90
 max_aspect_ratio = 1.6
 
 [gestures]
-# Swallow the Dock's swipe gestures before macOS acts on them. A swipe up would open Mission
-# Control, which puts the windows on hidden workspaces — parked off-screen, since macOS has no
-# public API for virtual desktops — back on display; a sideways swipe would change the macOS
-# Space out from under toe. Ctrl+←/→ still switches Spaces, which is also the way out of a
-# fullscreen app now that swiping is not.
+# Take the Dock's swipe gestures before macOS acts on them. A sideways swipe then moves between
+# toe's workspaces — the ones in use, as SUPER+TAB does — rather than changing the macOS Space
+# out from under toe, and follows System Settings' Natural scrolling the way the Spaces swipe
+# does. A swipe up is swallowed and does nothing: Mission Control would put the windows on
+# hidden workspaces — parked off-screen, since macOS has no public API for virtual desktops —
+# back on display, and toe has nothing to show in its place. Ctrl+←/→ still switches Spaces,
+# which is also the way out of a fullscreen app now that swiping is not.
 swallow_dock_swipes = true
 
 [misc]
