@@ -1221,6 +1221,71 @@ h.test("numbers outside a sensible range are refused too") { t in
     t.equal(ratio.warnings.contains { $0.contains("dwindle.default_split_ratio") }, true, "and says so")
 }
 
+h.test("force_split and split_bias take only their three values") { t in
+    // Both fell through `intValue` unchecked, so `force_split = 7` behaved exactly like 2 and a
+    // typo was indistinguishable from the default.
+    let c = try Config.parse("[dwindle]\nforce_split = 7\nsplit_bias = 9\n")
+    t.equal(c.dwindle.forceSplit, 2, "force_split = 7 keeps the default")
+    t.equal(c.dwindle.splitBias, 0, "split_bias = 9 keeps the default")
+    t.equal(c.warnings, ["dwindle.force_split: must be 0, 1 or 2, using 2",
+                         "dwindle.split_bias: must be 0, 1 or 2, using 0"],
+            "each names the values it could have been and the one it is keeping")
+
+    let negative = try Config.parse("[dwindle]\nforce_split = -1\n")
+    t.equal(negative.dwindle.forceSplit, 2, "a negative force_split keeps the default")
+    t.equal(negative.warnings.count, 1, "and says so")
+
+    let fine = try Config.parse("[dwindle]\nforce_split = 1\nsplit_bias = 2.0\n")
+    t.equal(fine.dwindle.forceSplit, 1, "1 is read")
+    t.equal(fine.dwindle.splitBias, 2, "a whole float still reads as the integer it is")
+    t.equal(fine.warnings, [], "and neither warns")
+
+    let bar = try Config.parse("[bar]\npersistent_workspaces = 11\n")
+    t.equal(bar.warnings, ["bar.persistent_workspaces: must be a whole number from 0 to 10, using \(bar.bar.persistentWorkspaces)"],
+            "a longer list is spelled as a range")
+}
+
+h.test("a number in quotes warns rather than being read as absent") { t in
+    // `gaps_in = "5"` used to fall through `raw?.doubleValue` as nil — the same nil as a key
+    // that was never written — so it was dropped without a word, while `gaps_in = 999` got a
+    // warning. From the outside both read as "toe ignored my config".
+    let c = try Config.parse("""
+        [general]
+        gaps_in = "5"
+        [border]
+        width = "2"
+        [menu]
+        font_size = "18"
+        [dwindle]
+        force_split = "1"
+        [bar]
+        persistent_workspaces = "3"
+        [floating]
+        width = "0.5"
+        max_aspect_ratio = true
+        """)
+    t.equal(c.gaps.inner, 8, "gaps_in in quotes keeps the default")
+    t.equal(c.border.width, 2, "border.width in quotes keeps the default")
+    t.equal(c.menu.fontSize, 18, "menu.font_size in quotes keeps the default")
+    t.equal(c.dwindle.forceSplit, 2, "force_split in quotes keeps the default")
+    t.equal(c.bar.persistentWorkspaces, WorkspaceStrip.defaultPersistent, "persistent_workspaces in quotes keeps the default")
+    t.equal(c.floating.width, 0.70, "floating.width in quotes keeps the default")
+    t.equal(c.floating.maxAspectRatio, Config().floating.maxAspectRatio, "a boolean where a ratio goes keeps the default")
+    t.equal(c.warnings.count, 7, "one warning each")
+    t.expect(c.warnings.contains("general.gaps_in: must be a number, using 8"), "the number is named, and so is what is kept")
+    t.expect(c.warnings.contains("border.width: must be a number, using 2"), "border.width too")
+    t.expect(c.warnings.contains("menu.font_size: must be a number, using 18"), "menu.font_size too")
+    t.expect(c.warnings.contains("dwindle.force_split: must be 0, 1 or 2, using 2"), "a choice names its values")
+    t.expect(c.warnings.contains { $0.hasPrefix("bar.persistent_workspaces: must be") }, "persistent_workspaces too")
+    t.expect(c.warnings.contains("floating.width: must be a number, using 0.7"), "floating.width too")
+    t.expect(c.warnings.contains { $0.hasPrefix("floating.max_aspect_ratio: must be a number") }, "and the boolean")
+
+    // The regression guard that matters: a key that is simply not there is still silent.
+    let absent = try Config.parse("[general]\n[border]\n[menu]\n[dwindle]\n[bar]\n[floating]\n")
+    t.equal(absent.warnings, [], "an absent key is the default, and nothing to warn about")
+    t.equal(absent.gaps.inner, 8, "with the default in place")
+}
+
 h.test("numbers in range are still read, and warn about nothing") { t in
     let c = try Config.parse("""
     [general]
