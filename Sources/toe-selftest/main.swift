@@ -1024,21 +1024,97 @@ h.test("letting go of an edge moves the split to where the window now ends") { t
     t.equal(after[4]?.maxX, before[4]?.maxX, "and nothing on the far side of the display moved")
 }
 
-h.test("resizeactive grows a floating window in place") { t in
+h.test("resizeactive grows a floating window about its centre") { t in
     let wm = draggingFixture()
     wm.toggleFloating(4)
-    guard let before = wm.render().floating[4] else { t.expect(false, "w4 floats"); return }
+    wm.floatingFrames[4] = box(400, 300, 600, 400)
     t.equal(wm.resizeWindow(4, dx: 50, dy: 20), true, "a float takes the delta as size")
-    guard let after = wm.render().floating[4] else { t.expect(false, "w4 still floats"); return }
-    t.equal(after.w, before.w + 50, "wider by 50")
-    t.equal(after.h, before.h + 20, "taller by 20")
-    t.equal(after.x, before.x, "the corner stayed where it was")
-    t.equal(after.y, before.y, "in both axes")
+    t.equalBox(wm.render().floating[4], box(375, 290, 650, 420),
+               "split between both edges — the centre is where it was")
 
-    wm.resizeWindow(4, dx: -5000, dy: -5000)
-    t.equal(wm.render().floating[4]?.w, 100, "and it cannot be shrunk out of reach")
+    wm.floatingFrames[4] = box(400, 300, 600, 400)
     t.equal(wm.growWindow(4, dx: 30, dy: 0), true, "growactive on a float")
-    t.equal(wm.render().floating[4]?.w, 130, "is the same thing — a float has no split to be relative to")
+    t.equalBox(wm.render().floating[4], box(385, 300, 630, 400),
+               "is the same thing — a float has no split to be relative to")
+
+    wm.floatingFrames[4] = box(400, 300, 600, 400)
+    wm.growWindow(4, dx: -5000, dy: -5000)
+    t.equalBox(wm.render().floating[4], box(650, 450, 100, 100),
+               "it cannot be shrunk out of reach, and the floor is centred like any other size")
+
+    wm.floatingFrames[4] = box(400, 300, 601, 401)
+    wm.growWindow(4, dx: 0, dy: 0)
+    t.equalBox(wm.render().floating[4], box(400, 300, 601, 401), "nothing to share out, nothing moves")
+}
+
+h.test("a float growing about its centre is kept on the display, inside gaps_out") { t in
+    let wm = draggingFixture()   // Gaps() — gaps_out is 15
+    wm.toggleFloating(4)
+    wm.floatingFrames[4] = box(0, 0, 600, 400)   // flush with the top-left corner
+    wm.growWindow(4, dx: 100, dy: 100)
+    t.equalBox(wm.render().floating[4], box(15, 15, 700, 500),
+               "it grew, it did not slide off — and it landed on the gap, not the edge")
+
+    wm.floatingFrames[4] = box(912, 582, 600, 400)   // flush with the bottom-right corner
+    wm.growWindow(4, dx: 100, dy: 100)
+    t.equalBox(wm.render().floating[4], box(797, 467, 700, 500), "and the same at the far corner")
+
+    wm.floatingFrames[4] = box(100, 100, 1400, 800)
+    wm.growWindow(4, dx: 400, dy: 0)
+    t.equalBox(wm.render().floating[4], box(15, 100, 1482, 800),
+               "asked to outgrow the display, it fills the display inside gaps_out instead")
+    wm.growWindow(4, dx: 100, dy: 0)
+    t.equalBox(wm.render().floating[4], box(15, 100, 1482, 800), "and stops there")
+    wm.growWindow(4, dx: -100, dy: 0)
+    t.equalBox(wm.render().floating[4], box(65, 100, 1382, 800), "shrinking back is still centred")
+
+    wm.gaps = Gaps(inner: 8, outer: 40)
+    wm.floatingFrames[4] = box(100, 100, 1400, 800)
+    wm.growWindow(4, dx: 400, dy: 0)
+    t.equalBox(wm.render().floating[4], box(40, 100, 1432, 800), "the margin is the configured gaps_out")
+}
+
+h.test("a float let go of past the margin snaps back inside it") { t in
+    let wm = draggingFixture()   // Gaps() — gaps_out is 15
+    wm.toggleFloating(4)
+    wm.floatingFrames[4] = box(300, 200, 600, 400)
+    t.equal(wm.settleFloat(4), false, "well inside: nothing to do, and nothing to write")
+    t.equalBox(wm.render().floating[4], box(300, 200, 600, 400), "left exactly where it was")
+
+    wm.floatingFrames[4] = box(-100, -50, 600, 400)   // dropped past the top-left corner
+    t.equal(wm.settleFloat(4), true, "past the corner, it moves")
+    t.equalBox(wm.render().floating[4], box(15, 15, 600, 400), "onto the gap, its size untouched")
+
+    wm.floatingFrames[4] = box(1000, 700, 600, 400)   // and past the bottom-right one
+    wm.settleFloat(4)
+    t.equalBox(wm.render().floating[4], box(897, 567, 600, 400), "the same at the far corner")
+
+    wm.floatingFrames[4] = box(5, 300, 600, 400)   // dropped inside the gap band
+    wm.settleFloat(4)
+    t.equalBox(wm.render().floating[4], box(15, 300, 600, 400), "the band is out of bounds too")
+
+    wm.floatingFrames[4] = box(-100, 100, 1600, 400)   // wider than the display
+    wm.settleFloat(4)
+    t.equalBox(wm.render().floating[4], box(15, 100, 1482, 400), "too big to fit is cut to the margin")
+
+    t.equal(wm.settleFloat(1), false, "a tile has no float to settle")
+}
+
+h.test("a float dropped on the other display comes back to its workspace's display") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+    wm.switchTo(workspace: wm.activeWorkspace[1]!)
+    wm.addWindow(1); wm.addWindow(2)
+    wm.toggleFloating(2)
+
+    wm.floatingFrames[2] = box(3000, 800, 600, 400)   // dragged onto the right display
+    wm.settleFloat(2)
+    t.equalBox(wm.render().floating[2], box(897, 567, 600, 400),
+               "back on its own display, at the nearest edge — where the render would have recentred it")
+    t.equal(wm.workspaceIndex(of: 2), wm.activeWorkspace[1], "its workspace is unchanged")
 }
 
 // MARK: - Dock swipes
