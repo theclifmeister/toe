@@ -278,7 +278,7 @@ public struct Config: Equatable {
     /// a gap of 1024 points) along with the non-finite.
     static func number(_ raw: TOMLValue?, _ path: String, in range: ClosedRange<Double>,
                        keeping current: Double, warnings: inout [String]) -> Double? {
-        guard let value = raw?.doubleValue else { return nil }
+        guard let value = numeric(raw, path, keeping: current, warnings: &warnings) else { return nil }
         guard value.isFinite, range.contains(value) else {
             warnings.append("\(path): must be a number from \(brief(range.lowerBound)) to "
                             + "\(brief(range.upperBound)), using \(brief(current))")
@@ -287,9 +287,60 @@ public struct Config: Equatable {
         return value
     }
 
+    /// The number a key holds, before any question of range — or nil, which means one of two
+    /// things and says which.
+    ///
+    /// A key that is absent is nil and silent: the default is what was asked for. A key that is
+    /// present and *not a number* — `gaps_in = "5"`, a number in quotes, is the one people
+    /// actually write — is nil with a warning, because from the outside it is indistinguishable
+    /// from "toe ignored my config", which is the failure the warnings exist to prevent. Before
+    /// this the two collapsed into one `raw?.doubleValue`, so a wrong type was dropped without
+    /// a word while a number merely out of range got a good one. `[misc]` and `[gestures]` had
+    /// already taken the trouble to tell absent from wrong for their booleans; this is the same
+    /// distinction for every numeric key.
+    static func numeric(_ raw: TOMLValue?, _ path: String,
+                        keeping current: Double, warnings: inout [String]) -> Double? {
+        guard let raw else { return nil }
+        guard let value = raw.doubleValue else {
+            warnings.append("\(path): must be a number, using \(brief(current))")
+            return nil
+        }
+        return value
+    }
+
+    /// One whole number from a short list of allowed values, or nil — with a warning naming the
+    /// list — when the key is present and holds anything else.
+    ///
+    /// For the keys that are a choice rather than a quantity: `force_split` is 0, 1 or 2 and
+    /// `force_split = 7` is a typo, not a large split. Without this it fell through to the
+    /// `else` in `DwindleLayout.insert` and behaved exactly like 2, so a mistake was
+    /// indistinguishable from the default. A float that is a whole number still reads as the
+    /// integer it is (`intValue` truncates toward zero), so `force_split = 2.0` keeps working;
+    /// a string, a bool, or a number off the list warns and keeps `current`.
+    static func choice(_ raw: TOMLValue?, _ path: String, among allowed: ClosedRange<Int>,
+                       keeping current: Int, warnings: inout [String]) -> Int? {
+        guard let raw else { return nil }
+        guard let value = raw.intValue, allowed.contains(value) else {
+            warnings.append("\(path): must be \(spell(allowed)), using \(current)")
+            return nil
+        }
+        return value
+    }
+
     /// `5` rather than `5.0`, so the warnings read the way the config file is written.
     private static func brief(_ value: Double) -> String {
         value == value.rounded() && abs(value) < 1e15 ? String(Int(value)) : String(value)
+    }
+
+    /// `0, 1 or 2` when the list is short enough to be read as one, since a typo wants to see
+    /// the values it could have been; `a whole number from 0 to 10` when it is not.
+    private static func spell(_ allowed: ClosedRange<Int>) -> String {
+        let values = Array(allowed)
+        guard values.count <= 3, let last = values.last else {
+            return "a whole number from \(allowed.lowerBound) to \(allowed.upperBound)"
+        }
+        guard values.count > 1 else { return String(last) }
+        return values.dropLast().map(String.init).joined(separator: ", ") + " or \(last)"
     }
 
     public static func parse(_ text: String) throws -> Config {
@@ -317,7 +368,10 @@ public struct Config: Equatable {
 
         if let d = root["dwindle"]?.tableValue {
             if let v = d["preserve_split"]?.boolValue { config.dwindle.preserveSplit = v }
-            if let v = d["force_split"]?.intValue { config.dwindle.forceSplit = v }
+            if let v = choice(d["force_split"], "dwindle.force_split", among: 0...2,
+                              keeping: config.dwindle.forceSplit, warnings: &config.warnings) {
+                config.dwindle.forceSplit = v
+            }
             if let v = d["smart_split"]?.boolValue { config.dwindle.smartSplit = v }
             if let v = number(d["split_width_multiplier"], "dwindle.split_width_multiplier", in: 0.1...10,
                               keeping: config.dwindle.splitWidthMultiplier, warnings: &config.warnings) {
@@ -329,7 +383,10 @@ public struct Config: Equatable {
                               keeping: config.dwindle.defaultSplitRatio, warnings: &config.warnings) {
                 config.dwindle.defaultSplitRatio = v
             }
-            if let v = d["split_bias"]?.intValue { config.dwindle.splitBias = v }
+            if let v = choice(d["split_bias"], "dwindle.split_bias", among: 0...2,
+                              keeping: config.dwindle.splitBias, warnings: &config.warnings) {
+                config.dwindle.splitBias = v
+            }
         }
 
         if let b = root["border"]?.tableValue {
@@ -354,38 +411,40 @@ public struct Config: Equatable {
         }
 
         if let b = root["bar"]?.tableValue {
-            if let v = b["persistent_workspaces"]?.intValue {
-                let allowed = 0...WorkspaceManager.workspaceCount
-                if allowed.contains(v) {
-                    config.bar.persistentWorkspaces = v
-                } else {
-                    config.warnings.append("bar.persistent_workspaces: must be 0 ... \(WorkspaceManager.workspaceCount), using \(config.bar.persistentWorkspaces)")
-                }
+            if let v = choice(b["persistent_workspaces"], "bar.persistent_workspaces",
+                              among: 0...WorkspaceManager.workspaceCount,
+                              keeping: config.bar.persistentWorkspaces, warnings: &config.warnings) {
+                config.bar.persistentWorkspaces = v
             }
         }
 
         if let f = root["floating"]?.tableValue {
-            if let v = f["width"]?.doubleValue {
+            if let v = numeric(f["width"], "floating.width",
+                               keeping: config.floating.width, warnings: &config.warnings) {
                 if v > 0, v <= 1 { config.floating.width = v } else {
                     config.warnings.append("floating.width: must be over 0 and at most 1, using \(config.floating.width)")
                 }
             }
-            if let v = f["height"]?.doubleValue {
+            if let v = numeric(f["height"], "floating.height",
+                               keeping: config.floating.height, warnings: &config.warnings) {
                 if v > 0, v <= 1 { config.floating.height = v } else {
                     config.warnings.append("floating.height: must be over 0 and at most 1, using \(config.floating.height)")
                 }
             }
-            if let v = f["large_width"]?.doubleValue {
+            if let v = numeric(f["large_width"], "floating.large_width",
+                               keeping: config.floating.largeWidth, warnings: &config.warnings) {
                 if v > 0, v <= 1 { config.floating.largeWidth = v } else {
                     config.warnings.append("floating.large_width: must be over 0 and at most 1, using \(config.floating.largeWidth)")
                 }
             }
-            if let v = f["large_height"]?.doubleValue {
+            if let v = numeric(f["large_height"], "floating.large_height",
+                               keeping: config.floating.largeHeight, warnings: &config.warnings) {
                 if v > 0, v <= 1 { config.floating.largeHeight = v } else {
                     config.warnings.append("floating.large_height: must be over 0 and at most 1, using \(config.floating.largeHeight)")
                 }
             }
-            if let v = f["max_aspect_ratio"]?.doubleValue {
+            if let v = numeric(f["max_aspect_ratio"], "floating.max_aspect_ratio",
+                               keeping: config.floating.maxAspectRatio, warnings: &config.warnings) {
                 if v > 0 { config.floating.maxAspectRatio = v } else {
                     config.warnings.append("floating.max_aspect_ratio: must be over 0, using \(config.floating.maxAspectRatio)")
                 }
