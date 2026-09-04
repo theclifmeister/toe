@@ -645,15 +645,59 @@ h.test("a workspace follows its monitor") { t in
     t.equalBox(wm.workspaces[5]?.layout.idealBox(of: 1), wm.monitor(id: home)!.usable,
                "the window fills its monitor's usable area")
 
-    // Switching to the other monitor's active workspace moves focus there.
+    // Switching to the other monitor's active workspace moves focus there — to a window on it,
+    // not just to the monitor. With a window on each side this used to leave `focusedWindow` on
+    // the display the focus was supposed to be leaving: `refocusVisible` picked the most recent
+    // window across *every* monitor, and the one you were standing on always won.
     let otherMonitor = wm.monitors.first { $0.id != home }!.id
     let otherWorkspace = wm.activeWorkspace[otherMonitor]!
     wm.switchTo(workspace: otherWorkspace)
+    wm.addWindow(2)
+    wm.switchTo(workspace: 5)
+    t.equal(wm.focusedWindow, 1, "back on workspace 5, its window has the focus")
+    wm.switchTo(workspace: otherWorkspace)
     t.equal(wm.focusedMonitorID, otherMonitor, "focus moved to the monitor owning that workspace")
+    t.equal(wm.focusedWindow, 2, "and to the window on it, not the one it came from")
+    t.equal(wm.render().focus, 2, "which is what the coordinator is told to focus")
 
     // And coming back to workspace 5 returns to its own monitor.
     wm.switchTo(workspace: 5)
     t.equal(wm.focusedMonitorID, home, "workspace 5 pulled focus back to its monitor")
+    t.equal(wm.focusedWindow, 1, "and its window has the focus again")
+    t.equal(wm.render().focus, 1, "for the coordinator too")
+}
+
+h.test("an empty workspace has no focused window, on either monitor") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+    wm.switchTo(workspace: 2); wm.addWindow(20)       // a window on monitor 2
+    wm.switchTo(workspace: 1); wm.addWindow(10)       // a window on monitor 1
+
+    // Bringing an empty workspace up on monitor 1 used to hand the focus to monitor 2's window:
+    // `focusedWindow` was the most recent window visible *anywhere*, and with w10 stashed that
+    // was w20. Every command then acted on a window on a display the focus had not gone to.
+    wm.switchTo(workspace: 5)
+    t.equal(wm.focusedMonitorID, 1, "workspace 5 came up on the monitor that asked for it")
+    t.equal(wm.focusedWindow, nil, "an empty workspace has nothing to focus")
+    t.equal(wm.render().focus, nil, "so the coordinator is told to focus nothing")
+    t.equal(wm.windowInDirection(.right), nil, "movefocus has nowhere to start from")
+    t.equal(wm.swapWindow(.right), false, "swapwindow has nothing to swap")
+    wm.moveFocusedWindow(toWorkspace: 6, follow: false)
+    t.equal(wm.workspaceIndex(of: 20), 2, "movetoworkspace did not reach across to w20")
+
+    // Clicking into the other display is a real focus notification, and that still lands.
+    wm.noteFocus(20)
+    t.equal(wm.focusedMonitorID, 2, "a real focus on w20 moves to its monitor")
+    t.equal(wm.focusedWindow, 20, "and w20 is the focused window")
+
+    // The same empty workspace already showing on the *other* monitor: focus goes there and
+    // stops, rather than staying on w20.
+    wm.switchTo(workspace: 5)
+    t.equal(wm.focusedMonitorID, 1, "workspace 5 is on monitor 1, so the focus went there")
+    t.equal(wm.focusedWindow, nil, "with nothing on it to focus")
 }
 
 // MARK: - Stacking
