@@ -72,6 +72,11 @@ public final class WorkspaceManager {
     /// How big a window is when it leaves the tree. See `centredFloatingBox`.
     public var floatingSize = FloatingSize()
 
+    /// The floor on how many slots the menu bar strip has — `bar.persistent_workspaces`. It
+    /// lives here as well as in `StatusItem` because `workspace next` / `prev` cycle the
+    /// strip, so the layout has to know how long the strip is.
+    public var persistentWorkspaces = WorkspaceStrip.defaultPersistent
+
     public init(options: DwindleOptions = DwindleOptions(), gaps: Gaps = Gaps()) {
         self.options = options
         self.gaps = gaps
@@ -528,13 +533,14 @@ public final class WorkspaceManager {
         if let prev = previousWorkspace[focusedMonitorID] { switchTo(workspace: prev) }
     }
 
-    /// `workspace e+1` / `e-1`. Cycles through the workspaces in use — the ones with windows
-    /// on them, plus whatever the monitors are showing — rather than all ten, so a press never
-    /// lands on a blank slot you would have to press past. With nothing else in use it does
-    /// nothing, and the workspace you are on always counts as one of them.
+    /// `workspace e+1` / `e-1`. Cycles through exactly what the menu bar strip is showing —
+    /// the workspaces in use, plus whatever empty ones `persistentWorkspaces` pads the strip
+    /// out to — rather than all ten. So a press never lands on a slot you cannot see, and
+    /// never skips one you can: the strip is the map, and TAB walks it. With nothing else on
+    /// it the press does nothing, and the workspace you are on is always on it.
     public func switchToRelativeWorkspace(_ delta: Int) {
         let current = focusedWorkspaceIndex
-        let ring = (1...Self.workspaceCount).filter { $0 == current || inUse(workspace: $0) }
+        let ring = WorkspaceStrip.slots(for: stripStates(), persistent: persistentWorkspaces)
         guard ring.count > 1, let position = ring.firstIndex(of: current) else { return }
         var next = (position + delta) % ring.count
         if next < 0 { next += ring.count }
@@ -812,10 +818,20 @@ public extension WorkspaceManager {
         activeWorkspace.first { $0.value == index }?.key
     }
 
-    /// Whether a workspace is one of the ones you are actually using: it holds windows, or a
-    /// monitor is showing it right now. This is what the strip draws as anything but a dim
-    /// digit, and what `workspace e+1` cycles through.
-    func inUse(workspace index: Int) -> Bool {
-        !isEmpty(workspace: index) || monitorShowing(workspace: index) != nil
+    /// Every workspace as the strip sees it — what `Coordinator` hands the menu bar, and what
+    /// `workspace e+1` cycles.
+    ///
+    /// This replaced an `inUse(workspace:)` that answered the same question one workspace at a
+    /// time. "Is this one in use" now belongs to `WorkspaceStrip.slots`, which asks it of the
+    /// whole bar at once and only then works out how much padding the answers leave room for —
+    /// a per-workspace helper cannot see the count, and the count is the rule.
+    func stripStates() -> [WorkspaceStrip.State] {
+        let focused = focusedWorkspaceIndex
+        return (1...Self.workspaceCount).map { index in
+            WorkspaceStrip.State(index: index,
+                                 isFocused: index == focused,
+                                 isVisible: monitorShowing(workspace: index) != nil,
+                                 isEmpty: isEmpty(workspace: index))
+        }
     }
 }

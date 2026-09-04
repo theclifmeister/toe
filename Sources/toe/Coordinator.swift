@@ -441,6 +441,8 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.options = config.dwindle
         workspaces.gaps = config.gaps
         workspaces.floatingSize = config.floating
+        // Both the strip and `workspace next` read this: the bar draws the slots, TAB walks them.
+        workspaces.persistentWorkspaces = config.bar.persistentWorkspaces
         tracker.floatRules = config.floatRules
         border.apply(config.border)
         status.persistentWorkspaces = config.bar.persistentWorkspaces
@@ -931,16 +933,10 @@ final class Coordinator: WindowTrackerDelegate {
 
     /// What the strip in the menu bar title draws. This runs on every focus change and every
     /// adopted window, so it stays to what the strip actually reads — no window lists, no app
-    /// names, and above all no icons.
+    /// names, and above all no icons. It is the layout's own answer rather than a second one
+    /// built here, because `workspace next` cycles the same list.
     private func workspaceStates() -> [WorkspaceStrip.State] {
-        let focusedIndex = workspaces.focusedWorkspaceIndex
-
-        return (1...WorkspaceManager.workspaceCount).map { index in
-            WorkspaceStrip.State(index: index,
-                                 isFocused: index == focusedIndex,
-                                 isVisible: workspaces.monitorShowing(workspace: index) != nil,
-                                 isEmpty: workspaces.isEmpty(workspace: index))
-        }
+        workspaces.stripStates()
     }
 
     // MARK: - Monitors

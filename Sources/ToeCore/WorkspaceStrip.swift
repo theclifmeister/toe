@@ -9,8 +9,8 @@ import Foundation
 /// lands on one. `StatusItem` draws the result.
 public enum WorkspaceStrip {
 
-    /// Omarchy's waybar declares `persistent-workspaces` 1-5, so those five keep a slot on
-    /// the bar whether or not anything is on them.
+    /// Omarchy's waybar declares `persistent-workspaces` 1-5, so the bar never has fewer
+    /// than five slots on it — see `slots` for what that does and does not mean.
     public static let defaultPersistent = 5
 
     /// What the strip needs to know about one workspace.
@@ -51,13 +51,34 @@ public enum WorkspaceStrip {
         public let dim: Bool
     }
 
-    /// A workspace earns a slot by being one of the first `persistent` — Omarchy's
-    /// `persistent-workspaces` — or by having windows on it, or by being on screen right
-    /// now. So the first five are always there, and past those the strip stays as short as
-    /// what you are actually using.
+    /// Which workspaces earn a slot, in the order they were given.
+    ///
+    /// A workspace earns one on merit by having windows on it or by being on screen right
+    /// now. `persistent` — Omarchy's `persistent-workspaces` — is then a *floor on how many
+    /// slots the strip has*, not a claim on the first five indices: only if fewer than
+    /// `persistent` workspaces earned a slot is the strip padded out to that many, with the
+    /// lowest empty ones. So a fresh session shows 1-5 and six workspaces in use show six,
+    /// where taking `index <= persistent` literally used to wedge an empty 4 in between a
+    /// busy 3 and 5 that had no need of the padding. Learned at v0.15.0.
+    public static func slots(for states: [State],
+                             persistent: Int = defaultPersistent) -> [Int] {
+        let earned = states.filter { !$0.isEmpty || $0.isVisible }
+        guard earned.count < persistent else { return earned.map(\.index) }
+
+        // Pad in the order given — callers hand over 1-10 ascending, so this is Omarchy's
+        // 1, 2, 3... and stops the moment the strip is `persistent` long.
+        let padding = states.lazy
+            .filter { $0.isEmpty && !$0.isVisible }
+            .prefix(persistent - earned.count)
+        let keep = Set(earned.map(\.index)).union(padding.map(\.index))
+        return states.map(\.index).filter(keep.contains)
+    }
+
+    /// The strip itself: `slots`, each labelled and marked the way waybar does it.
     public static func items(for states: [State],
                              persistent: Int = defaultPersistent) -> [Item] {
-        states.filter { $0.index <= persistent || !$0.isEmpty || $0.isVisible }.map { state in
+        let keep = Set(slots(for: states, persistent: persistent))
+        return states.filter { keep.contains($0.index) }.map { state in
             Item(index: state.index,
                  label: state.index == 10 ? "0" : "\(state.index)",
                  marker: state.isFocused ? .focused : (state.isVisible ? .visible : .digit),

@@ -182,8 +182,10 @@ prevent_hiding = true
 restore_session = true
 
 [bar]
-# waybar's persistent-workspaces: Omarchy keeps slots 1-5 on the bar even when they are
-# empty, dimmed. 0 shows only the workspaces in use; 10 always shows all ten.
+# waybar's persistent-workspaces: the fewest slots the bar ever has, so a fresh session still
+# shows 1-5, the empty ones dimmed. It is a floor and not a claim on the first five: once five
+# workspaces are in use the padding has nothing left to do, and an empty 4 between a busy 3 and
+# 5 is not drawn. 0 shows only the workspaces in use; 10 always shows all ten.
 persistent_workspaces = 5
 
 [menu]
@@ -253,8 +255,9 @@ font_size  = 18
 # Same, without following the window:  "movetoworkspacesilent 3"
 
 # ── Cycling ───────────────────────────────────────────────────────────────────
-# next/prev walk only the workspaces in use — the ones with windows on them, plus whatever the
-# other displays are showing — so a press never lands on a blank slot.
+# next/prev walk exactly the slots on the menu bar — the workspaces in use, plus the empty ones
+# bar.persistent_workspaces pads them out to — so a press never lands somewhere you cannot see
+# and never skips somewhere you can.
 "super-tab"       = "workspace next"
 "super-shift-tab" = "workspace prev"
 "super-ctrl-tab"  = "workspace previous"
