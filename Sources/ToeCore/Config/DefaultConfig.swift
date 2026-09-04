@@ -81,7 +81,8 @@ name = ""
 
 [border]
 # Highlights the focused window. Omarchy's col.active_border gradient — and what you see when no
-# theme is set above, since a theme replaces both stops with one flat accent.
+# theme is set above, since a theme replaces both stops with one flat accent. SUPER+SPACE > Setup
+# has this switch as well, and rewrites this line.
 enabled      = true
 width        = 2
 active_start = "#33ccffee"
@@ -125,6 +126,10 @@ swallow_dock_swipes = true
 # the swipe switches instantly, as it does now. macOS 15 reminds you now and then that toe can
 # record the screen — it captures for the moment of a swipe and keeps nothing. The swipe only:
 # it is the gesture the Spaces slide belongs to. SUPER+1…0 and SUPER+TAB stay instant.
+#
+# SUPER+SPACE > Setup has this switch, and throwing it there rewrites this line — the menu and
+# this file are the same setting, so there is nothing to keep in step. It is also where the
+# permission prompt comes from, with the row you pressed still on screen to explain it.
 slide_on_swipe = false
 # Seconds. Spaces takes about a third of one.
 slide_duration = 0.3
@@ -156,7 +161,10 @@ disable_edge_tiling = true
 # default install, for something SUPER+SPACE reaches instead. toe turns on the setting System
 # Settings › Desktop & Dock calls "Automatically hide and show the Dock", which hands the strip
 # back and leaves the Dock one mouse-to-the-edge away, and turns it off again when it quits. A
-# Dock you already auto-hide yourself is left alone.
+# Dock you already auto-hide yourself is left alone: this line is toe making sure the strip is
+# there, not toe taking your Dock over. SUPER+SPACE > Setup has this switch too, and that one is
+# you asking rather than toe maintaining — throwing it there moves the Dock either way, including
+# back into view on a machine that was hiding it before toe ever started.
 autohide_dock = true
 
 # ⌘H and ⌘⌥H take an application's windows out of the layout without closing them — the tree

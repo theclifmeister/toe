@@ -205,12 +205,13 @@ public enum CommandParser {
             case "", "root", "go":                    return .menu(.root)
             case "keybindings", "keys":               return .menu(.keybindings)
             case "learn":                             return .menu(.learn)
-            case "trigger":                           return .menu(.trigger)
-            case "toggle", "toggles":                 return .menu(.toggle)
             case "style":                             return .menu(.style)
             case "theme", "themes":                   return .menu(.theme)
             case "background", "backgrounds", "wallpaper": return .menu(.background)
-            case "setup", "settings":                 return .menu(.setup)
+            // `trigger` and `toggles` opened the borrowed `Trigger › Toggle` level, which held
+            // one switch and is gone; the switch is a Setup row now, so the aliases follow it
+            // there rather than becoming an error in a config that was right when it was written.
+            case "setup", "settings", "trigger", "toggle", "toggles": return .menu(.setup)
             case "install":                           return .menu(.install)
             case "remove", "uninstall":               return .menu(.remove)
             default:                    throw CommandError.badArgument(name, argument)

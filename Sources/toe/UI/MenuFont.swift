@@ -103,8 +103,6 @@ enum MenuFont {
         case .power:     return "\u{F011}"   // nf-fa-power_off
         case .toggleOn:  return "\u{F205}"   // nf-fa-toggle_on
         case .toggleOff: return "\u{F204}"   // nf-fa-toggle_off
-        case .rocket:    return "\u{F135}"   // nf-fa-rocket — upstream draws Trigger as one too
-        case .sliders:   return "\u{F1DE}"   // nf-fa-sliders
         case .paintbrush: return "\u{F1FC}"  // nf-fa-paint_brush
         case .droplet:   return "\u{F043}"   // nf-fa-tint
         case .image:     return "\u{F03E}"   // nf-fa-picture_o
@@ -126,8 +124,6 @@ enum MenuFont {
         case .power:     return "power"
         case .toggleOn:  return "switch.2"
         case .toggleOff: return "switch.2"
-        case .rocket:    return "bolt"
-        case .sliders:   return "slider.horizontal.3"
         case .paintbrush: return "paintbrush"
         case .droplet:   return "drop"
         case .image:     return "photo"

@@ -34,8 +34,6 @@ public struct MenuRoute: Equatable, Sendable {
     public static let style = MenuRoute(path: ["Style"])
     public static let theme = MenuRoute(path: ["Style", "Theme"])
     public static let background = MenuRoute(path: ["Style", "Background"])
-    public static let trigger = MenuRoute(path: ["Trigger"])
-    public static let toggle = MenuRoute(path: ["Trigger", "Toggle"])
     public static let setup = MenuRoute(path: ["Setup"])
     public static let install = MenuRoute(path: ["Install"])
     public static let remove = MenuRoute(path: ["Remove"])
@@ -49,7 +47,6 @@ public struct MenuItem: Equatable {
     /// moves rather than every test that mentions a row.
     public enum Icon: Equatable, Sendable {
         case gear, book, keyboard, pencil, power, toggleOn, toggleOff
-        case rocket, sliders
         case paintbrush, droplet, image
         case download, trash, info, globe
     }
@@ -59,10 +56,10 @@ public struct MenuItem: Equatable {
         case page(MenuPage)
         case run(Command)
         case toggleLoginItem
-        /// The Trigger › Toggle row for `animations.slide_on_swipe`. Its own case rather than a
+        /// One of the Setup switches — which one is the payload. Its own case rather than a
         /// `.run`, for the reason the login toggle has one: the row's value flips under the
         /// cursor and the menu stays open, which no `Command` does.
-        case toggleSlide
+        case toggleSetting(ConfigSwitch)
         /// A row that says something and does nothing when you press it — "Fetching Omarchy's
         /// themes…". The alternative was leaving the level looking like a short list rather than
         /// an unfinished one, which is the sort of thing you stare at wondering if it is broken.
@@ -182,6 +179,71 @@ public struct StyleMenu: Equatable {
     }
 }
 
+/// A Setup row that flips one boolean in `toe.toml`.
+///
+/// The case names the line it writes — which table, which key, and how to read it back — because
+/// everything between the row and the file is otherwise the same code once per switch: the menu
+/// builds a row from `value(in:)`, `MenuState` hands the case straight back, and
+/// `Coordinator.toggle` writes `key` into `table` and reloads. A fourth switch is a case here and
+/// nothing anywhere else.
+///
+/// Only settings that are *worth* a row belong here — a switch in the menu is a switch somebody
+/// will throw while looking at what it does, so it wants an effect they can see. These three
+/// change the screen the moment they are written. `restore_session` does not, and is not here.
+public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
+    /// `[animations] slide_on_swipe`. The one that can ask for a permission — see
+    /// `Coordinator.toggle` on why the flip goes through the file.
+    case slide
+    /// `[border] enabled`. The gradient around the focused window.
+    case border
+    /// `[misc] autohide_dock`. Hands the Dock's strip of screen back to the tiles.
+    case dock
+
+    /// The row's title. Says what the setting does rather than what the key is called, because
+    /// the key is one grep away and the row is not.
+    public var title: String {
+        switch self {
+        case .slide:  return "Workspace slide"
+        case .border: return "Focus border"
+        case .dock:   return "Auto-hide Dock"
+        }
+    }
+
+    public var table: String {
+        switch self {
+        case .slide:  return "animations"
+        case .border: return "border"
+        case .dock:   return "misc"
+        }
+    }
+
+    public var key: String {
+        switch self {
+        case .slide:  return "slide_on_swipe"
+        case .border: return "enabled"
+        case .dock:   return "autohide_dock"
+        }
+    }
+
+    public func value(in config: Config) -> Bool {
+        switch self {
+        case .slide:  return config.animations.slideOnSwipe
+        case .border: return config.border.enabled
+        case .dock:   return config.misc.autohideDock
+        }
+    }
+
+    /// The value written into a config in memory, for the one caller that has to show a row
+    /// before the file has been read back — `QuickMenu`, redrawing the level under the cursor.
+    public func set(_ on: Bool, in config: inout Config) {
+        switch self {
+        case .slide:  config.animations.slideOnSwipe = on
+        case .border: config.border.enabled = on
+        case .dock:   config.misc.autohideDock = on
+        }
+    }
+}
+
 /// The menu's contents.
 ///
 /// Deliberately a function of the state it displays rather than a constant: a "Run on startup"
@@ -202,24 +264,23 @@ public enum MenuModel {
     /// theme, a background and an already-installed row.
     public static let checkmark = "✓"
 
-    public static func root(loginItem: LoginItemState, bindings: [Binding],
+    public static func root(loginItem: LoginItemState, config: Config,
                             style: StyleMenu = StyleMenu(),
-                            version: String? = nil,
-                            slideOnSwipe: Bool = false) -> [MenuItem] {
+                            version: String? = nil) -> [MenuItem] {
         // Omarchy's root order, with the rows toe has no analogue for left out: Apps, **Learn**,
-        // **Trigger**, **Style**, **Setup**, **Install**, **Remove**, Update, **About**, System.
+        // Trigger, **Style**, **Setup**, **Install**, **Remove**, Update, **About**, System.
         // Quit is toe's own and goes last, after everything ported.
         var items: [MenuItem] = [
             MenuItem(title: "Learn", icon: .book, action: .submenu(learn())),
-            MenuItem(title: "Trigger", icon: .rocket,
-                     action: .submenu(trigger(slideOnSwipe: slideOnSwipe))),
             MenuItem(title: "Style", icon: .paintbrush, action: .submenu(MenuModel.style(style))),
         ]
-        // Setup can come out empty — neither of its rows is guaranteed — and a row that leads
-        // into an empty level is worse than no row, so the parent goes with it. That is Omarchy's
-        // rule for a submenu whose children have all failed their `when`, applied here by hand
-        // because toe's levels are built rather than filtered.
-        let setupRows = setup(loginItem: loginItem, bindings: bindings)
+        // A row that leads into an empty level is worse than no row, so the parent goes with an
+        // empty Setup. That is Omarchy's rule for a submenu whose children have all failed their
+        // `when`, applied here by hand because toe's levels are built rather than filtered. The
+        // slide switch is unconditional, so as things stand the level cannot come out empty — but
+        // which of these rows survives is a function of the machine, and the guard is what keeps
+        // the day one of them goes conditional again from putting a dead row at the root.
+        let setupRows = setup(loginItem: loginItem, config: config)
         if !setupRows.isEmpty {
             items.append(MenuItem(title: "Setup", icon: .gear, action: .submenu(setupRows)))
         }
@@ -259,31 +320,6 @@ public enum MenuModel {
             MenuItem(title: "Hyprland", icon: .globe,
                      action: .run(.exec("open https://wiki.hypr.land/"))),
         ]
-    }
-
-    /// Omarchy's `Trigger` level: Emoji, Reminder, Capture, Transcode, Share, **Toggle**,
-    /// Hardware, Speed Test. One survives. The rest are Linux tools — an emoji picker, ffmpeg,
-    /// a share sheet, a touchpad switch — that a Mac either has of its own or has no need of, so
-    /// they fail their `when` here the way an upstream row does on a machine without the
-    /// hardware. Toggle stays because it holds a row toe can honour, and a level with one live
-    /// descendant is listed: that is the Setup rule read the other way round.
-    public static func trigger(slideOnSwipe: Bool) -> [MenuItem] {
-        [MenuItem(title: "Toggle", icon: .sliders, action: .submenu(toggles(slideOnSwipe: slideOnSwipe)))]
-    }
-
-    /// Omarchy's `Trigger › Toggle` level — where upstream keeps every switch that is on or off
-    /// *right now*: Stay Awake, Notifications, Screensaver, Nightlight, Menu Bar, and the
-    /// Hyprland ones, Workspace Layout and Window Gaps. None of those ten has a Mac analogue
-    /// toe can throw from here yet, so the level opens with toe's own row, where an Omarchy
-    /// user would go looking for a switch. (Run on startup is under Setup, not here, on
-    /// purpose: it is how toe *starts*, like upstream's Direct Boot, not what is on at the
-    /// moment.) Also built on its own, by the menu, when throwing the switch rebuilds the level
-    /// under the cursor.
-    public static func toggles(slideOnSwipe: Bool) -> [MenuItem] {
-        [MenuItem(title: "Workspace slide",
-                  icon: slideOnSwipe ? .toggleOn : .toggleOff,
-                  value: slideOnSwipe ? "on" : "off",
-                  action: .toggleSlide)]
     }
 
     /// Omarchy's `Style` level, minus the parts toe has no analogue for.
@@ -410,15 +446,33 @@ public enum MenuModel {
     ///
     /// `Config` is `setup.config`, which upstream is a submenu of the files Omarchy will open for
     /// you. toe has one file, so it is one row.
-    public static func setup(loginItem: LoginItemState, bindings: [Binding]) -> [MenuItem] {
+    public static func setup(loginItem: LoginItemState, config: Config) -> [MenuItem] {
         var rows: [MenuItem] = []
-        if let opener = configOpener(in: bindings) {
+        if let opener = configOpener(in: config.bindings) {
             rows.append(MenuItem(title: "Config", icon: .pencil, action: .run(opener.command)))
         }
         // After the ported row rather than before it: this one has no Omarchy counterpart — an
         // Omarchy session does not start its window manager at login, it *is* the login — and
         // toe's own rows go under the ones an Omarchy user came looking for.
         if let startup = startup(loginItem) { rows.append(startup) }
+        // Upstream keeps its live switches under `Trigger › Toggle`, and the slide sat there for
+        // exactly as long as it was the only one: a root row leading to a level leading to a
+        // level holding one switch is three keys to reach a thing toe had one of. None of these
+        // is one of upstream's ten toggles — they are toe's own settings — so with the borrowed
+        // level gone they go where toe's other settings are, under the config and the startup
+        // switch, in the order `ConfigSwitch` declares them.
+        //
+        // Every one of them is also a line in `toe.toml`, and the row and the file say the same
+        // thing because the row *is* the file: the value is read from the config the menu was
+        // opened with, and throwing the switch edits that line rather than remembering something
+        // beside it.
+        for setting in ConfigSwitch.allCases {
+            let on = setting.value(in: config)
+            rows.append(MenuItem(title: setting.title,
+                                 icon: on ? .toggleOn : .toggleOff,
+                                 value: on ? "on" : "off",
+                                 action: .toggleSetting(setting)))
+        }
         return rows
     }
 

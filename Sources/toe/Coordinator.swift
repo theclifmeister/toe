@@ -224,7 +224,7 @@ final class Coordinator: WindowTrackerDelegate {
             self.dispatch(binding.command)
         }
         quickMenu.onCommand = { [weak self] command in self?.dispatch(command) }
-        quickMenu.onToggleSlide = { [weak self] in self?.toggleSlide() ?? false }
+        quickMenu.onToggleSetting = { [weak self] setting in self?.toggle(setting) ?? false }
         // Dragging a tiled window over another one trades their places, live, the way
         // Hyprland's `IHyprLayout::onMouseMove` does.
         drag.onMove = { [weak self] id, point in
@@ -672,21 +672,34 @@ final class Coordinator: WindowTrackerDelegate {
                       verify: { Slug.make($0.theme.name) == slug })
     }
 
-    /// Flips `animations.slide_on_swipe` in the config file, for the menu's Toggle row, and
-    /// answers the value now in effect.
+    /// Flips one of the menu's Setup switches in the config file and answers the value now in
+    /// effect. Which line to write is the switch's own business — see `ConfigSwitch`.
     ///
     /// Through the file rather than flipped in memory, because the file is where the setting
-    /// lives: a flip the next reload put back would be a switch that throws itself. Going through
-    /// the file also means the first `on` arrives by `applyAnimationSetting` and asks for Screen
-    /// Recording with the menu open on the row that asked — the one moment the prompt has a
-    /// context, and better than a config save nobody was watching.
-    private func toggleSlide() -> Bool {
-        let wanted = !config.animations.slideOnSwipe
-        rewriteConfig("slide", edit: {
-            ConfigWriter.setting("slide_on_swipe", to: wanted ? "true" : "false",
-                                 inTable: "animations", of: $0)
-        }, verify: { $0.animations.slideOnSwipe == wanted })
-        return config.animations.slideOnSwipe
+    /// lives: a flip the next reload put back would be a switch that throws itself. It also means
+    /// the reload does the work — `border.apply` for the border, `applyMiscSettings` for the
+    /// Dock — so the switch and the config file that says the same thing take the same path, and
+    /// there is nothing here that only happens when a menu row was the one to ask.
+    ///
+    /// For the slide that path matters twice over: the first `on` arrives by
+    /// `applyAnimationSetting` and asks for Screen Recording with the menu open on the row that
+    /// asked — the one moment the prompt has a context, and better than a config save nobody was
+    /// watching.
+    private func toggle(_ setting: ConfigSwitch) -> Bool {
+        let wanted = !setting.value(in: config)
+        rewriteConfig(setting.key, edit: {
+            ConfigWriter.setting(setting.key, to: wanted ? "true" : "false",
+                                 inTable: setting.table, of: $0)
+        }, verify: { setting.value(in: $0) == wanted })
+        let now = setting.value(in: config)
+        // The Dock is the one switch the reload above does not always act on: `autohide_dock` is
+        // toe making sure the strip is there, and it leaves a Dock you hide yourself alone, so on
+        // that machine the row would sit there saying `off` beside a Dock that never moved. The
+        // switch says what it does instead — see `DockAutoHide.command`. Only when the file
+        // actually changed: a write that was declined leaves the row, the file and the Dock
+        // agreeing on the old value rather than the Dock alone on the new one.
+        if setting == .dock, now == wanted { DockAutoHide.command(now) }
+        return now
     }
 
     /// Edits `toe.toml` in place and reloads. `what` names the caller in the log.
