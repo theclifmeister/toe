@@ -55,9 +55,10 @@ final class QuickMenu {
     /// launchd's answer, read once when the menu opened.
     ///
     /// Held rather than re-read by `update(config:style:)`, because that runs six times a second
-    /// for as long as a download lasts and `LoginItem.state()` shells out to `launchctl`. Nothing can change it
-    /// while the menu is up except the toggle itself, which rebuilds its own level with the fresh
-    /// answer and does not come through here.
+    /// for as long as a download lasts and `LoginItem.state()` is not free: `SMAppService.status`
+    /// is an XPC round trip to launchd, and the checks before it touch `Bundle.main` and the
+    /// filesystem. Nothing can change it while the menu is up except the toggle itself, which
+    /// rebuilds its own level with the fresh answer and does not come through here.
     private var loginItem: LoginItemState = .off
     private var usable: Box?
     private var metrics = MenuMetrics(lineHeight: 22)

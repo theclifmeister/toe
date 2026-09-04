@@ -16,6 +16,13 @@ import Foundation
 ///     un-gapped node boxes, otherwise the gaps break every adjacency.
 ///  2. Among qualifying candidates, the winner is the most recently focused one, not the
 ///     one with the largest shared edge.
+///
+/// That second rule is `focus_preferred_method = 0` and nothing else: there is no switch here
+/// for `= 1` (longest shared edge). One used to be declared and never passed, and its branch
+/// had quietly diverged from this one — it accepted a candidate whose edges merely touched at a
+/// corner, where the live path demands a real overlap. In the one file whose whole point is
+/// fidelity to upstream, an untested second mode is a liability; it can come back with its test
+/// on the day it is wanted.
 public enum DirectionalSearch {
 
     public static func windowInDirection(
@@ -23,8 +30,7 @@ public enum DirectionalSearch {
         ignoring: WindowID?,
         candidates: [(id: WindowID, box: Box)],
         direction: Direction,
-        focusHistory: [WindowID],
-        preferLongestSharedEdge: Bool = false
+        focusHistory: [WindowID]
     ) -> WindowID? {
 
         var leaderValue: Double = -1
@@ -55,20 +61,14 @@ public enum DirectionalSearch {
                 }
             }
 
-            if preferLongestSharedEdge {
-                if intersectLength > leaderValue {
-                    leaderValue = intersectLength
-                    leader = candidate.id
-                }
-            } else {
-                guard intersectLength > 0 else { continue }
-                // Most recently focused wins. History is ordered most-recent-first.
-                let idx = focusHistory.firstIndex(of: candidate.id) ?? focusHistory.count
-                let score = Double(focusHistory.count - idx)
-                if score > leaderValue {
-                    leaderValue = score
-                    leader = candidate.id
-                }
+            // A real shared edge, not a corner that happens to touch.
+            guard intersectLength > 0 else { continue }
+            // Most recently focused wins. History is ordered most-recent-first.
+            let idx = focusHistory.firstIndex(of: candidate.id) ?? focusHistory.count
+            let score = Double(focusHistory.count - idx)
+            if score > leaderValue {
+                leaderValue = score
+                leader = candidate.id
             }
         }
 
