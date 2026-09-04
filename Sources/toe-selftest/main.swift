@@ -438,7 +438,9 @@ h.test("movetoworkspace follows the window") { t in
 }
 
 h.test("workspace next skips the workspaces nothing is on") { t in
+    // persistent 0 is the strip with no padding, so the ring is the workspaces in use.
     let wm = WorkspaceManager()
+    wm.persistentWorkspaces = 0
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
 
     wm.addWindow(1)                                   // workspace 1
@@ -456,13 +458,62 @@ h.test("workspace next skips the workspaces nothing is on") { t in
     t.equal(wm.focusedWorkspaceIndex, 9, "prev walks the same ring backwards")
 }
 
+h.test("workspace next walks the padded slots the strip is showing") { t in
+    // The strip you can see is the ring TAB walks: with only 1, 4 and 9 in use the padding
+    // puts 2 and 3 on the bar, so a press has to be able to reach them. 5 is not on the bar —
+    // the padding stopped at five slots — so a press must not land there either.
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    wm.addWindow(1)
+    wm.switchTo(workspace: 4); wm.addWindow(2)
+    wm.switchTo(workspace: 9); wm.addWindow(3)
+    wm.switchTo(workspace: 1)
+
+    t.equal(WorkspaceStrip.slots(for: wm.stripStates(), persistent: 5), [1, 2, 3, 4, 9],
+            "two empties pad the strip to five")
+
+    var walked: [Int] = []
+    for _ in 1...5 { wm.switchToRelativeWorkspace(1); walked.append(wm.focusedWorkspaceIndex) }
+    t.equal(walked, [2, 3, 4, 9, 1], "TAB visits every slot on the bar and rounds")
+
+    wm.switchToRelativeWorkspace(-1)
+    t.equal(wm.focusedWorkspaceIndex, 9, "prev walks the same ring backwards")
+}
+
+h.test("workspace next stops padding once the strip is full") { t in
+    // 1, 2, 3, 5, 6 and 9 in use is already six slots, so no empty workspace joins the ring —
+    // and 4, sitting between two busy neighbours, is the one a naive `index <= persistent`
+    // used to hand you on the way past.
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    var next = WindowID(1)
+    for index in [1, 2, 3, 5, 6, 9] {
+        wm.switchTo(workspace: index); wm.addWindow(next); next += 1
+    }
+    wm.switchTo(workspace: 3)
+
+    t.equal(WorkspaceStrip.slots(for: wm.stripStates(), persistent: 5), [1, 2, 3, 5, 6, 9],
+            "six in use, so nothing is padded in — 4 included")
+
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 5, "next steps over the empty 4")
+}
+
 h.test("workspace next stays put when nothing else is in use") { t in
     let wm = WorkspaceManager()
+    wm.persistentWorkspaces = 0
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
     wm.addWindow(1)
 
     wm.switchToRelativeWorkspace(1)
     t.equal(wm.focusedWorkspaceIndex, 1, "one workspace in use, so the press does nothing")
+
+    // With Omarchy's five persistent slots there is somewhere to go, even on a fresh session.
+    wm.persistentWorkspaces = 5
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 2, "the padded slots are reachable from the first press")
 }
 
 h.test("workspace next reaches a workspace another monitor is showing") { t in
@@ -2114,8 +2165,24 @@ h.test("the strip keeps Omarchy's persistent workspaces") { t in
     t.equal(fresh.map(\.dim), [false, true, true, true, true], "the empty four are dimmed")
 
     let beyond = WorkspaceStrip.items(for: states(occupied: [1, 8], focused: 1))
-    t.equal(beyond.map(\.index), [1, 2, 3, 4, 5, 8],
-            "a workspace past the persistent five appears once it has windows")
+    t.equal(beyond.map(\.index), [1, 2, 3, 4, 8],
+            "a workspace past the persistent five appears once it has windows, and the "
+            + "padding gives up a slot for it rather than adding a sixth")
+
+    // The bug: persistent is a floor on how many slots there are, not a claim on 1-5. Six
+    // workspaces in use is already past the floor, so the empty 4 between them stays off.
+    let full = WorkspaceStrip.items(for: states(occupied: [1, 2, 3, 5, 6, 9], focused: 1))
+    t.equal(full.map(\.index), [1, 2, 3, 5, 6, 9], "no empty 4 once five slots are earned")
+    t.equal(full.map(\.dim), [false, false, false, false, false, false], "and none is dimmed")
+
+    // Exactly at the floor: five in use, nothing padded, and again no empty 4.
+    let atFloor = WorkspaceStrip.items(for: states(occupied: [1, 2, 3, 5, 6], focused: 1))
+    t.equal(atFloor.map(\.index), [1, 2, 3, 5, 6], "five in use is already five slots")
+
+    // One short of it: the lowest empty workspace is padded in to make the fifth slot.
+    let oneShort = WorkspaceStrip.items(for: states(occupied: [2, 3, 5, 6], focused: 2))
+    t.equal(oneShort.map(\.index), [1, 2, 3, 5, 6], "four in use, so the lowest empty joins")
+    t.equal(oneShort.map(\.dim), [true, false, false, false, false], "the padded one is dimmed")
 
     t.equal(WorkspaceStrip.items(for: states(occupied: [1], focused: 1), persistent: 10)
                 .map(\.index), Array(1...10), "persistent 10 shows all ten")
