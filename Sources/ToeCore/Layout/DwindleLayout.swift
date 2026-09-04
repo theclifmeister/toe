@@ -4,7 +4,7 @@ import Foundation
 public struct Gaps: Equatable, Sendable {
     public var inner: Double
     public var outer: Double
-    public init(inner: Double = 5, outer: Double = 10) {
+    public init(inner: Double = 8, outer: Double = 15) {
         self.inner = inner
         self.outer = outer
     }

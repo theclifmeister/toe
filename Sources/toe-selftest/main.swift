@@ -932,7 +932,7 @@ h.test("the shipped default config parses cleanly") { t in
     let c = try Config.parse(Config.defaultTOML)
     t.equal(c.warnings, [], "no warnings")
     t.equal(c.superKey, Modifiers.option, "SUPER is Option")
-    t.equal(c.gaps, Gaps(inner: 5, outer: 10), "Omarchy gaps")
+    t.equal(c.gaps, Gaps(inner: 8, outer: 15), "the shipped gaps")
     t.equal(c.bar.persistentWorkspaces, 5, "Omarchy's persistent-workspaces 1-5")
     t.equal(c.dwindle.preserveSplit, true, "preserve_split")
     t.equal(c.dwindle.forceSplit, 2, "force_split")
@@ -1179,14 +1179,14 @@ h.test("nan and infinity are refused rather than reaching the layout") { t in
     // never resets, and the NaN is passed to other applications over Accessibility.
     for spelling in ["nan", "inf", "-inf", "+inf"] {
         let c = try Config.parse("[general]\ngaps_in = \(spelling)\n")
-        t.equal(c.gaps.inner, 5, "gaps_in = \(spelling) keeps the default")
+        t.equal(c.gaps.inner, 8, "gaps_in = \(spelling) keeps the default")
         t.equal(c.gaps.inner.isFinite, true, "gaps_in = \(spelling) leaves a finite gap")
         t.equal(c.warnings.contains { $0.contains("general.gaps_in") }, true,
                 "gaps_in = \(spelling) warns")
     }
 
     let out = try Config.parse("[general]\ngaps_out = nan\n")
-    t.equal(out.gaps.outer, 10, "gaps_out = nan keeps the default")
+    t.equal(out.gaps.outer, 15, "gaps_out = nan keeps the default")
     t.equal(out.warnings.contains { $0.contains("general.gaps_out") }, true, "and says so")
 
     let border = try Config.parse("[border]\nwidth = nan\nangle = inf\nradius = nan\n")
@@ -1205,7 +1205,7 @@ h.test("numbers outside a sensible range are refused too") { t in
     // Swift's Double(_: String) takes hex floats, which TOML has no notion of, so this used
     // to parse as a 1024 point gap with no warning at all.
     let hex = try Config.parse("[general]\ngaps_in = 0x1p10\n")
-    t.equal(hex.gaps.inner, 5, "a 1024 point gap keeps the default")
+    t.equal(hex.gaps.inner, 8, "a 1024 point gap keeps the default")
     t.equal(hex.warnings.contains { $0.contains("general.gaps_in") }, true, "and says so")
 
     let negative = try Config.parse("[border]\nwidth = -5\n")
@@ -1607,8 +1607,8 @@ h.test("a snapshot restored onto a different display reflows into it") { t in
     restored.restore(snapshot, monitorID: { _ in nil })
 
     t.equal(restored.workspaceIndex(of: 1), restored.focusedWorkspaceIndex, "the workspace came home to the focused monitor")
-    t.equalBox(restored.render().frames[1], box(10, 10, 1705, 1380), "w1 fills half the new display")
-    t.equalBox(restored.render().frames[2], box(1725, 10, 1705, 1380), "w2 the other half")
+    t.equalBox(restored.render().frames[1], box(15, 15, 1697, 1370), "w1 fills half the new display")
+    t.equalBox(restored.render().frames[2], box(1728, 15, 1697, 1370), "w2 the other half")
 }
 
 h.test("a damaged snapshot is repaired rather than trusted") { t in
