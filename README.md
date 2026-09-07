@@ -74,6 +74,7 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 | `SUPER` + `1`…`9`, `0` | Switch to workspace 1…10 |
 | `SUPER` + `SHIFT` + `1`…`9`, `0` | Move window to workspace and follow it |
 | `SUPER` + `TAB` / `SHIFT`+`TAB` / `CTRL`+`TAB` | Next / previous workspace in use, former workspace |
+| `SUPER` + `CTRL` + `SHIFT` + `←` / `→` | Swap this workspace with the one next door, windows and all |
 | Sideways swipe on the trackpad | Next / previous workspace in use |
 | `SUPER` + `ENTER` | New terminal window |
 | `SUPER` + `SHIFT` + `ENTER` | New browser window |
@@ -141,11 +142,13 @@ app = "com.apple.ActivityMonitor"
 
 Binding specs accept the dash spelling and Omarchy's, so `"alt-shift-1"`, `"super+shift+1"` and
 `"SUPER SHIFT, 1"` all mean the same. The commands are `movefocus`, `swapwindow`, `movewindow`,
-`workspace`, `movetoworkspace`, `movetoworkspacesilent`, `killactive`, `togglefloating`,
-`togglesplit`, `swapsplit`, `growactive`, `resizeactive`, `exec`, `reload`, `menu`, `keybindings`,
-`theme`, `removetheme`, `background`, `nextbackground` and `quit`. `growactive <dx> <dy>` grows the
-focused window by that much; Hyprland's `resizeactive` moves the split by that much instead, which
-from a right-hand window is the other way round, and is accepted for configs copied from Omarchy.
+`workspace`, `movetoworkspace`, `movetoworkspacesilent`, `swapworkspace`, `killactive`,
+`togglefloating`, `togglesplit`, `swapsplit`, `growactive`, `resizeactive`, `exec`, `reload`,
+`menu`, `keybindings`, `theme`, `removetheme`, `background`, `nextbackground` and `quit`.
+`growactive <dx> <dy>` grows the focused window by that much; Hyprland's `resizeactive` moves the
+split by that much instead, which from a right-hand window is the other way round, and is accepted
+for configs copied from Omarchy. `swapworkspace left` / `right` is toe's own: it renumbers two
+workspaces rather than moving any window, so a workspace can be shuffled along the menu bar.
 
 Other sections worth knowing about:
 

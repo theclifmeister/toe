@@ -543,11 +543,14 @@ public enum MenuModel {
         case .workspace(.index): return 3
         case .moveToWorkspace:  return 4
         case .workspace:        return 5
-        case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive: return 6
-        case .theme, .removeTheme, .background, .nextBackground: return 7
-        case .menu:             return 8
-        case .reload, .quit:    return 9
-        case .exec:             return 10
+        // Last of the workspace verbs: it is the one that acts on a workspace as a whole rather
+        // than on where you are or what is on it.
+        case .swapWorkspace:    return 6
+        case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive: return 7
+        case .theme, .removeTheme, .background, .nextBackground: return 8
+        case .menu:             return 9
+        case .reload, .quit:    return 10
+        case .exec:             return 11
         }
     }
 }

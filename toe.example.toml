@@ -253,6 +253,15 @@ font_size  = 18
 "super-shift-tab" = "workspace prev"
 "super-ctrl-tab"  = "workspace previous"
 
+# ── Reordering — SUPER CTRL SHIFT + arrows ────────────────────────────────────
+# Your workspace changes places with the one next door: on 3 with 2 to your left, this makes
+# yours 2 and theirs 3. Nothing on screen moves — the windows stay in their tiles and only the
+# numbers on the menu bar change — so it is how a workspace you started late gets to where it
+# belongs in the row, and how the number under SUPER+n becomes the one you expect. Off either
+# end the press does nothing: 1 has no left and 10 no right.
+"super-ctrl-shift-left"  = "swapworkspace left"
+"super-ctrl-shift-right" = "swapworkspace right"
+
 # ── Windows ───────────────────────────────────────────────────────────────────
 "super-w"       = "killactive"
 "super-j"       = "togglesplit"
