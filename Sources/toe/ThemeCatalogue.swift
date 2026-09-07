@@ -8,21 +8,31 @@ import ToeCore
 /// catalogue is fetched when you open `Style › Theme` and at most once a day, and a theme is
 /// downloaded only when you choose it.
 enum Upstream {
-    /// The numeric id rather than `omacom/omarchy`, because the repository has now been renamed
-    /// twice — `basecamp` to `omacom` — and an id does not move. The owner still has to be spelled
-    /// out for `raw.githubusercontent.com`, which takes a path and not an id; that one is the
-    /// current name, and GitHub keeps serving the old one, so a rename shows up as a stale
-    /// string here rather than as a broken download.
-    static let repository = "994093166"
+    /// toe's own fork of Omarchy — `theclifmeister/omarchy`, forked from `omacom/omarchy` and
+    /// tracking its `quattro` branch. Fetching from the fork rather than from upstream directly
+    /// is what keeps the catalogue from changing underneath a shipped toe: Omarchy renumbering a
+    /// background or rewriting a `colors.toml` is something this repository pulls in on purpose,
+    /// once the download path has been taught to read it, instead of on the morning it lands.
+    /// Both of those have happened — see `branch` below — and each one cost a release.
+    ///
+    /// The numeric id rather than the path, because a repository moves when it is renamed and an
+    /// id does not: upstream alone has been renamed twice, `basecamp` to `omacom`. The path still
+    /// has to be spelled out for `raw.githubusercontent.com`, which takes a path and not an id;
+    /// `repositoryPath` below is the current name, and GitHub keeps serving the old one after a
+    /// rename, so a rename shows up as a stale string here rather than as a broken download.
+    static let repository = "1356403527"
 
-    /// Omarchy 4's branch, and the repository's default. Not `master`, which is where toe looked
-    /// first and which stopped moving at Omarchy 3.8.5 in August 2026: every release from
-    /// v3.8.4 onwards has been cut from `quattro`, and the three themes added since — Last
-    /// Horizon, Lupine, Solitude — exist only here. The catalogue and the palette both had to
-    /// learn something for this: the backgrounds were mostly re-encoded to webp and renumbered,
-    /// which is why `Catalogue.currentVersion` went up rather than letting a cached listing point
-    /// at files that are no longer there, and `colors.toml` was rewritten, which `Palette.parse`
-    /// now reads in both spellings.
+    /// The same repository spelled the way `raw.githubusercontent.com` needs it.
+    static let repositoryPath = "theclifmeister/omarchy"
+
+    /// Omarchy 4's branch, and the default on the fork as much as upstream. Not `master`, which
+    /// is where toe looked first and which stopped moving at Omarchy 3.8.5 in August 2026: every
+    /// release from v3.8.4 onwards has been cut from `quattro`, and the three themes added since
+    /// — Last Horizon, Lupine, Solitude — exist only here. The catalogue and the palette both had
+    /// to learn something for this: the backgrounds were mostly re-encoded to webp and
+    /// renumbered, which is why `Catalogue.currentVersion` went up rather than letting a cached
+    /// listing point at files that are no longer there, and `colors.toml` was rewritten, which
+    /// `Palette.parse` now reads in both spellings.
     static let branch = "quattro"
 
     static var tree: URL {
@@ -30,7 +40,7 @@ enum Upstream {
     }
 
     static func file(theme slug: String, _ path: String) -> URL {
-        URL(string: "https://raw.githubusercontent.com/omacom/omarchy/\(branch)/themes/\(slug)/\(path)")!
+        URL(string: "https://raw.githubusercontent.com/\(repositoryPath)/\(branch)/themes/\(slug)/\(path)")!
     }
 
     /// Every host toe is allowed to end up talking to. Checked after redirects rather than
