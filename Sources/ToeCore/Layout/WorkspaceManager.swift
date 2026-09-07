@@ -529,6 +529,31 @@ public final class WorkspaceManager {
         refocusVisible()
     }
 
+    /// A window has taken the focus without toe asking for it — an application's Dock icon,
+    /// Cmd-Tab, Spotlight, a link opening in a browser that is not on screen — and the window
+    /// the system just focused may be sitting on a workspace that is not showing.
+    ///
+    /// The window is not pushed away: its workspace is brought to it, the same answer
+    /// `settleFullscreenReturns` gives a window coming back from a fullscreen Space. Anything
+    /// else means the click did nothing at all — the window stays parked at `stashPoint` with
+    /// the focus on it, which is exactly the bug this fixes.
+    ///
+    /// Returns whether a workspace switch was needed, because the two cases cost the caller
+    /// very different amounts of work: the focus landing where it could already be seen wants
+    /// the border moved, while this wants the whole workspace written out.
+    @discardableResult
+    public func revealWindow(_ id: WindowID) -> Bool {
+        guard let index = workspaceIndex(of: id) else { return false }
+        let hidden = !visibleWorkspaceIndices.contains(index)
+        if hidden { switchTo(workspace: index) }
+        // After the switch and not before: `switchTo` ends in `refocusVisible`, which hands the
+        // focus to the arriving workspace's own most recently used window — and that is not the
+        // window the user has just asked for. On a workspace that was already showing this is
+        // the plain `noteFocus` this call replaces.
+        noteFocus(id)
+        return hidden
+    }
+
     public func switchToPreviousWorkspace() {
         if let prev = previousWorkspace[focusedMonitorID] { switchTo(workspace: prev) }
     }

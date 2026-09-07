@@ -762,6 +762,55 @@ h.test("a workspace of nothing but detached windows still walks") { t in
     t.equal(wm.windowInDirection(.right, from: 2), nil, "at either end of it")
 }
 
+// Clicking an application's Dock icon focuses its window wherever that window is. Before
+// `revealWindow` the focus went into the model and nothing else moved, so the click looked like
+// it had done nothing at all: the window stayed parked off-screen with the focus on it.
+h.test("focusing a window on a hidden workspace brings its workspace up") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.switchTo(workspace: 2)
+    wm.addWindow(3)
+
+    t.equal(wm.render().stashed, [1, 2], "workspace 1 is parked off-screen")
+    t.equal(wm.revealWindow(1), true, "w1 was not on screen, so its workspace had to come up")
+    t.equal(wm.focusedWorkspaceIndex, 1, "which is workspace 1")
+    t.equal(wm.focusedWindow, 1, "and the window the focus landed on is the focused one")
+    t.equal(wm.render().stashed, [3], "workspace 2 is parked in its place")
+
+    // Not `focusHistory`'s most recent window on the arriving workspace — w2 was focused there
+    // more recently than w1 — but the window that was actually clicked.
+    wm.switchTo(workspace: 2)
+    t.equal(wm.revealWindow(2), true, "w2 is off-screen again")
+    t.equal(wm.focusedWindow, 2, "and it is what the focus follows, not w1")
+
+    // A window that is already on screen asks for no switch: the caller only has a border to move.
+    t.equal(wm.revealWindow(1), false, "w1 is on the workspace that is showing")
+    t.equal(wm.focusedWindow, 1, "and takes the focus where it stands")
+    t.equal(wm.focusedWorkspaceIndex, 1, "nothing switched")
+
+    t.equal(wm.revealWindow(99), false, "a window toe does not manage reveals nothing")
+}
+
+h.test("revealing a window on another monitor's workspace follows it there") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    let leftWS = wm.activeWorkspace[1]!
+    let rightWS = wm.activeWorkspace[2]!
+    wm.switchTo(workspace: leftWS); wm.addWindow(1)
+    wm.switchTo(workspace: rightWS); wm.addWindow(2)
+
+    // Both workspaces are showing — one per monitor — so nothing is stashed and nothing switches.
+    // The focus still has to cross to the other display, which is `noteFocus`'s job.
+    t.equal(wm.revealWindow(1), false, "w1's workspace is on screen, on the other monitor")
+    t.equal(wm.focusedWorkspaceIndex, leftWS, "the focused monitor followed it")
+    t.equal(wm.focusedWindow, 1, "and w1 has the focus")
+}
+
 h.test("a floating window keeps its frame across a workspace round trip") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])

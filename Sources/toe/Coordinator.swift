@@ -1245,14 +1245,42 @@ final class Coordinator: WindowTrackerDelegate {
 
     func windowFocused(_ id: WindowID) {
         guard workspaces.workspaceIndex(of: id) != nil, !isEchoOfOwnRaise(id) else { return }
-        workspaces.noteFocus(id)
+        // Following the focus onto a workspace that is not showing is right only when the user
+        // asked for it. Clicking an application's Dock icon, Cmd-Tab and Spotlight all activate
+        // the application as they focus its window; an application raising a window of its own
+        // accord does not, and yanking the screen away from the user for that is the behaviour
+        // Hyprland keeps behind `focus_on_activate` and leaves off. The same test `isEchoOfOwnRaise`
+        // makes, for the same reason: a focus that comes with an activation is a person's doing.
+        let activated = tracker.window(id).map {
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == $0.pid
+        } ?? false
+        let revealed: Bool
+        if activated {
+            revealed = workspaces.revealWindow(id)
+        } else {
+            workspaces.noteFocus(id)
+            revealed = false
+        }
+        // The system has already given this window the focus — that is what brought us here — so
+        // toe has nothing to assert, and saying so keeps `apply` from raising it a second time.
         focusApplied = id
-        // Clicking a window raises it, so the focused one is already in front and stays there;
-        // this is only about the float it has just taken the focus from.
-        sinkUnfocusedFloats(workspaces.render())
-        updateBorder()
-        refreshStatus()
-        scheduleSessionSave()
+
+        guard revealed else {
+            // Clicking a window raises it, so the focused one is already in front and stays there;
+            // this is only about the float it has just taken the focus from.
+            sinkUnfocusedFloats(workspaces.render())
+            updateBorder()
+            refreshStatus()
+            scheduleSessionSave()
+            return
+        }
+
+        // The focus arrived from off-screen: the Dock, Cmd-Tab, Spotlight. `revealWindow` has
+        // switched to the window's workspace, and the whole switch now has to reach the screen —
+        // this workspace's windows are parked at `stashPoint` and the one the user clicked is
+        // among them, focused and nowhere to be seen. `apply` ends in the border, the status and
+        // the session save, so nothing more is owed here.
+        apply(refocus: false)
     }
 
     /// Chromium, Electron and the JetBrains IDEs restore their own remembered geometry a beat
