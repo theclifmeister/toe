@@ -14,6 +14,12 @@ public enum Command: Equatable {
     case moveWindow(Direction)
     case workspace(WorkspaceTarget)
     case moveToWorkspace(Int, follow: Bool)
+    /// `swapworkspace <left|right>`: the workspace you are on trades numbers with its
+    /// neighbour, so a workspace can be moved along the menu bar strip to where it belongs.
+    /// The argument is how far and which way, as a signed number of slots — toe's own verb;
+    /// Hyprland reorders nothing, and its `swapactiveworkspaces` is a different thing again
+    /// (two monitors trading what they show).
+    case swapWorkspace(Int)
     case killActive
     case toggleFloating
     case toggleSplit
@@ -95,11 +101,18 @@ public extension Command {
     /// fullscreen, closed unseen and unasked. Every other verb acts on the window's size, the
     /// theme, or a menu, and none of those is a window vanishing.
     ///
+    /// `swapworkspace` is here for the quieter version of the same thing. It moves no window at
+    /// all — it renumbers two workspaces — but the workspace it renumbers is the one *behind*
+    /// the fullscreen Space, and the strip that would report what happened is in a menu bar
+    /// that Space is covering. So the press would land on a workspace the user is not looking
+    /// at and say nothing about it.
+    ///
     /// The way out is the way in: leave fullscreen, or click a window on another display, and
     /// the keys work again with nothing to put back.
     var suspendedByFullscreen: Bool {
         switch self {
-        case .moveFocus, .swapWindow, .moveWindow, .workspace, .moveToWorkspace, .killActive:
+        case .moveFocus, .swapWindow, .moveWindow, .workspace, .moveToWorkspace, .killActive,
+             .swapWorkspace:
             return true
         default:
             return false
@@ -258,6 +271,24 @@ public enum CommandParser {
             case "e-1", "prev", "-1": return .workspace(.previous)
             case "previous", "former", "back": return .workspace(.former)
             default: return .workspace(.index(try workspaceIndex()))
+            }
+
+        // toe's own verb — see `Command.swapWorkspace`. `left`/`right` because that is what the
+        // strip does when you press it, with Hyprland's relative spellings accepted for the
+        // hands that already type them. No `moveworkspace` alias: one letter from
+        // `movetoworkspace`, and a number means something else entirely to each of them.
+        case "swapworkspace":
+            switch argument.lowercased() {
+            case "": throw CommandError.missingArgument(name)
+            case "l", "left", "-1", "e-1": return .swapWorkspace(-1)
+            case "r", "right", "+1", "e+1": return .swapWorkspace(1)
+            default:
+                // A signed count of slots, so `swapworkspace -2` is two places left. Zero is a
+                // bad argument rather than a no-op: a binding that does nothing is a typo.
+                guard let n = Int(argument), n != 0,
+                      abs(n) < WorkspaceManager.workspaceCount
+                else { throw CommandError.badArgument(name, argument) }
+                return .swapWorkspace(n)
             }
 
         case "movetoworkspace":

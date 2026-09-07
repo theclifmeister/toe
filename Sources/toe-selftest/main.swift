@@ -532,6 +532,84 @@ h.test("workspace next reaches a workspace another monitor is showing") { t in
     t.equal(wm.focusedWorkspaceIndex, rightWS, "the other display's workspace counts, empty or not")
 }
 
+h.test("swapworkspace trades places with the workspace next door") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    wm.switchTo(workspace: 2); wm.addWindow(1)
+    wm.switchTo(workspace: 3); wm.addWindow(2)
+
+    t.expect(wm.swapWorkspace(-1), "3 swaps with 2")
+    t.equal(wm.focusedWorkspaceIndex, 2, "your windows are on 2 now, and you are still on them")
+    t.equal(wm.workspaceIndex(of: 2), 2, "and they came with you")
+    t.equal(wm.workspaceIndex(of: 1), 3, "the neighbour's went the other way")
+    t.equal(wm.render().stashed, [1], "3 is hidden, as 2 was — nothing changed on screen")
+    t.equal(wm.workspaces[2]?.index, 2, "the workspace knows its new number")
+    t.equal(wm.workspaces[3]?.index, 3, "so does the one it swapped with")
+
+    t.expect(wm.swapWorkspace(1), "and back again")
+    t.equal(wm.focusedWorkspaceIndex, 3, "which undoes it exactly")
+    t.equal(wm.workspaceIndex(of: 2), 3, "windows and all")
+    t.equal(wm.workspaceIndex(of: 1), 2, "both ways")
+}
+
+h.test("swapworkspace moves into an empty slot, and stops at the ends") { t in
+    // The point of index ± 1 rather than the strip's ring: a workspace has to be able to move
+    // into a slot nothing is on, which is the one thing stepping over the empties cannot do.
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    wm.switchTo(workspace: 5); wm.addWindow(1)
+    t.expect(wm.swapWorkspace(-1), "4 is empty and is still somewhere to go")
+    t.equal(wm.focusedWorkspaceIndex, 4, "so the workspace is 4 now")
+    t.equal(wm.workspaceIndex(of: 1), 4, "with its window")
+    t.expect(wm.workspaces[5] == nil || wm.workspaces[5]!.isEmpty,
+             "and 5 is as empty as 4 was — an untouched slot stays untouched")
+
+    wm.switchTo(workspace: 1)
+    t.expect(!wm.swapWorkspace(-1), "1 has no left")
+    t.equal(wm.focusedWorkspaceIndex, 1, "so the press does nothing rather than wrapping to 10")
+    wm.switchTo(workspace: 10)
+    t.expect(!wm.swapWorkspace(1), "and 10 no right")
+    t.equal(wm.focusedWorkspaceIndex, 10, "same at the other end")
+    t.expect(!wm.swapWorkspace(0), "nought places is not a swap")
+}
+
+h.test("swapworkspace leaves the other display showing its own windows") { t in
+    // The neighbour may be the workspace the second display is on. Renumbering has to follow
+    // every monitor's active workspace, or that display would be showing somebody else's.
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+
+    wm.switchTo(workspace: 1); wm.addWindow(1)           // display 1
+    wm.switchTo(workspace: 2); wm.addWindow(2)           // display 2, since 2 re-homes to focus
+    t.equal(wm.workspaces[2]?.monitorID, 2, "the second display is on workspace 2")
+    wm.switchTo(workspace: 1)
+
+    t.expect(wm.swapWorkspace(1), "1 swaps with the workspace the other display is showing")
+    t.equal(wm.focusedWorkspaceIndex, 2, "your windows are 2 now")
+    t.equal(wm.activeWorkspace[2], 1, "and the other display's are 1, still on that display")
+    t.equal(wm.workspaces[1]?.monitorID, 2, "a workspace does not change display for a rename")
+    t.equal(wm.render().stashed, [], "and nothing is parked: both are still on screen")
+}
+
+h.test("swapworkspace carries the workspace `former` goes back to") { t in
+    // `workspace former` means the windows you were last on, not the number they were under.
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    wm.switchTo(workspace: 2); wm.addWindow(1)
+    wm.switchTo(workspace: 3); wm.addWindow(2)           // former is 2
+
+    t.expect(wm.swapWorkspace(-1), "swap, so the windows that were on 2 are on 3")
+    wm.switchToPreviousWorkspace()
+    t.equal(wm.focusedWorkspaceIndex, 3, "former follows them there")
+    t.equal(wm.workspaceIndex(of: 1), 3, "which is where they are")
+}
+
 h.test("a floating focus falls back to the window under the pointer") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
@@ -3070,6 +3148,23 @@ h.test("a menu binding opens the level Omarchy's own key opens") { t in
             "slugified at the door, because the name is about to be joined onto a path")
     t.expect((try? CommandParser.parse("removetheme")) == nil,
              "and it needs an argument — there is no theme called nothing to delete")
+}
+
+h.test("swapworkspace parses the strip's own two directions") { t in
+    t.equal(try CommandParser.parse("swapworkspace left"), .swapWorkspace(-1), "the word")
+    t.equal(try CommandParser.parse("swapworkspace, r"), .swapWorkspace(1),
+            "Hyprland's comma and its single letter")
+    t.equal(try CommandParser.parse("swapworkspace e-1"), .swapWorkspace(-1),
+            "and its relative spelling, which `workspace` takes too")
+    t.equal(try CommandParser.parse("swapworkspace -2"), .swapWorkspace(-2), "a count of slots")
+    t.expect((try? CommandParser.parse("swapworkspace")) == nil, "it needs an argument")
+    t.expect((try? CommandParser.parse("swapworkspace 0")) == nil,
+             "and nought is a typo rather than a binding that does nothing")
+    t.expect((try? CommandParser.parse("swapworkspace 10")) == nil,
+             "ten places is further than the strip is long")
+    t.expect((try? CommandParser.parse("swapworkspace up")) == nil, "the strip has no up")
+    t.equal(CommandLabel.describe(.swapWorkspace(-1)),
+            "Swap this workspace with the one to its left", "and the keybindings page says so")
 }
 
 h.test("resizeactive takes Hyprland's two numbers and nothing else") { t in

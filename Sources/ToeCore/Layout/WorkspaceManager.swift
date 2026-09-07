@@ -17,7 +17,9 @@ public struct RenderPlan: Equatable {
 }
 
 public final class Workspace {
-    public let index: Int              // 1...10
+    /// 1...10. Not a constant: `swapWorkspace` renumbers two workspaces in place, which is the
+    /// whole of what reordering the strip does to them.
+    public internal(set) var index: Int
     public var monitorID: UInt32
     public var layout: DwindleLayout
     public var floating: Set<WindowID> = []
@@ -570,6 +572,53 @@ public final class WorkspaceManager {
         var next = (position + delta) % ring.count
         if next < 0 { next += ring.count }
         switchTo(workspace: ring[next])
+    }
+
+    /// `swapworkspace left` / `right`: this workspace trades places with the one next door,
+    /// windows and all.
+    ///
+    /// A renaming, and nothing more. Both workspaces keep their windows, their tree and the
+    /// monitor they live on; only the numbers change, and `activeWorkspace` follows them so the
+    /// display you are looking at goes on showing the same windows under its new number. Not one
+    /// window is written to, which is the whole appeal of doing it this way rather than carrying
+    /// windows from one workspace to the other: no stash, no re-tiling, no floating frame to put
+    /// back — and a workspace that was on the other display stays on the other display, since
+    /// its `monitorID` travels with it.
+    ///
+    /// The neighbour is `index ± 1` and deliberately not the next slot on the strip, which is
+    /// what `workspace next` walks. This is the verb that *reorders* the strip, so it has to be
+    /// able to move a workspace into an empty slot — and stepping over the empties, as the ring
+    /// does, is exactly the one thing that would make that impossible. Off either end nothing
+    /// happens: 1 has no left and 10 no right, and wrapping would fling a workspace the length
+    /// of the bar for a keypress that reads as one step.
+    @discardableResult
+    public func swapWorkspace(_ delta: Int) -> Bool {
+        let here = focusedWorkspaceIndex
+        let there = here + delta
+        guard delta != 0, (1...Self.workspaceCount).contains(there) else { return false }
+
+        let ours = workspaces[here]
+        let theirs = workspaces[there]
+        ours?.index = there
+        theirs?.index = here
+        // Assigning nil clears the key, which is right: a workspace is made on demand, and a
+        // slot nobody has been on should still have no entry after the swap.
+        workspaces[there] = ours
+        workspaces[here] = theirs
+
+        func renumbered(_ index: Int) -> Int {
+            switch index {
+            case here:  return there
+            case there: return here
+            default:    return index
+            }
+        }
+        // Every monitor's, not just the focused one's: the neighbour may be the workspace the
+        // second display is showing, and that display has to keep showing its own windows.
+        activeWorkspace = activeWorkspace.mapValues(renumbered)
+        // `workspace former` means the windows you were last on, not the slot they were in.
+        previousWorkspace = previousWorkspace.mapValues(renumbered)
+        return true
     }
 
     /// `movetoworkspace <n>` / `movetoworkspacesilent <n>`.

@@ -1912,6 +1912,13 @@ final class Coordinator: WindowTrackerDelegate {
             workspaces.moveFocusedWindow(toWorkspace: n, follow: follow)
             apply(refocus: follow)
 
+        case .swapWorkspace(let delta):
+            // Nothing moves on screen — the swap is two workspaces trading numbers — so this
+            // render writes no frame and unparks nothing. It is here for the two things that do
+            // name a workspace by its number: the strip in the menu bar, and the session file
+            // `apply` schedules, which is what makes the new order survive a restart.
+            if workspaces.swapWorkspace(delta) { apply(refocus: false) }
+
         case .killActive:
             guard let id = workspaces.focusedWindow, let window = tracker.window(id) else { return }
             WindowMover.close(window)

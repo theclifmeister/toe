@@ -3,10 +3,10 @@ import Foundation
 /// What a command is called, for a reader rather than for a parser.
 ///
 /// The keybindings page shows `SUPER + W  →  Close window`, and the right-hand half is this. It
-/// is the second exhaustive `switch` over `Command` in the tree — `Coordinator.dispatch` is the
-/// other — so a new command now needs three edits rather than two: the verb in `CommandParser`,
-/// the arm in `dispatch`, and a label here. The compiler catches a missing label; nothing but a
-/// reader catches a bad one.
+/// is one of three exhaustive `switch`es over `Command` in the tree — `Coordinator.dispatch` and
+/// `MenuModel.rank` are the others — so a new command needs four edits rather than two: the verb
+/// in `CommandParser`, the arm in `dispatch`, a label here, and a rank on the keybindings page.
+/// The compiler catches a missing label; nothing but a reader catches a bad one.
 public enum CommandLabel {
 
     public static func describe(_ command: Command) -> String {
@@ -18,6 +18,7 @@ public enum CommandLabel {
         case .moveToWorkspace(let n, let follow):
             return follow ? "Move window to workspace \(n)"
                           : "Move window to workspace \(n), staying here"
+        case .swapWorkspace(let delta): return swapWorkspace(delta)
         case .killActive:           return "Close window"
         case .toggleFloating:       return "Cycle floating"
         case .toggleSplit:          return "Toggle split orientation"
@@ -86,6 +87,16 @@ public enum CommandLabel {
                                     + " and " + change(dy, "taller", "shorter")
         case (false, false): return "Leave the window its size"
         }
+    }
+
+    /// "Swap this workspace with the one to its left" — the swap and not the renumbering, which
+    /// is only how it is done. What the user sees is their workspace changing places on the bar
+    /// with its neighbour, and both keeping their windows.
+    private static func swapWorkspace(_ delta: Int) -> String {
+        let side = delta < 0 ? "left" : "right"
+        let places = abs(delta)
+        return places == 1 ? "Swap this workspace with the one to its \(side)"
+                           : "Move this workspace \(places) places to the \(side)"
     }
 
     private static func workspace(_ target: WorkspaceTarget) -> String {
