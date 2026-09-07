@@ -15,8 +15,8 @@ Recording — see `ScreenSnapshot`).
 
 ```sh
 make test      # layout suite — no permissions, no Xcode, ~1s
-make run       # build, bundle, sign, relaunch in place (replaces any running toe)
-make bundle    # build/Toe.app, runs `make test` first
+make run       # build/ToeDev.app, sign, relaunch in place (replaces any running toe)
+make bundle    # build/Toe.app — the installed identity; runs `make test` first
 make install   # same, into /Applications
 make dev-cert  # once per machine — see "Accessibility and code signing" below
 make reset-perms
@@ -140,6 +140,20 @@ macOS keys the Accessibility grant to the code signature, and an ad-hoc signatur
 build — so without `make dev-cert` (a stable self-signed `toe-dev` identity, one password prompt)
 you re-grant permission after every rebuild. `scripts/bundle.sh` picks it up automatically. When
 hotkeys or window moves stop working after a rebuild, `make reset-perms` and re-grant.
+
+**The grant is keyed to the bundle identifier as well**, which is why `make run` builds a second
+application rather than the same one: `build/ToeDev.app`, `com.clifmeister.toe.dev`, "Toe Dev" in
+the Accessibility list. The installed copy is signed with Developer ID and this one with `toe-dev`,
+so under one identifier each launch invalidated the other's grant and asked again. Two identifiers,
+two grants, each given once — and `make reset-perms` resets both.
+
+Two applications, one machine. Everything toe does is global — the hotkeys, the taps, the windows,
+the four settings journalled to `~/.local/state/toe` — so `AppIdentity.takeOver` asks any other
+running copy to quit and waits for it, first thing in `Coordinator.start`, before the journal
+repairs the outgoing copy is still writing. `SIGTERM` and not `NSRunningApplication.terminate()`:
+that sends a quit Apple Event, and AppKit answers it without going near `shutDown`, which would
+leave a hidden workspace's windows parked in the stash corner. Config and state are deliberately
+shared, since only one copy ever runs and a swap should keep your layout.
 
 ## Releasing
 

@@ -36,8 +36,15 @@ final class QuickMenu {
     /// What the bundle was stamped with, for the `About` row. nil for a binary run straight out
     /// of `.build`, which has no Info.plist to have been stamped — and the row is then left out
     /// rather than reporting a version toe does not know.
-    private static let version =
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    ///
+    /// The development copy says so. It is the same application under its own identifier — see
+    /// `AppIdentity` — and the one row toe has to report a fact about itself is where the
+    /// question "which of the two am I looking at?" belongs.
+    private static let version: String? = {
+        guard let stamped = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        else { return nil }
+        return AppIdentity.isDevelopment ? "\(stamped) dev" : stamped
+    }()
 
     private let panel: MenuPanel
     private let view = MenuView()
