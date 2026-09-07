@@ -1,8 +1,10 @@
-APP      := build/Toe.app
-BUNDLEID := com.clifmeister.toe
-AGENT    := $(HOME)/Library/LaunchAgents/$(BUNDLEID).plist
+APP         := build/Toe.app
+DEV_APP     := build/ToeDev.app
+BUNDLEID    := com.clifmeister.toe
+DEVBUNDLEID := com.clifmeister.toe.dev
+AGENT       := $(HOME)/Library/LaunchAgents/$(BUNDLEID).plist
 
-.PHONY: all build test bundle run install uninstall dev-cert reset-perms start-at-login stop-at-login example-config icon clean
+.PHONY: all build test bundle dev-bundle run install uninstall dev-cert reset-perms start-at-login stop-at-login example-config icon clean
 
 all: bundle
 
@@ -17,8 +19,16 @@ test:
 bundle: test
 	@./scripts/bundle.sh release
 
-## Build and launch in place, replacing any running copy.
-run: bundle
+## The same app under its own identity — "Toe Dev", com.clifmeister.toe.dev — so that its
+## Accessibility grant is its own and swapping between this and the installed copy never costs
+## you the permission. See the comment at the top of scripts/bundle.sh.
+dev-bundle: test
+	@TOE_DEV=1 ./scripts/bundle.sh release
+
+## Build and launch the development copy in place. Whichever copy is running goes first:
+## `AppIdentity.takeOver` does the same from inside the app, so launching the installed one
+## afterwards is just as safe, but doing it here keeps the launch below from racing it.
+run: dev-bundle
 	@pkill -x toe 2>/dev/null || true
 	@# SIGTERM is asynchronous, and toe handles it rather than dying on the spot: it unstashes
 	@# every hidden workspace and takes down the event tap first. Opening the new copy while the
@@ -26,8 +36,8 @@ run: bundle
 	@# for the process to actually be gone. Bounded, so a wedged toe cannot hang the build.
 	@for _ in $$(seq 50); do pgrep -x toe >/dev/null || break; sleep 0.1; done
 	@pgrep -x toe >/dev/null && { echo "a previous toe will not exit — kill -9 it and retry"; exit 1; } || true
-	@open $(APP)
-	@echo "toe running — look for it in the menu bar"
+	@open $(DEV_APP)
+	@echo "Toe Dev running — look for it in the menu bar"
 
 install: bundle
 	@pkill -x toe 2>/dev/null || true
@@ -47,9 +57,13 @@ dev-cert:
 
 ## macOS keys Accessibility grants to the code signature, and an ad-hoc signature changes on
 ## every build. Run this after a rebuild if hotkeys or window moves stop working.
+## Both identities: the installed copy and the development one are separate applications to
+## macOS, so they hold — and lose — their permissions separately.
 reset-perms:
-	@tccutil reset Accessibility $(BUNDLEID) || true
-	@tccutil reset ScreenCapture $(BUNDLEID) || true
+	@for id in $(BUNDLEID) $(DEVBUNDLEID); do \
+	    tccutil reset Accessibility $$id || true; \
+	    tccutil reset ScreenCapture $$id || true; \
+	done
 	@echo "re-grant Accessibility for toe (and Screen Recording, if the slide is on), then relaunch"
 
 start-at-login:

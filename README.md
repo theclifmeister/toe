@@ -170,9 +170,14 @@ others. Symlinking it into a dotfiles repository works fine.
 ```sh
 make dev-cert   # once per machine: a stable signing identity so Accessibility survives rebuilds
 make test       # layout suite — no permissions, no Xcode needed
-make run        # build, sign and relaunch in place
+make run        # build, sign and relaunch in place, as "Toe Dev"
 make install    # same, into /Applications
 ```
+
+`make run` builds a separate application — `build/ToeDev.app`, "Toe Dev" — so that the copy you are
+working on and the one in `/Applications` hold their Accessibility grants separately and neither
+launch costs you the other's permission. Grant each once. Only one copy runs at a time: whichever
+starts asks the other to quit and waits for it to unstash its windows before taking over.
 
 Diagnostics go to the unified log:
 

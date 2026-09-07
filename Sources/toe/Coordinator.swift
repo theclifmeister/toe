@@ -191,6 +191,9 @@ final class Coordinator: WindowTrackerDelegate {
         status.onOpenMenu = { [weak self] in self?.dispatch(.menu(.root)) }
 
         installSignalHandlers()
+        // Before the four repairs below, because the copy this replaces writes those journals on
+        // its way out — and before anything grabs a hotkey or a tap it is still holding.
+        AppIdentity.takeOver()
         // Symbolic hotkey state outlives the process, so a previous toe that was killed rather
         // than quit may have left Mission Control's shortcut switched off. Give it back before
         // anything else, so the config below decides from a known-good baseline.
