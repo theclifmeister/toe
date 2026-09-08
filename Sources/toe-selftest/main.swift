@@ -1662,7 +1662,8 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     // The shipped config binds them itself, so nothing should be duplicated.
     let shipped = try Config.parse(Config.defaultTOML)
     for command in [Command.quit, .reload, .menu(.background), .menu(.theme),
-                    .growActive(dx: 100, dy: 0), .growActive(dx: 0, dy: 100)] {
+                    .growActive(dx: 100, dy: 0), .growActive(dx: 0, dy: 100),
+                    .swapWorkspace(-1), .swapWorkspace(1)] {
         t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
                 "the shipped config binds \(command) exactly once")
     }
@@ -1706,6 +1707,29 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     t.equal(binding(equal, .growActive(dx: 100, dy: 0)), nil, "and is not given the resize on top")
     t.equal(binding(equal, .growActive(dx: -100, dy: 0))?.source, "super-minus", "while SUPER+- still lands")
     t.equal(binding(taken, .killActive)?.source, "super-ctrl-space", "still doing what you asked")
+
+    // `swapworkspace`, on the list for the reachability reason rather than the Omarchy one: the
+    // quick menu does not carry the verb, so a config written before it had no route to the
+    // feature at all. The case that prompted this was a real config that predated it and a user
+    // pressing the key from the README to no effect.
+    t.equal(binding(old, .swapWorkspace(-1))?.source, "super-ctrl-shift-left",
+            "a config written before workspaces could trade places still gets the key")
+    t.equal(binding(old, .swapWorkspace(1))?.source, "super-ctrl-shift-right",
+            "and its pair, because one direction is half a feature")
+    // Any swap on any key is an answer, whatever its direction or distance — the resize rule,
+    // for the same reason: a config with the verb already knows the feature is there.
+    let swapper = try Config.parse("[binds]\n\"super-y\" = \"swapworkspace 3\"\n")
+    t.equal(swapper.bindings.filter { $0.command.swapsWorkspaces }.count, 1,
+            "your own swap binding stands alone")
+    t.equal(binding(swapper, .swapWorkspace(3))?.source, "super-y", "on your key")
+    // Moving one direction elsewhere takes both keys back, since either answers for the verb.
+    let leftOnly = try Config.parse("[binds]\n\"super-z\" = \"swapworkspace left\"\n")
+    t.equal(leftOnly.bindings.filter { $0.command.swapsWorkspaces }.count, 1,
+            "binding one direction yourself stands the pair aside")
+    // And swapping a *window* is a different feature that answers for none of it.
+    let window = try Config.parse("[binds]\n\"super-shift-left\" = \"swapwindow l\"\n")
+    t.equal(binding(window, .swapWorkspace(-1))?.source, "super-ctrl-shift-left",
+            "swapwindow is not swapworkspace and does not stand it aside")
 }
 
 h.test("nan and infinity are refused rather than reaching the layout") { t in

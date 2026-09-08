@@ -83,6 +83,15 @@ public extension Command {
         }
     }
 
+    /// True for the verb that renumbers workspaces. Every direction and distance answers for
+    /// every other where the question is "has this config got workspace swapping on a key" —
+    /// see `Config.bound(_:in:)`. `swapWindow` and `swapSplit` are not this: they move a window
+    /// inside a workspace and are a different feature with different keys.
+    var swapsWorkspaces: Bool {
+        if case .swapWorkspace = self { return true }
+        return false
+    }
+
     /// The verbs a native-fullscreen window suspends: everything that moves the focus or a
     /// window, and the one that closes one.
     ///
