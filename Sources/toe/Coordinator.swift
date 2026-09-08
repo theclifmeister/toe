@@ -160,9 +160,20 @@ final class Coordinator: WindowTrackerDelegate {
     /// Bumped whenever a slide is started or cancelled, so that a callback from an earlier one
     /// — a picture, a timer, an animation ending — finds it is no longer wanted and does nothing.
     private var slideGeneration = 0
-    /// How long the switch waits for the first picture before going ahead without one. A
-    /// capture is a few milliseconds once the capture session is warm, and the user's fingers
-    /// have just left the trackpad, so this is the most a swipe may be held up for a picture.
+    /// How long the switch waits for the first picture before going ahead without one. The
+    /// user's fingers have just left the trackpad, so this is the most a swipe may be held up
+    /// for a picture — past it the switch is made the plain way and the slide is dropped.
+    ///
+    /// This assumes a warm capture path, and until v0.20.0 that assumption was simply false:
+    /// nothing warmed it, so ScreenCaptureKit's first `captureImage` of the run — hundreds of
+    /// milliseconds of spinning up capture infrastructure — blew the budget every time, and the
+    /// swipes after it raced two full-resolution captures against this. That is what made the
+    /// slide a coin flip. `ScreenSnapshot.warm` and the wallpaper cache are the two halves of
+    /// making the sentence true, and with both of them in this number is left alone on measured
+    /// grounds rather than kept out of caution: over 63 swipes on a 5120×1440 display the one
+    /// capture still on the critical path ran 27 ms median, 53 ms p95, 60 ms worst, and not one
+    /// swipe missed the deadline. It was never the constant that was wrong. Re-measure before
+    /// touching it — `slide: outgoing picture after N ms (screen …, wallpaper …)` is the line.
     private static let slidePictureDeadline: TimeInterval = 0.1
     /// How long after the switch the second picture is taken. The Accessibility writes have
     /// returned by then, but that means the app has *received* its frame, not painted it —
@@ -857,7 +868,18 @@ final class Coordinator: WindowTrackerDelegate {
             snapshot.requestOnce()
             return
         }
-        snapshot.refresh()
+        snapshot.refresh { [weak self] in self?.warmSlide() }
+    }
+
+    /// The capture path, warmed for the displays as they are now.
+    ///
+    /// Always on the back of a `refresh` rather than beside it: `warm` can only point at a
+    /// display `SCShareableContent` has already named, so calling the two in a row would warm
+    /// nothing on the first run. `workspaces.monitors` is asked for the rects rather than
+    /// `NSScreen`, because these have to be the *same* rects a swipe will ask for or the
+    /// wallpaper cache misses on the very swipe it was taken for.
+    private func warmSlide() {
+        snapshot.warm(workspaces.monitors.map { (id: $0.id, area: $0.usable, frame: $0.frame) })
     }
 
     /// The macOS behaviours toe takes over, applied at startup and on every reload. None of them
@@ -1081,17 +1103,50 @@ final class Coordinator: WindowTrackerDelegate {
         switchWorkspace(target)
         let after = workspaces.activeWorkspace[monitorID]
 
-        guard config.animations.slideOnSwipe, before != after,
-              let direction = WorkspaceSlide.direction(for: target),
-              let monitor = workspaces.monitor(id: monitorID)
-        else { apply(refocus: true); return }
+        // Every skip from here on says so, and says which one it was. They were all silent until
+        // v0.20.0, and a slide that does not happen looks identical whichever guard stopped it —
+        // so "sometimes it slides" was undiagnosable from the log, which is the only instrument
+        // there is for a gesture. One guard per reason for that reason: a compound `guard` would
+        // be shorter and could only report the first arm's story for all of them.
+        guard config.animations.slideOnSwipe else { apply(refocus: true); return }
+
+        // `.next` can land on a workspace that lives on the other display, in which case the
+        // focus moved and this display's content did not. Nothing to slide, and this is the
+        // common one — not a fault.
+        guard before != after else {
+            Log.info("slide: skipped — display \(monitorID) is still showing"
+                     + " workspace \(before.map(String.init) ?? "none")")
+            apply(refocus: true)
+            return
+        }
+        guard let direction = WorkspaceSlide.direction(for: target) else {
+            // `.index` and `.former`, which no swipe produces — so this is a new caller, not a
+            // user's swipe, and worth saying out loud rather than silently not animating.
+            Log.info("slide: skipped — \(target) has no direction to slide in")
+            apply(refocus: true)
+            return
+        }
+        guard let monitor = workspaces.monitor(id: monitorID) else {
+            Log.info("slide: skipped — display \(monitorID) is not in the layout")
+            apply(refocus: true)
+            return
+        }
 
         // The grant may have landed since the config was applied — read it now, and if the
         // displays have not been listed since, list them for the next swipe. This one switches
         // the plain way rather than wait on an enumeration of every window on the system.
-        guard ScreenSnapshot.isGranted else { apply(refocus: true); return }
+        guard ScreenSnapshot.isGranted else {
+            Log.info("slide: skipped — Screen Recording is not granted")
+            apply(refocus: true)
+            return
+        }
+        // Also the recovery for a grant given in System Settings while toe ran: `refresh` refused
+        // to list anything at the time (see `applyAnimationSetting`), so `displays` was empty for
+        // the life of the process and every swipe landed here. It now costs the one swipe.
         guard snapshot.knows(display: monitor.id) else {
-            snapshot.refresh()
+            Log.info("slide: skipped — display \(monitor.id) is not listed yet;"
+                     + " listing and warming it for the next swipe")
+            snapshot.refresh { [weak self] in self?.warmSlide() }
             apply(refocus: true)
             return
         }
@@ -1147,6 +1202,8 @@ final class Coordinator: WindowTrackerDelegate {
         // slides, wallpaper and all, which is how the first version looked.
         var screen: CGImage??
         var wallpaper: CGImage??
+        var screenMs = 0
+        var wallpaperMs = 0
         let proceed = { [weak self] in
             guard let self, self.slideIs(.awaitingPicture, mine),
                   let screen, let wallpaper else { return }
@@ -1156,6 +1213,7 @@ final class Coordinator: WindowTrackerDelegate {
                 return
             }
             Log.info("slide: outgoing picture after \(ms()) ms"
+                     + " (screen \(screenMs) ms, wallpaper \(wallpaperMs) ms)"
                      + (wallpaper == nil ? " — no wallpaper picture, sliding the whole screen" : ""))
             self.slidePhase = .switching
             self.slide.begin(showing: image, over: monitor.usable, wallpaper: wallpaper,
@@ -1189,13 +1247,19 @@ final class Coordinator: WindowTrackerDelegate {
                 }
             }
         }
+        // Each capture's own time, reported together on the one line below rather than one line
+        // each: they race, and "no picture after 100 ms" cannot say which of the two was late —
+        // which is exactly the question the budget turns on, and was unanswerable from the log
+        // until v0.20.0.
         snapshot.capture(display: monitor.id, area: monitor.usable, frame: monitor.frame,
                          of: .everything) { image in
+            screenMs = ms()
             screen = .some(image)
             proceed()
         }
         snapshot.capture(display: monitor.id, area: monitor.usable, frame: monitor.frame,
                          of: .wallpaper) { image in
+            wallpaperMs = ms()
             wallpaper = .some(image)
             proceed()
         }
@@ -1438,7 +1502,12 @@ final class Coordinator: WindowTrackerDelegate {
         // A slide in flight is a picture of a screen that no longer exists in that shape.
         cancelSlide()
         refreshMonitors()
-        snapshot.refresh()
+        // Both cached pictures are of a screen that no longer has that shape — and the rects the
+        // wallpapers were keyed on have just changed, so they would miss anyway. Warmed again on
+        // the back of the new list, since `refreshMonitors` has already run and the rects are
+        // current.
+        snapshot.forgetWallpapers()
+        snapshot.refresh { [weak self] in self?.warmSlide() }
         desired.removeAll()
         corrections.removeAll()
         apply(refocus: false)

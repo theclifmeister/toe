@@ -222,6 +222,13 @@ public struct Config: Equatable {
     /// them — and the answer is usually still no, because a key taken from someone who did not
     /// ask for it is a worse failure than a feature they have to go and bind.
     ///
+    /// So the question that actually separates the list from everything else is not whether a
+    /// binding is new. It is whether the command has *any other route*. A verb the quick menu
+    /// carries is a verb an old config can still reach, and it can wait for the day its owner
+    /// goes looking; a verb that exists only on a key nobody has is a feature that shipped to
+    /// nobody. That is the narrower bar, it is the one the entries below actually clear, and
+    /// stating it that way is what keeps the list from growing to hold every new binding.
+    ///
     /// Editing the config is not one of them, though it used to be. It is an `exec` binding now,
     /// like the ones that open a terminal or a browser, and a fallback would have to name an
     /// editor toe has no business choosing — and would put itself back on `SUPER`+`,` every time
@@ -255,6 +262,19 @@ public struct Config: Equatable {
         ("super-equal", .growActive(dx: 100, dy: 0)),
         ("super-shift-minus", .growActive(dx: 0, dy: -100)),
         ("super-shift-equal", .growActive(dx: 0, dy: 100)),
+        // `swapworkspace`, on the reachability bar above rather than on any resemblance to
+        // Omarchy — it has none, and neither has Hyprland: the verb is toe's own, so there is no
+        // upstream habit to satisfy and that argument is not available here. What is available
+        // is that the quick menu does not carry it either, which left it the one command in toe
+        // reachable by no route at all from a config written before it. A feature that shipped
+        // to nobody is the failure this list is for.
+        //
+        // Both directions, because left without right is half a feature — the same reason the
+        // four resize keys go together — and ⌥⌃⇧ with an arrow is deep enough that taking it is
+        // close to taking nothing. Standing aside is the usual two rules plus `swapsWorkspaces`:
+        // any swap on any key, in any direction, and both of these stay away.
+        ("super-ctrl-shift-left", .swapWorkspace(-1)),
+        ("super-ctrl-shift-right", .swapWorkspace(1)),
     ]
 
     /// Whether a binding already answers for a fallback's command. Equality, except that any
@@ -265,6 +285,9 @@ public struct Config: Equatable {
     static func bound(_ command: Command, in bindings: [Binding]) -> Bool {
         bindings.contains { existing in
             if existing.command.resizes && command.resizes { return true }
+            // Same rule, same reason: a config with `swapworkspace 3` on a key of its own knows
+            // the feature exists, which is the whole thing the fallback was for.
+            if existing.command.swapsWorkspaces && command.swapsWorkspaces { return true }
             return existing.command == command
         }
     }
