@@ -623,11 +623,26 @@ public final class WorkspaceManager {
 
     /// `movetoworkspace <n>` / `movetoworkspacesilent <n>`.
     public func moveFocusedWindow(toWorkspace index: Int, follow: Bool) {
+        guard let id = focusedWindow else { return }
+        moveWindow(id, toWorkspace: index, follow: follow)
+    }
+
+    /// The same move, for a window that was named rather than focused.
+    ///
+    /// This is the generalisation `toe dispatch --window` needs, and it is the only one of its
+    /// kind: every other verb either already takes an id — `toggleFloating`, `growWindow`,
+    /// `resizeWindow` — or means something different when it is pointed away from the focus, and
+    /// those are refused rather than generalised. See `Command.acceptsTarget`.
+    ///
+    /// `follow` still means what it meant: the workspace comes forward and the window keeps the
+    /// focus. Sent for a window that is not the focused one, following it is usually not what the
+    /// caller wants, which is why `movetoworkspacesilent` exists and why a layout profile uses it.
+    @discardableResult
+    public func moveWindow(_ id: WindowID, toWorkspace index: Int, follow: Bool) -> Bool {
         guard (1...Self.workspaceCount).contains(index),
-              let id = focusedWindow,
               let currentIndex = workspaceIndex(of: id),
               currentIndex != index
-        else { return }
+        else { return false }
 
         let wasFloating = isFloating(id)
         workspaces[currentIndex]?.layout.remove(id)
@@ -645,6 +660,39 @@ public final class WorkspaceManager {
             switchTo(workspace: index)
             noteFocus(id)
         }
+        return true
+    }
+
+    /// Puts a window into or out of the tree, without walking the cycle to get there.
+    ///
+    /// `toggleFloating` is a cycle — tiled, floating, floating larger, tiled — because it is on a
+    /// key and a key that can only go one way round is how you ask for a size you cannot get
+    /// back from. A caller restoring a saved arrangement is not pressing a key: it knows the
+    /// state it wants and has to arrive at it in one step, since "press until it looks right" is
+    /// not something a program can see well enough to do.
+    ///
+    /// The floating half is deliberately the cycle's first stage rather than whichever one the
+    /// window last had. A profile records *that* a window floats, not how big it was — the size a
+    /// float lands at is centred on the monitor it is going to, and a remembered size from a
+    /// display that may not be plugged in is a worse answer than the one toe would give a window
+    /// leaving the tree today.
+    @discardableResult
+    public func setFloating(_ id: WindowID, _ floating: Bool) -> Bool {
+        guard let index = workspaceIndex(of: id), isFloating(id) != floating else { return false }
+        let ws = workspace(index)
+        guard floating else {
+            ws.floating.remove(id)
+            floatingStage.removeValue(forKey: id)
+            ws.layout.insert(id, anchor: anchor(on: ws, excluding: id), focalPoint: focalPoint(on: ws))
+            return true
+        }
+        ws.layout.remove(id)
+        ws.floating.insert(id)
+        floatingStage[id] = 1
+        if let m = monitor(id: ws.monitorID) {
+            floatingFrames[id] = centredFloatingBox(on: m, stage: 1)
+        }
+        return true
     }
 
     /// Focus the most recently used window on the workspace `focusedMonitorID` is now showing.

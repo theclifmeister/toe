@@ -4,7 +4,11 @@ BUNDLEID    := com.clifmeister.toe
 DEVBUNDLEID := com.clifmeister.toe.dev
 AGENT       := $(HOME)/Library/LaunchAgents/$(BUNDLEID).plist
 
-.PHONY: all build test bundle dev-bundle run install uninstall dev-cert reset-perms start-at-login stop-at-login example-config icon clean
+# Where `make install-cli` puts the symlink. Homebrew's bin if there is one — it is already on
+# the PATH of anyone who has brew — and /usr/local/bin otherwise, which may want sudo.
+BINDIR      ?= $(shell brew --prefix 2>/dev/null || echo /usr/local)/bin
+
+.PHONY: all build test bundle dev-bundle run install uninstall install-cli uninstall-cli dev-cert reset-perms start-at-login stop-at-login example-config icon clean
 
 all: bundle
 
@@ -45,7 +49,23 @@ install: bundle
 	@cp -R $(APP) /Applications/Toe.app
 	@echo "installed /Applications/Toe.app — run 'make start-at-login' to launch it at login"
 
-uninstall: stop-at-login
+## `toe` on the PATH, for an install from source. The Homebrew cask does this itself with its
+## `binary` stanza, so this is only for `make install`. The symlink points into the bundle rather
+## than at a copy: the same binary is the agent and the command line, told apart by argv, and a
+## copy would go stale the next time you built.
+install-cli:
+	@test -x /Applications/Toe.app/Contents/MacOS/toe \
+	    || { echo "install /Applications/Toe.app first — run 'make install'"; exit 1; }
+	@mkdir -p $(BINDIR) 2>/dev/null || true
+	@ln -sf /Applications/Toe.app/Contents/MacOS/toe $(BINDIR)/toe 2>/dev/null \
+	    || { echo "could not write $(BINDIR)/toe — try 'sudo make install-cli', or BINDIR=~/bin"; exit 1; }
+	@echo "linked $(BINDIR)/toe — try 'toe help'"
+
+uninstall-cli:
+	@rm -f $(BINDIR)/toe
+	@echo "removed $(BINDIR)/toe"
+
+uninstall: stop-at-login uninstall-cli
 	@pkill -x toe 2>/dev/null || true
 	@rm -rf /Applications/Toe.app
 	@echo "removed /Applications/Toe.app"

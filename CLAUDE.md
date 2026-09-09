@@ -30,12 +30,17 @@ executable rather than XCTest (XCTest ships with Xcode, not the Command Line Too
 `make test` working on a bare CLT machine). The whole suite is ~600 assertions and runs in about a
 second, so run all of it. Failures print as `test name:line — what: got X, want Y`.
 
+`toe query state` and the rest of the command line are the same binary talking to the running
+agent — see "The control socket" below.
+
 **Diagnostics without launching the agent:**
 
 ```sh
 toe --version                # what the bundle was stamped with
 toe --print-default-config   # the shipped default TOML
 toe --print-corner-radius    # what macOS rounds each on-screen window to
+toe help                     # the command line's own usage (also what a bare `toe` prints)
+toe skill print              # the generated Claude Code skill, without writing it anywhere
 log stream --predicate 'subsystem == "com.clifmeister.toe"' --level info
 ```
 
@@ -133,6 +138,56 @@ rather than expired by age.
 **AX calls are synchronous and on the main thread**, capped at 250 ms (`axMessagingTimeout`). They
 are not rare — `isManageable` alone is six round trips per candidate window. Adding one to a path
 that runs on every focus change or stack change is a real cost; put it after the cheap conditions.
+
+## The control socket
+
+`toe <verb>` is the same binary, deciding by argv before `NSApplication` exists — the shape
+`--version` and `--print-default-config` already had. It connects to a Unix socket at
+`~/.local/state/toe/toe.sock` and the running agent answers. A Mach service would be the more
+macOS answer and is not available: it needs a `MachServices` key in a launchd plist, and toe is as
+often started by `open Toe.app`, which never goes through launchd.
+
+The split follows the two-target rule. `ToeCore/Control` holds the wire types, the argv parsing,
+the selectors, the verb catalogue, the layout profiles and the generated skill document — all of
+it pure, all of it in the selftest. `toe/Control` holds the socket, the client, and the assembly
+of live state into `StateReport`.
+
+Three things here are easy to break:
+
+- **The socket runs on the main thread**, because a request ends in Accessibility writes and those
+  are main-thread-only. So nothing in `ControlSocket` may block: non-blocking descriptors, a
+  64 KiB cap, a two-second deadline on a connection that has not produced a whole request, a
+  write source for partial writes, and `SO_NOSIGPIPE` on every accepted descriptor.
+- **A batch renders once.** `Coordinator.batch` holds `apply` while a run of commands executes,
+  because every arm of `dispatch` ends in its own `apply` and ten of those is an arrangement
+  assembling itself on screen. Only synchronous runs are ever wrapped.
+- **`exec` and `quit` are gated** by `[cli] allow_exec` / `allow_quit`, and `CommandCatalogue.gate`
+  is where that is decided. The socket is not a privilege boundary — it is mode 600 in your own
+  home directory — but a window manager with one verb that runs shell lines should not hand a
+  shell to everything that learns to talk to it as a side effect. A new verb that runs anything
+  belongs on that list.
+
+**A bare `toe` from a shell is not the agent.** `make install-cli` and the cask's `binary` stanza
+both put `toe` on the PATH, at which point somebody types it to see what it does — and started from
+a shell the agent inherits that shell's process group, so closing the tab signals it and
+`installSignalHandlers` shuts it down, after `takeOver` has already stopped the copy that was
+running properly. `isatty` on **either** standard input or standard output separates that from
+launchd and `open Toe.app`, which have neither; one alone leaves a hole that `toe | head` or
+`toe > log` walks through, which is how this was found. `toe agent` is the deliberate way in from a
+shell.
+
+`Command.acceptsTarget` is the other rule worth knowing: `--window` may only be pointed at the
+verbs whose meaning survives being aimed away from the focus. The directional ones do not — they
+mean "from where the focus is" — and the catalogue's `--window` column is computed from that
+property rather than written down beside it, so the table cannot claim a target the dispatcher
+would refuse.
+
+The skill document (`SkillDocument`) is generated rather than committed, and its verb table comes
+from `CommandCatalogue`, so a verb added to the table reaches the file without anybody remembering
+to. The prose around it is the part that cannot be derived, and it is the reason the file exists:
+workspaces are not Spaces, fullscreen suspends half the verbs, a float is the user's. Installing
+it is `Install › Claude Code skill` in the quick menu, `toe skill install` on the command line, or
+the `installskill` verb.
 
 ## Accessibility and code signing
 

@@ -181,6 +181,40 @@ prevent_hiding = true
 # choice you made rather than a window arrangement toe worked out for you.
 restore_session = true
 
+[cli]
+# `toe` is a command line as well as a window manager. Run with a verb it talks to the copy already
+# running, over a socket at ~/.local/state/toe/toe.sock — 0600, in a 0700 directory, and refused to
+# any user but you:
+#
+#   toe query state                          what is open, where, and on which workspace
+#   toe query commands                       every verb dispatch accepts
+#   toe dispatch "workspace 3"               run one
+#   toe dispatch "movetoworkspace 2" "workspace 2"    run several, drawn once at the end
+#   toe dispatch --window app:Safari "movetoworkspace 3"
+#   toe layout save work / toe layout apply work      remember an arrangement, and put it back
+#   toe help                                 all of it
+#
+# The binary is inside the app bundle, so it is /Applications/Toe.app/Contents/MacOS/toe unless you
+# have put a symlink to it on your PATH.
+#
+# This exists so that something else can drive toe — a script, or a language model with a terminal.
+# `toe skill install` writes a page for Claude Code into ~/.claude/skills/toe describing all of the
+# above, generated from toe's own verb table so it cannot go stale; SUPER+SPACE > Install has the
+# same row, and Remove takes it away again.
+enabled = true
+
+# Two verbs are refused over that socket regardless, unless these say otherwise. They stay bound to
+# keys either way, where a person pressed them.
+#
+# `exec` runs a shell line, so a socket that carried it would hand a shell to every script and every
+# agent that learned to talk to toe — not by anyone's decision, but because window management
+# happens to have one verb that runs programs. Turn it on if you want that; know that it is what you
+# are turning on.
+allow_exec = false
+# `quit` stops toe, and a caller that stops toe cannot start it again — leaving a machine that has
+# stopped tiling for reasons nothing on screen explains.
+allow_quit = false
+
 [bar]
 # waybar's persistent-workspaces: the fewest slots the bar ever has, so a fresh session still
 # shows 1-5, the empty ones dimmed. It is a floor and not a claim on the first five: once five

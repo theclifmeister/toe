@@ -144,7 +144,8 @@ Binding specs accept the dash spelling and Omarchy's, so `"alt-shift-1"`, `"supe
 `"SUPER SHIFT, 1"` all mean the same. The commands are `movefocus`, `swapwindow`, `movewindow`,
 `workspace`, `movetoworkspace`, `movetoworkspacesilent`, `swapworkspace`, `killactive`,
 `togglefloating`, `togglesplit`, `swapsplit`, `growactive`, `resizeactive`, `exec`, `reload`,
-`menu`, `keybindings`, `theme`, `removetheme`, `background`, `nextbackground` and `quit`.
+`menu`, `keybindings`, `theme`, `removetheme`, `background`, `nextbackground`, `installskill`,
+`removeskill` and `quit`.
 `growactive <dx> <dy>` grows the focused window by that much; Hyprland's `resizeactive` moves the
 split by that much instead, which from a right-hand window is the other way round, and is accepted
 for configs copied from Omarchy. `swapworkspace left` / `right` is toe's own: it renumbers two
@@ -162,11 +163,66 @@ Other sections worth knowing about:
   default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
   menu flips it.
 - `[bar] persistent_workspaces` — how many workspaces always keep a slot on the menu bar.
+- `[cli]` — the command line below: whether its socket is opened at all, and whether `exec` and
+  `quit` may travel over it. Both are refused by default.
 
 **Treat the config as code.** An `exec` binding runs whatever the file says through `/bin/sh`,
 and toe reloads the file within a moment of it changing — so anything that can write it can run
 commands as you. toe creates it `0600` and warns in the menu bar if it is later found writable by
 others. Symlinking it into a dotfiles repository works fine.
+
+## The command line
+
+`toe` is a command as well as a window manager. Run with a verb, it talks to the copy already
+running over a socket at `~/.local/state/toe/toe.sock` — mode `0600`, in a `0700` directory, and
+refused to any user but you.
+
+```sh
+toe query state                          # what is open, where, and on which workspace
+toe query commands                       # every verb dispatch accepts
+toe dispatch "workspace 3"
+toe dispatch "movetoworkspace 2" "workspace 2"       # several, drawn once at the end
+toe dispatch --window app:Safari "movetoworkspace 3"
+toe focus app:Ghostty
+toe layout save work                     # remember an arrangement
+toe layout apply work                    # and put it back, by application rather than window id
+toe help
+```
+
+Replies are JSON on stdout — `{"ok":true,"result":…}`. A refusal exits 1 with a sentence on
+stderr; a mistyped command exits 2 without reaching toe at all. Selectors are `id:`, `app:`,
+`bundle:`, `title:` and `workspace:`, and a bare word tries the application first, then the title;
+a selector matching more than one window is refused with the candidates listed.
+
+**Getting `toe` onto your `PATH`.** Installed with Homebrew you already have it — the cask
+symlinks the binary into Homebrew's `bin`. From source, `make install-cli` does the same into
+`$(brew --prefix)/bin`, or wherever `BINDIR` points:
+
+```sh
+make install && make install-cli      # or: BINDIR=~/bin make install-cli
+```
+
+Either way the link points *into* the bundle rather than at a copy of it: the same binary is the
+window manager and the command line, told apart by its first argument. Without a link it is
+`/Applications/Toe.app/Contents/MacOS/toe`.
+
+Which means a bare `toe` typed at a prompt would otherwise start a window manager as a child of
+your shell — one that takes over from the copy running properly and then dies when you close the
+tab. So from a shell, `toe` with no arguments prints the usage; with no terminal at either end,
+which is how launchd and `open Toe.app` start it, it is the window manager. `toe agent` runs it in
+your shell deliberately.
+
+**Driving toe from an agent.** `toe skill install` writes a Claude Code skill into
+`~/.claude/skills/toe/SKILL.md` — the verb table, the selector syntax, and the handful of things
+about this window manager that nothing else would tell you: that a workspace is not a macOS Space,
+that a fullscreen window suspends half the verbs, that a floating window is the user's. The verb
+half is generated from toe's own table, so it cannot drift out of step with the program. The quick
+menu has the same row under Install › Claude Code skill, ticked once the file is there, and Remove
+takes it away again. `toe skill print` shows the document without writing it anywhere.
+
+`exec` and `quit` do not travel over the socket unless `[cli] allow_exec` / `allow_quit` say so.
+`exec` runs a shell line, and a control socket that carried it would hand a shell to everything
+that learned to talk to toe.
 
 ## From source
 
@@ -190,8 +246,9 @@ log stream --predicate 'subsystem == "com.clifmeister.toe"' --level info
 
 ## Not included
 
-By design: no scratchpads, no binding modes, no scripting API, no window groups. It is a
-layout engine and the bindings that drive it.
+By design: no scratchpads, no binding modes, no window groups, and no scripting language. The
+command line above is not one — it is the same verbs the keys send, spelled out loud so something
+else can send them. It is a layout engine, the bindings that drive it, and one socket.
 
 ## License
 
