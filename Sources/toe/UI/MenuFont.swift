@@ -110,6 +110,7 @@ enum MenuFont {
         case .trash:     return "\u{F014}"   // nf-fa-trash_o
         case .info:      return "\u{F05A}"   // nf-fa-info_circle
         case .globe:     return "\u{F0AC}"   // nf-fa-globe
+        case .terminal:  return "\u{F120}"   // nf-fa-terminal
         }
     }
 
@@ -131,6 +132,7 @@ enum MenuFont {
         case .trash:     return "trash"
         case .info:      return "info.circle"
         case .globe:     return "globe"
+        case .terminal:  return "terminal"
         }
     }
 }

@@ -4,9 +4,12 @@ import Foundation
 ///
 /// The keybindings page shows `SUPER + W  →  Close window`, and the right-hand half is this. It
 /// is one of three exhaustive `switch`es over `Command` in the tree — `Coordinator.dispatch` and
-/// `MenuModel.rank` are the others — so a new command needs four edits rather than two: the verb
-/// in `CommandParser`, the arm in `dispatch`, a label here, and a rank on the keybindings page.
-/// The compiler catches a missing label; nothing but a reader catches a bad one.
+/// `MenuModel.rank` are the others — so a new command needs five edits rather than two: the verb
+/// in `CommandParser`, the arm in `dispatch`, a label here, a rank on the keybindings page, and a
+/// row in `CommandCatalogue`, which is what `toe query commands` and the generated skill file
+/// answer with. The compiler catches the first four; the fifth is caught by the selftest only in
+/// the direction that matters — every catalogued verb must parse — so a verb added to the parser
+/// and left out of the table is a verb the command line will run and never mention.
 public enum CommandLabel {
 
     public static func describe(_ command: Command) -> String {
@@ -50,6 +53,11 @@ public enum CommandLabel {
         case .removeTheme(let slug): return "Remove the theme \(Slug.title(slug))"
         case .background(let file):  return "Background: \(ellipsised(file))"
         case .nextBackground:        return "Next background"
+        // Named for what it is for rather than for what it writes. Somebody reading this row in
+        // the keybindings list has not got the path in their head, and "the Claude Code skill"
+        // is the thing they went looking for.
+        case .installSkill:          return "Install the Claude Code skill"
+        case .removeSkill:           return "Remove the Claude Code skill"
         }
     }
 

@@ -54,6 +54,13 @@ public enum Command: Equatable {
     case background(String)
     /// `omarchy-theme-bg-next`.
     case nextBackground
+    /// Writes the Claude Code skill into `~/.claude/skills/toe`, so an agent knows what the
+    /// `toe` command line can do without being told each time. toe's own verb: it has no
+    /// Omarchy counterpart, because a shell on Linux needs no help finding `hyprctl`.
+    case installSkill
+    /// Takes that file away again — the Remove level's mirror of the row above, and the same
+    /// bounded kind of destructive as `removeTheme`: one path toe wrote, and no other.
+    case removeSkill
 }
 
 public extension Command {
@@ -128,6 +135,28 @@ public extension Command {
         }
     }
 
+    /// Whether `--window` means anything for this verb.
+    ///
+    /// Every command toe has acts on the focused window, because every one of them arrives on a
+    /// key pressed by somebody looking at the screen. A caller on the socket is not, so it may
+    /// name a window instead — but only for the verbs whose meaning survives the substitution.
+    ///
+    /// These four do, and they are exactly the ones the layout can already carry out on a window
+    /// by id rather than by focus. The directional verbs deliberately do not: `movefocus l` is
+    /// "the window left of *here*", and here is where the focus is — pointed at somebody else's
+    /// window it would mean walking a tree from a place the user is not standing, which is a
+    /// different command wearing the same name. `workspace` and the theme verbs take no window at
+    /// all. A caller that wants a directional verb somewhere else moves the focus there first,
+    /// which is a thing it can say and a thing the user can see happening.
+    var acceptsTarget: Bool {
+        switch self {
+        case .killActive, .toggleFloating, .moveToWorkspace, .growActive, .resizeActive:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Whether the quick menu stays up after running this.
     ///
     /// Every row used to dismiss the panel, which is right for almost all of them: `exec` brings
@@ -156,6 +185,11 @@ public extension Command {
         // Removing one is the same argument from the other side: the row leaves the list under
         // the cursor, and that disappearance is the whole of what toe says about it.
         case .theme, .removeTheme: return true
+        // The same argument again, and it is the reason the Install level exists: the row is
+        // the only thing that reports what happened. Installing the skill writes one file and
+        // says nothing about it, so the row turning into a ticked, dimmed one under the cursor
+        // *is* the confirmation — and closing the menu would take it away before it was read.
+        case .installSkill, .removeSkill: return true
         default:                   return false
         }
     }
@@ -245,6 +279,11 @@ public enum CommandParser {
             return .background(argument)
         case "nextbackground", "bgnext", "background-next":
             return .nextBackground
+
+        // Spelled like `removetheme` beside it, and for the same reason: a binding's value is a
+        // verb and its argument, so the noun goes in the verb rather than after it.
+        case "installskill":                return .installSkill
+        case "removeskill":                 return .removeSkill
 
         // Spelled the way `omarchy-menu` and `omarchy-menu keybindings` are invoked, so a
         // binding can be read across from an Omarchy config without translating it.

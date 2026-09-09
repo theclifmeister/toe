@@ -142,6 +142,38 @@ public struct MiscConfig: Equatable {
 }
 
 /// A window that should float instead of joining the dwindle tree.
+/// `[cli]` — what the `toe` command line, and whatever is driving it, is allowed to do.
+///
+/// The socket is not a privilege boundary: it lives in your home directory, mode 600, and
+/// anything running as you could equally well press the keys. What it is is a *blast radius*.
+/// `Command.exec` runs a shell line, so a control socket that carried it would hand a shell to
+/// every script and every language model that learned to talk to toe — not by anyone's decision,
+/// but as a side effect of window management having one verb that runs programs. `quit` is the
+/// same shape of mistake pointing the other way: a caller that stops toe cannot start it again,
+/// and the user is left with a machine that has stopped tiling for reasons nothing on screen
+/// explains.
+///
+/// Both stay bound to keys, where a person pressed them. Neither travels over the socket unless
+/// this section says so, and the refusal names the key to set — a setting nobody can find is a
+/// setting that reads as a bug.
+public struct CLIConfig: Equatable {
+    /// Whether the socket is opened at all. Off is a complete answer for anyone who wants toe
+    /// and does not want anything else able to drive it.
+    public var enabled: Bool = true
+    public var allowExec: Bool = false
+    public var allowQuit: Bool = false
+
+    /// Why this command may not come in over the socket, or nil when it may.
+    public func refusal(for command: Command) -> String? {
+        guard let gate = CommandCatalogue.gate(command) else { return nil }
+        switch gate.key {
+        case "cli.allow_exec": return allowExec ? nil : gate.reason
+        case "cli.allow_quit": return allowQuit ? nil : gate.reason
+        default:               return gate.reason
+        }
+    }
+}
+
 public struct FloatRule: Equatable {
     /// Bundle identifier. `*` matches any run of characters.
     public var app: String?
@@ -195,6 +227,7 @@ public struct Config: Equatable {
     public var menu: MenuConfig = MenuConfig()
     public var theme: ThemeConfig = ThemeConfig()
     public var misc: MiscConfig = MiscConfig()
+    public var cli: CLIConfig = CLIConfig()
     public var bindings: [Binding] = []
     public var floatRules: [FloatRule] = Config.defaultFloatRules
     /// Non-fatal problems (a binding that would not parse, an unknown key). Surfaced in the
@@ -613,6 +646,25 @@ public struct Config: Equatable {
                     config.misc.restoreSession = v
                 } else {
                     config.warnings.append("misc.restore_session: must be true or false, using \(config.misc.restoreSession)")
+                }
+            }
+        }
+
+        if let c = root["cli"]?.tableValue {
+            // Told apart from absent rather than coerced, the way `[misc]` and `[gestures]` do
+            // it: a mistyped boolean here is the difference between a socket and no socket, and
+            // silence about that is indistinguishable from toe ignoring the file.
+            for (key, path) in [("enabled", "cli.enabled"), ("allow_exec", "cli.allow_exec"),
+                                ("allow_quit", "cli.allow_quit")] {
+                guard let raw = c[key] else { continue }
+                guard let value = raw.boolValue else {
+                    config.warnings.append("\(path): must be true or false, leaving it alone")
+                    continue
+                }
+                switch key {
+                case "enabled":    config.cli.enabled = value
+                case "allow_exec": config.cli.allowExec = value
+                default:           config.cli.allowQuit = value
                 }
             }
         }

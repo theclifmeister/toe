@@ -4092,4 +4092,298 @@ h.test("a disabled row is listed, ticked, and cannot be reached") { t in
     t.equal(landed.activate(), MenuOutcome.none, "pressing it does nothing, leaving the menu up")
 }
 
+// MARK: - The command line
+
+/// A window as `toe query windows` would report it.
+func win(_ id: WindowID, _ app: String, bundle: String? = nil, title: String? = nil,
+         workspace: Int? = 1, floating: Bool = false) -> WindowReport {
+    WindowReport(id: id, app: app, bundle: bundle, title: title, workspace: workspace,
+                 frame: box(0, 0, 100, 100), floating: floating)
+}
+
+h.test("the CLI tells a verb from a flag from a typo") { t in
+    t.equal(ControlCLI.parse([]).kind, .agent,
+            "no arguments and no terminal — launchd, or `open Toe.app` — is the window manager")
+
+    // Once `toe` is on a PATH, a bare `toe` typed to see what it does would otherwise take the
+    // machine from the copy running properly and hand it to a process that dies with the shell.
+    t.equal(ControlCLI.parse([], isInteractive: true).kind, .help(ControlCLI.usage),
+            "typed at a terminal it prints the usage instead")
+    t.equal(ControlCLI.parse(["agent"], isInteractive: true).kind, .agent,
+            "and `toe agent` is how you say it out loud from a terminal anyway")
+    t.equal(ControlCLI.parse(["query", "state"], isInteractive: true).kind,
+            .request(ControlRequest(op: .query, what: "state")),
+            "a terminal changes nothing about a verb")
+    t.equal(ControlCLI.parse(["--version"]).kind, .agent,
+            "a flag falls through to the flag handling that has always been there")
+    t.equal(ControlCLI.parse(["-psn_0_12345"]).kind, .agent,
+            "and so does the argument some launches of `open Toe.app` carry")
+
+    // The one that matters: a mistyped verb must never start a second window manager on top of
+    // the running one.
+    guard case .error(let message) = ControlCLI.parse(["quer", "windows"]).kind else {
+        return t.expect(false, "a word that is not a verb is an error, not an agent")
+    }
+    t.expect(message.contains("quer"), "and the error says which word it did not know")
+
+    t.equal(ControlCLI.parse(["query", "windows"]).kind,
+            .request(ControlRequest(op: .query, what: "windows")), "query windows")
+    guard case .error = ControlCLI.parse(["query", "everything"]).kind else {
+        return t.expect(false, "an unknown query names the ones there are")
+    }
+    guard case .error = ControlCLI.parse(["query"]).kind else {
+        return t.expect(false, "and query with nothing after it does too")
+    }
+}
+
+h.test("dispatch takes several lines, a window and stdin") { t in
+    t.equal(ControlCLI.parse(["dispatch", "workspace 3"]).kind,
+            .request(ControlRequest(op: .dispatch, commands: ["workspace 3"])), "one line")
+    t.equal(ControlCLI.parse(["dispatch", "workspace 3", "movefocus l"]).kind,
+            .request(ControlRequest(op: .dispatch, commands: ["workspace 3", "movefocus l"])),
+            "several, which is what makes them one render")
+
+    let both = ControlCLI.parse(["dispatch", "--window", "app:Safari", "movetoworkspace 3"])
+    t.equal(both.kind, .request(ControlRequest(op: .dispatch, commands: ["movetoworkspace 3"],
+                                               window: "app:Safari")), "--window and its selector")
+    t.equal(ControlCLI.parse(["dispatch", "--window=app:Safari", "movetoworkspace 3"]).kind,
+            both.kind, "the joined-up spelling is the same request")
+
+    let piped = ControlCLI.parse(["dispatch", "-"])
+    t.expect(piped.readsStdin, "a bare - means the lines are on stdin")
+    guard case .request = piped.kind else { return t.expect(false, "and it is still a dispatch") }
+
+    guard case .error = ControlCLI.parse(["dispatch"]).kind else {
+        return t.expect(false, "dispatch with nothing to dispatch is a usage error")
+    }
+    guard case .error = ControlCLI.parse(["dispatch", "--window"]).kind else {
+        return t.expect(false, "and --window with no selector after it is too")
+    }
+}
+
+h.test("layout and skill route to their own operations") { t in
+    t.equal(ControlCLI.parse(["layout", "save", "work"]).kind,
+            .request(ControlRequest(op: .layoutSave, what: "work")), "layout save work")
+    t.equal(ControlCLI.parse(["layout", "list"]).kind,
+            .request(ControlRequest(op: .layoutList)), "layout list needs no name")
+    guard case .error = ControlCLI.parse(["layout", "apply"]).kind else {
+        return t.expect(false, "layout apply without a name says so rather than applying nothing")
+    }
+    t.equal(ControlCLI.parse(["skill", "install"]).kind, .skill(.install), "skill install")
+    t.equal(ControlCLI.parse(["skill"]).kind, .skill(.status),
+            "bare `skill` reports rather than writing anything")
+    guard case .help = ControlCLI.parse(["help"]).kind else {
+        return t.expect(false, "help prints the usage")
+    }
+}
+
+h.test("a selector names a window without pointing at it") { t in
+    let windows = [
+        win(11, "Ghostty", bundle: "com.mitchellh.ghostty", title: "toe — zsh"),
+        win(12, "Ghostty", bundle: "com.mitchellh.ghostty", title: "notes — nvim"),
+        win(13, "Safari", bundle: "com.apple.Safari", title: "Ghostty on GitHub", workspace: 2),
+    ]
+
+    t.equal(WindowSelector.resolve("id:13", in: windows), .one(windows[2]), "an id is exact")
+    t.equal(WindowSelector.resolve("id:99", in: windows), .none, "and an id nothing has finds nothing")
+    t.equal(WindowSelector.resolve("bundle:com.apple.Safari", in: windows), .one(windows[2]),
+            "a bundle identifier is matched whole")
+    t.equal(WindowSelector.resolve("bundle:com.apple", in: windows), .none,
+            "and not by substring, or `app:com` would name every Apple application at once")
+    t.equal(WindowSelector.resolve("title:notes", in: windows), .one(windows[1]), "a title fragment")
+    t.equal(WindowSelector.resolve("workspace:2", in: windows), .one(windows[2]), "a whole workspace")
+
+    // The rule that makes the most obvious selector anyone will type mean what they meant: a
+    // bare word matches the application *and* the Safari window whose title mentions it, and
+    // the application wins outright rather than the two being called ambiguous.
+    t.equal(WindowSelector.resolve("Safari", in: windows), .one(windows[2]),
+            "a bare word prefers the application to a title that mentions it")
+    guard case .many(let hits) = WindowSelector.resolve("Ghostty", in: windows) else {
+        return t.expect(false, "two windows of one application are ambiguous, not a guess")
+    }
+    t.equal(hits.map(\.id), [11, 12], "and both are named, in id order")
+
+    let explained = WindowSelector.explain(WindowSelector.resolve("Ghostty", in: windows),
+                                           selector: "Ghostty") ?? ""
+    t.expect(explained.contains("id:11") && explained.contains("id:12"),
+             "the refusal carries the ids, which is what a narrower selector needs")
+    t.expect(WindowSelector.explain(.one(windows[0]), selector: "id:11") == nil,
+             "a selector that landed has nothing to explain")
+
+    // Not a prefix toe knows is not a prefix at all: a window title with a colon in it is a
+    // title before it is a mistake.
+    t.equal(WindowSelector.parse("Downloads:2024").field, .any, "an unknown prefix is just text")
+    t.equal(WindowSelector.parse("Downloads:2024").value, "Downloads:2024", "kept whole")
+}
+
+h.test("every catalogued verb is a verb toe actually has") { t in
+    for entry in CommandCatalogue.entries {
+        t.expect(entry.sample.hasPrefix(entry.verb), "\(entry.verb): the sample uses the verb")
+        t.expect((try? CommandParser.parse(entry.sample)) != nil,
+                 "\(entry.verb): `\(entry.sample)` parses")
+        for alias in entry.aliases {
+            let aliased = entry.sample.replacingOccurrences(of: entry.verb, with: alias)
+            t.expect((try? CommandParser.parse(aliased)) != nil,
+                     "\(entry.verb): the alias `\(alias)` parses too")
+        }
+    }
+
+    let verbs = Set(CommandCatalogue.entries.map(\.verb))
+    t.expect(verbs.contains("installskill"), "the skill verbs are in the table")
+    t.expect(verbs.contains("movetoworkspace"), "and so is the one an agent reaches for first")
+
+    // The table's `--window` column is asked of the command rather than written down beside it,
+    // so it cannot claim a target the dispatcher would refuse.
+    func takesWindow(_ verb: String) -> Bool {
+        CommandCatalogue.entries.first { $0.verb == verb }?.takesWindow ?? false
+    }
+    t.expect(takesWindow("movetoworkspace"), "movetoworkspace can be pointed at a window")
+    t.expect(takesWindow("killactive"), "and so can killactive")
+    t.expect(!takesWindow("movefocus"),
+             "movefocus cannot: it means 'from where the focus is'")
+    t.expect(!takesWindow("workspace"), "and a workspace verb has no window to take")
+}
+
+h.test("[cli] keeps exec and quit off the socket until you say otherwise") { t in
+    let config = try Config.parse("")
+    t.expect(config.cli.enabled, "the socket is on by default")
+    t.expect(!config.cli.allowExec, "and exec is not")
+    t.expect(config.cli.refusal(for: .exec("rm -rf /")) != nil, "so exec is refused")
+    t.expect(config.cli.refusal(for: .quit) != nil, "and so is quit")
+    t.expect(config.cli.refusal(for: .workspace(.index(3))) == nil,
+             "while everything that only moves windows goes straight through")
+
+    let opened = try Config.parse("[cli]\nenabled = false\nallow_exec = true\n")
+    t.expect(!opened.cli.enabled, "enabled = false is read")
+    t.expect(opened.cli.refusal(for: .exec("ls")) == nil, "and allow_exec lets exec through")
+    t.expect(opened.cli.refusal(for: .quit) != nil, "one gate does not open the other")
+
+    let wrong = try Config.parse("[cli]\nenabled = \"yes\"\n")
+    t.expect(wrong.cli.enabled, "a mistyped boolean keeps the default")
+    t.expect(wrong.warnings.contains { $0.contains("cli.enabled") },
+             "and says so, rather than looking like toe ignored the file")
+
+    // The default config is the file every new install gets, and it documents this section.
+    let shipped = try Config.parse(Config.defaultTOML)
+    t.expect(shipped.cli.enabled && !shipped.cli.allowExec && !shipped.cli.allowQuit,
+             "the shipped default opens the socket and gates the two verbs")
+}
+
+h.test("a window can be moved and floated without being the focused one") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.noteFocus(1)
+
+    t.expect(wm.moveWindow(2, toWorkspace: 4, follow: false), "window 2 moved without holding focus")
+    t.equal(wm.workspaceIndex(of: 2), 4, "it is on workspace 4")
+    t.equal(wm.focusedWorkspaceIndex, 1, "and nobody went with it")
+    t.equal(wm.focusedWindow, 1, "the focus never moved")
+    t.expect(!wm.moveWindow(2, toWorkspace: 4, follow: false), "moving it where it already is does nothing")
+    t.expect(!wm.moveWindow(99, toWorkspace: 2, follow: false), "and a window toe does not know does nothing")
+
+    // `setFloating` arrives at a state in one step where `togglefloating` walks a cycle to it —
+    // a caller restoring a saved arrangement cannot press until it looks right.
+    t.expect(wm.setFloating(1, true), "window 1 floats")
+    t.expect(wm.isFloating(1), "and says so")
+    t.expect(!wm.setFloating(1, true), "asking again changes nothing")
+    t.expect(wm.setFloating(1, false), "and it tiles again in one step")
+    t.expect(!wm.isFloating(1), "rather than at the second size the cycle would have given it")
+}
+
+h.test("a layout profile names windows in a way that survives quitting them") { t in
+    let state = StateReport(
+        focusedWindow: 11, focusedWorkspace: 1, focusedMonitor: 1,
+        monitors: [MonitorReport(id: 1, frame: AREA, usable: AREA, workspace: 1, focused: true)],
+        workspaces: [WorkspaceReport(index: 1, monitor: 1, visible: true, focused: true,
+                                     windows: [11, 12]),
+                     WorkspaceReport(index: 2, monitor: 1, visible: false, focused: false,
+                                     windows: [13])],
+        windows: [win(11, "Ghostty", bundle: "com.mitchellh.ghostty", title: "toe — zsh"),
+                  win(12, "Ghostty", bundle: "com.mitchellh.ghostty", title: "notes — nvim"),
+                  win(13, "Safari", bundle: "com.apple.Safari", title: "GitHub", workspace: 2,
+                      floating: true)])
+
+    let profile = LayoutProfile.capture(name: "work", from: state)
+    t.equal(profile.workspaces.map(\.index), [1, 2], "both workspaces are recorded, in order")
+    t.equal(profile.workspaces[0].windows.map(\.app), ["Ghostty", "Ghostty"], "in tree order")
+    t.expect(profile.workspaces[0].windows[0].title == nil,
+             "the first window of an application is named by the application alone")
+    t.equal(profile.workspaces[0].windows[1].title, "notes — nvim",
+             "and only the second earns a title, which is the least durable thing about a window")
+    t.expect(profile.workspaces[1].windows[0].floating, "the float is recorded as one")
+
+    // Applied against the same windows, it asks for exactly the arrangement it was taken from.
+    let same = profile.plan(against: state.windows)
+    t.equal(same.moves.map(\.window), [11, 12, 13], "every window is placed")
+    t.equal(same.moves.map(\.workspace), [1, 1, 2], "back where it came from")
+    t.expect(same.missing.isEmpty && same.untouched.isEmpty, "nothing missing, nothing left over")
+
+    // One terminal running where the profile wants two: it places the one and reports the other
+    // rather than putting the same window in two places.
+    let fewer = [win(21, "Ghostty", bundle: "com.mitchellh.ghostty", title: "something else"),
+                 win(22, "Mail", bundle: "com.apple.mail", title: "Inbox")]
+    let short = profile.plan(against: fewer)
+    t.equal(short.moves.map(\.window), [21], "the one terminal is claimed once")
+    t.equal(short.missing.count, 2, "the second terminal and Safari are reported missing")
+    t.equal(short.untouched, [22], "and a window the profile says nothing about is left alone")
+}
+
+h.test("the skill row is Install's, with Omarchy's already-have-it guard") { t in
+    let none = StyleMenu()
+    t.expect(MenuModel.agentSkill(none) == nil,
+             "with nothing known about the file there is no row rather than a guess")
+    t.expect(MenuModel.remove(none).isEmpty, "and nothing to remove")
+
+    let missing = StyleMenu(skill: SkillReport(path: "/x/SKILL.md", installed: false, stale: false))
+    let offer = MenuModel.install(missing)
+    t.equal(offer.map(\.title), ["Claude Code skill"],
+            "with no catalogue fetched the level is the skill row alone")
+    t.expect(offer[0].value == nil && !offer[0].isDisabled, "offered plainly")
+    t.equal(offer[0].action, .run(.installSkill), "and it installs")
+    t.expect(MenuModel.remove(missing).isEmpty, "Remove says nothing about a file that is not there")
+
+    let installed = StyleMenu(skill: SkillReport(path: "/x/SKILL.md", installed: true, stale: false))
+    let have = MenuModel.install(installed)
+    t.equal(have[0].value, MenuModel.checkmark, "installed takes the tick")
+    t.expect(have[0].isDisabled, "and Omarchy's disabled guard, so it is listed but not choosable")
+    t.equal(MenuModel.remove(installed).map(\.title), ["Claude Code skill"],
+            "while Remove now offers it")
+    t.expect(MenuModel.remove(installed)[0].value == nil,
+             "with no tick: in a list called Remove that would read as 'already gone'")
+
+    // The document names the binary that wrote it, so the two copies of toe write different
+    // text. A file from the other one is offered again rather than ticked.
+    let stale = StyleMenu(skill: SkillReport(path: "/x/SKILL.md", installed: true, stale: true))
+    let update = MenuModel.install(stale)
+    t.equal(update[0].value, "update", "a stale file says what pressing it would do")
+    t.expect(!update[0].isDisabled, "and can be pressed")
+    t.equal(MenuModel.remove(stale).map(\.title), ["Claude Code skill"],
+            "a stale file is still a file, and still removable")
+
+    // The row keeps the menu open, for the reason a theme row does: the row changing under the
+    // cursor is the whole of what toe says about having done it.
+    t.expect(Command.installSkill.keepsMenuOpen && Command.removeSkill.keepsMenuOpen,
+             "both leave the menu up to show the row change")
+}
+
+h.test("the skill document is generated from the verb table") { t in
+    let text = SkillDocument.text(binary: "/Applications/Toe.app/Contents/MacOS/toe", version: "1.2.3")
+    t.expect(text.hasPrefix("---\nname: toe\n"), "it starts with the frontmatter a skill needs")
+    t.expect(text.contains("/Applications/Toe.app/Contents/MacOS/toe query state"),
+             "and names the binary that wrote it, since nothing puts toe on a PATH")
+
+    // The half that would otherwise go stale: every verb toe has appears because the table is
+    // walked, not because somebody remembered to add it here.
+    for entry in CommandCatalogue.entries {
+        t.expect(text.contains("`\(entry.usage)`"), "the document lists \(entry.verb)")
+    }
+
+    // The half that cannot be derived, and the reason the document is worth having.
+    for note in ["not a macOS Space", "fullscreen", "Floating windows are the user's",
+                 "app:Ghostty", "layout save"] {
+        t.expect(text.contains(note), "it still says the thing about \(note)")
+    }
+}
+
 exit(h.report())

@@ -49,6 +49,8 @@ public struct MenuItem: Equatable {
         case gear, book, keyboard, pencil, power, toggleOn, toggleOff
         case paintbrush, droplet, image
         case download, trash, info, globe
+        /// The command line, and the one row that is about it — see `MenuModel.agentSkill`.
+        case terminal
     }
 
     public indirect enum Action: Equatable {
@@ -138,6 +140,12 @@ public enum LoginItemState: Equatable, Sendable {
 
 /// What the Style, Install and Remove levels need to draw themselves.
 ///
+/// Style is in the name because for a long time that was all of it. The Install and Remove levels
+/// hold one row that is not about colour — the agent skill — and it is carried here rather than
+/// as a second parameter for the reason the rest of this is one value: it is threaded from the
+/// Coordinator through `QuickMenu` to `MenuModel` unchanged, and a second thing to thread is a
+/// second thing to forget to thread.
+///
 /// A value rather than four parameters, because it is threaded from the Coordinator through
 /// `QuickMenu` to here unchanged, and because it is rebuilt every time the menu opens — that is
 /// what makes a theme folder you created a moment ago appear without a reload.
@@ -164,11 +172,15 @@ public struct StyleMenu: Equatable {
     /// The theme being fetched right now, if one is. Its row fills as the pictures arrive, which
     /// is the whole of what toe says about a download since the menu bar stopped saying it.
     public var downloading: ThemeDownload?
+    /// Where the Claude Code skill file is and whether what is there is what this copy of toe
+    /// would write. nil where nobody has asked — the selftest, and every construction of this
+    /// value that is not the menu opening — and the row is then left out rather than guessing.
+    public var skill: SkillReport?
 
     public init(themes: [ThemeRef] = [], available: [RemoteTheme] = [], fetching: Bool = false,
                 current: String? = nil,
                 backgrounds: [String] = [], currentBackground: String? = nil,
-                downloading: ThemeDownload? = nil) {
+                downloading: ThemeDownload? = nil, skill: SkillReport? = nil) {
         self.themes = themes
         self.available = available
         self.fetching = fetching
@@ -176,6 +188,7 @@ public struct StyleMenu: Equatable {
         self.backgrounds = backgrounds
         self.currentBackground = currentBackground
         self.downloading = downloading
+        self.skill = skill
     }
 }
 
@@ -361,18 +374,49 @@ public enum MenuModel {
         return rows
     }
 
-    /// Omarchy's `Install` level. Upstream it holds sixteen submenus; toe can fetch one kind of
-    /// thing, so it holds `Style › Theme` and the two levels above it exist to put that row
-    /// where an Omarchy user's hands expect to find it.
+    /// Omarchy's `Install` level. Upstream it holds sixteen submenus; toe can put two kinds of
+    /// thing on your machine, so it holds `Style › Theme` — the two levels above it exist to put
+    /// that row where an Omarchy user's hands expect to find it — and the agent skill.
     ///
-    /// Empty — and so absent from the root — until the catalogue has been fetched once. A
-    /// machine that has never had a network has nothing to install and says so by not offering.
+    /// The theme half is absent until the catalogue has been fetched once: a machine that has
+    /// never had a network has no themes to offer and says so by not offering. The skill needs
+    /// nothing fetched, so the level itself is no longer conditional — which is a change from
+    /// when this could come out empty, and the reason the guard below stays: the *rule* is that a
+    /// row leading into an empty level is worse than no row, not that this particular level
+    /// happens to have something in it today.
     public static func install(_ style: StyleMenu) -> [MenuItem] {
-        let rows = installableThemes(style)
-        guard !rows.isEmpty else { return [] }
-        return [MenuItem(title: "Style", icon: .paintbrush, action: .submenu([
-            MenuItem(title: "Theme", icon: .droplet, action: .submenu(rows)),
-        ]))]
+        var rows: [MenuItem] = []
+        let themes = installableThemes(style)
+        if !themes.isEmpty {
+            rows.append(MenuItem(title: "Style", icon: .paintbrush, action: .submenu([
+                MenuItem(title: "Theme", icon: .droplet, action: .submenu(themes)),
+            ])))
+        }
+        if let skill = agentSkill(style) { rows.append(skill) }
+        return rows
+    }
+
+    /// The row that writes `~/.claude/skills/toe/SKILL.md`.
+    ///
+    /// toe's own row, with no Omarchy counterpart — Omarchy's Install level installs software,
+    /// and this installs a page of documentation into another program's directory. It is here
+    /// rather than under Setup because Setup is switches and the config file, and this is a thing
+    /// that is either on your disk or not, which is exactly what Install and Remove are for.
+    ///
+    /// Omarchy's `disabled` guard does the work: once the file is there the row stays listed,
+    /// goes dim and takes a tick, so the level reads as a catalogue of what toe can put on the
+    /// machine rather than a list that empties as you use it. The one thing that is not simply
+    /// present or absent is a file written by the *other* copy of toe — the document names the
+    /// binary that wrote it, so the development build and the installed one write different text
+    /// — and that is offered rather than ticked, with the second column saying which it is.
+    public static func agentSkill(_ style: StyleMenu) -> MenuItem? {
+        guard let skill = style.skill else { return nil }
+        let current = skill.installed && !skill.stale
+        return MenuItem(title: "Claude Code skill",
+                        icon: .terminal,
+                        value: current ? checkmark : (skill.stale ? "update" : nil),
+                        isDisabled: current,
+                        action: .run(.installSkill))
     }
 
     /// Everything Omarchy publishes: what you have, dimmed, and what you do not, priced.
@@ -416,9 +460,20 @@ public enum MenuModel {
     /// already gone*; removing the theme you are wearing is allowed, and hands your own colours
     /// back on the way out.
     public static func remove(_ style: StyleMenu) -> [MenuItem] {
-        guard !style.themes.isEmpty else { return [] }
-        return [MenuItem(title: "Theme", icon: .droplet, action: .submenu(
-            style.themes.map { MenuItem(title: $0.name, action: .run(.removeTheme($0.slug))) }))]
+        var rows: [MenuItem] = []
+        if !style.themes.isEmpty {
+            rows.append(MenuItem(title: "Theme", icon: .droplet, action: .submenu(
+                style.themes.map { MenuItem(title: $0.name, action: .run(.removeTheme($0.slug))) })))
+        }
+        // Only when there is something to remove, which is upstream's `when` and the mirror of
+        // the Install row: no tick and no dimming here, because in a list called Remove a tick
+        // would read as *this one is already gone*. A stale file is still a file and is still
+        // listed — you can take away a skill written by the other copy of toe.
+        if style.skill?.installed == true {
+            rows.append(MenuItem(title: "Claude Code skill", icon: .terminal,
+                                 action: .run(.removeSkill)))
+        }
+        return rows
     }
 
     /// The current theme's pictures, and the row that steps through them.
@@ -549,6 +604,9 @@ public enum MenuModel {
         case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive: return 7
         case .theme, .removeTheme, .background, .nextBackground: return 8
         case .menu:             return 9
+        // With `reload` and `quit` rather than with the theme rows: this is a thing done to
+        // toe's own installation, not to how the screen looks.
+        case .installSkill, .removeSkill: return 10
         case .reload, .quit:    return 10
         case .exec:             return 11
         }

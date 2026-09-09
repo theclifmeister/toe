@@ -24,6 +24,30 @@ if CommandLine.arguments.contains("--version") {
     exit(0)
 }
 
+// The command line. `toe query state`, `toe dispatch "workspace 3"` and the rest talk to the copy
+// already running, over the socket in ~/.local/state/toe — see `ControlSocket` for why a socket
+// and not a Mach service.
+//
+// Before `NSApplication.shared`, deliberately and not merely for speed: touching it connects to
+// the window server and makes this process an application as far as macOS is concerned, which is
+// not what a shell command should be. A verb here is a few milliseconds, one file descriptor and
+// no Accessibility at all.
+//
+// Anything that is not one of these verbs falls through and starts the window manager, exactly as
+// it always has — including the flags above and the `-psn_…` argument some launches of
+// `open Toe.app` carry. A first word that is neither a flag nor a verb stops with a usage error
+// rather than starting a second window manager on top of the running one.
+//
+// `isInteractive` is what tells a bare `toe` typed at a prompt from the launchd and `open
+// Toe.app` invocations that carry no arguments either — see `ControlCLI.parse`. Either descriptor
+// being a terminal is enough, because a pipe or a redirect takes the other one away and the thing
+// being asked is who typed this, not where its output goes.
+let invocation = ControlCLI.parse(Array(CommandLine.arguments.dropFirst()),
+                                  isInteractive: isatty(STDIN_FILENO) == 1 || isatty(STDOUT_FILENO) == 1)
+if case .agent = invocation.kind {} else {
+    exit(ControlClient.run(invocation))
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 // `toe --print-corner-radius` reports what macOS rounds windows to, so the border can be

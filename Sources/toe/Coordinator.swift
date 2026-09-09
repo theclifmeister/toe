@@ -19,6 +19,10 @@ final class Coordinator: WindowTrackerDelegate {
     private let hideBlocker = HideBlocker()
     private let status = StatusItem()
     private let quickMenu = QuickMenu()
+    /// The `toe` you type, on the other end of a socket. See `ControlSocket` — it is
+    /// opened by `applyCLISetting` rather than here, so that `[cli] enabled = false` is a
+    /// socket that is never created and a reload can open or close it.
+    private let control = ControlSocket()
     private var watcher: ConfigWatcher?
     /// Watches `~/.config/toe/themes`, so a theme folder appearing or going away is noticed
     /// without waiting for anything else to happen. Optional and re-checked on every reload,
@@ -88,6 +92,19 @@ final class Coordinator: WindowTrackerDelegate {
     /// than fought with forever.
     private var corrections: [WindowID: Int] = [:]
     private var focusApplied: WindowID?
+    /// How deep inside a batch we are. While this is above zero every `apply` is recorded rather
+    /// than carried out, and the whole batch is drawn once when it unwinds.
+    ///
+    /// This exists for the command line and for nothing else. Every arm of `dispatch` ends in its
+    /// own `apply`, which is right for a keypress — one press, one change, drawn immediately —
+    /// and wrong for the ten commands that put a saved layout back: ten renders means every
+    /// window written up to ten times, and an arrangement that assembles itself on screen instead
+    /// of arriving. Only synchronous runs of commands are ever wrapped, so nothing arriving from
+    /// a callback can find itself inside somebody else's batch.
+    private var batchDepth = 0
+    /// Whether anything in the batch asked for the focus to be re-applied. Sticky, because one
+    /// command in ten wanting it is the batch wanting it.
+    private var batchRefocus = false
     /// Windows toe raised itself, and when — see `isEchoOfOwnRaise`.
     private var selfRaised: [WindowID: TimeInterval] = [:]
     /// How long a focus notification can still be the echo of one of those raises.
@@ -348,6 +365,7 @@ final class Coordinator: WindowTrackerDelegate {
         applyAnimationSetting()
         applyMiscSettings()
         applySessionSetting()
+        applyCLISetting()
         refreshStatus()
         apply(refocus: false)
         Log.info("managing \(tracker.windows.count) window(s) across \(workspaces.monitors.count) monitor(s)")
@@ -478,6 +496,7 @@ final class Coordinator: WindowTrackerDelegate {
         applyAnimationSetting()
         applyMiscSettings()
         applySessionSetting()
+        applyCLISetting()
 
         refreshStatus()
         // The theme may have changed under an open menu — most often because a download just
@@ -661,7 +680,12 @@ final class Coordinator: WindowTrackerDelegate {
                          fetching: available.isFetching,
                          current: current,
                          backgrounds: backgrounds, currentBackground: currentBackground,
-                         downloading: downloading)
+                         downloading: downloading,
+                         // Read every time rather than remembered, and on the redraw as well as
+                         // on the open: it is one small file, the row it draws is the whole of
+                         // what toe says about installing it, and a file somebody deleted by
+                         // hand should stop being ticked without a reload.
+                         skill: SkillStore.state())
     }
 
     /// Takes a theme off the disk, and off your border if you were wearing it.
@@ -1570,6 +1594,14 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - Applying the layout
 
     private func apply(refocus: Bool) {
+        // Held, not dropped: see `batchDepth`. Before the slide check below because a batch has
+        // not happened yet — cancelling a slide on behalf of a render that is still to come would
+        // be acting on a decision nobody has made.
+        guard batchDepth == 0 else {
+            batchRefocus = batchRefocus || refocus
+            return
+        }
+
         // A slide waiting for its picture has switched the model and not yet the screen. A render
         // arriving now from anywhere else — a window appearing, a config reload — puts the new
         // layout on screen before the picture of the old one is taken, and the picture would then
@@ -1827,6 +1859,11 @@ final class Coordinator: WindowTrackerDelegate {
         // WindowServer, so it is taken down deliberately rather than left to process death.
         dockSwipes.stop()
         hideBlocker.stop()
+        // Before the four journals below, and for the same family of reason: the socket file is
+        // state that outlives the process. A copy that is killed rather than quit leaves one
+        // behind, which the next `start` unlinks — but a copy that goes away properly should not
+        // leave a door that opens onto nothing.
+        control.stop()
         // The four that would otherwise outlive toe: the window server keeps a symbolic hotkey
         // switched off until something switches it back on, and the reveal-desktop, edge-tiling
         // and Dock auto-hide preferences are written to the user's settings.
@@ -1918,6 +1955,40 @@ final class Coordinator: WindowTrackerDelegate {
         sessionSave?.cancel()
         sessionSave = nil
         SessionStore.clear()
+    }
+
+    // MARK: - The control socket
+
+    /// Opens or closes the socket `toe query` and `toe dispatch` talk to.
+    ///
+    /// Called from the same fan-out as the other `apply*` settings, and unlike them *not* gated
+    /// on `isManaging`: the socket needs no Accessibility grant, and a machine sitting at the
+    /// permission prompt is exactly where somebody wants to ask toe what it thinks is going on.
+    /// The commands that arrive before the grant do nothing, which is what those commands do on
+    /// a key as well.
+    private func applyCLISetting() {
+        guard config.cli.enabled else {
+            if control.isRunning { Log.info("cli: [cli] enabled = false — closing the socket") }
+            control.stop()
+            runtimeWarnings.removeValue(forKey: "cli")
+            return
+        }
+        guard !control.isRunning else { return }
+        control.onRequest = { [weak self] request in
+            guard let self else {
+                return ControlCoding.line(ControlFailure("toe is going away"))
+            }
+            return self.handle(request)
+        }
+        if let problem = control.start() {
+            // Keyed under `cli` rather than appended to `setupWarnings`, so that a reload
+            // replaces this message instead of stacking another copy of it — and so that the
+            // dock-swipe check, which starts that list afresh, cannot take it away.
+            runtimeWarnings["cli"] = "the toe command line is unavailable: \(problem)"
+            Log.error("cli: \(problem)")
+        } else {
+            runtimeWarnings.removeValue(forKey: "cli")
+        }
     }
 
     /// A durable name for each live display, asked again every time rather than cached:
@@ -2075,6 +2146,296 @@ final class Coordinator: WindowTrackerDelegate {
                 return
             }
             setBackground(next)
+
+        case .installSkill:
+            writeSkill(SkillStore.install())
+
+        case .removeSkill:
+            writeSkill(SkillStore.remove())
         }
     }
+
+    /// Both skill rows, which differ only in which way they went.
+    ///
+    /// A failure is a `runtimeWarnings` entry rather than a thrown anything: this is reached from
+    /// a menu row and from a keybinding, and neither has a way of showing an error except the one
+    /// toe already has. Keyed, so a later success takes the message down — the same contract
+    /// `download` has with a failed fetch.
+    private func writeSkill(_ outcome: Result<SkillReport, Refusal>) {
+        switch outcome {
+        case .success:
+            runtimeWarnings.removeValue(forKey: "skill")
+        case .failure(let refusal):
+            runtimeWarnings["skill"] = refusal.description
+        }
+        refreshStatus()
+        // The Install and Remove levels are built from whether the file is there, so the row the
+        // user just pressed becomes a ticked, dimmed one under their cursor. That change *is* the
+        // confirmation — see `Command.keepsMenuOpen`.
+        refreshMenu()
+    }
+}
+
+// MARK: - Answering the command line
+
+/// The socket's side of `Coordinator`.
+///
+/// In this file rather than beside `ControlSocket`, because everything here reaches into state
+/// the coordinator keeps to itself — the tracker, the layout, the config — and Swift's `private`
+/// is file-scoped. Splitting it out would mean opening those up to the whole module in order to
+/// tidy a file, which is the wrong trade in a type whose invariants are the reason it is one type.
+///
+/// Every path is main-thread, synchronous, and answers something. A request that cannot be
+/// carried out comes back as a sentence rather than as silence: the caller is a script or a
+/// language model, and "nothing happened" is the one reply neither can do anything with.
+extension Coordinator {
+
+    func handle(_ request: ControlRequest) -> Data {
+        switch request.op {
+        case .query:        return query(request.what)
+        case .dispatch:     return runBatch(request)
+        case .focus:        return focus(selector: request.window)
+        case .layoutSave:   return saveLayout(request.what)
+        case .layoutApply:  return applyLayout(request.what)
+        case .layoutList:   return ok(layoutsReport())
+        case .layoutShow:   return showLayout(request.what)
+        case .layoutDelete: return deleteLayout(request.what)
+        }
+    }
+
+    // MARK: Reading
+
+    private func query(_ what: String?) -> Data {
+        guard let what, let kind = ControlQuery(rawValue: what) else {
+            return no("query needs one of: "
+                      + ControlQuery.allCases.map(\.rawValue).joined(separator: ", "))
+        }
+        switch kind {
+        case .state:      return ok(state())
+        case .windows:    return ok(state().windows)
+        case .workspaces: return ok(state().workspaces)
+        case .monitors:   return ok(state().monitors)
+        case .binds:
+            return ok(config.bindings.map {
+                BindReport(keys: ShortcutFormatter.describe($0, superKey: config.superKey),
+                           does: CommandLabel.describe($0.command))
+            })
+        case .commands:   return ok(CommandCatalogue.entries.map(\.report))
+        case .layouts:    return ok(layoutsReport())
+        case .skill:      return ok(SkillStore.state())
+        }
+    }
+
+    private func state() -> StateReport {
+        let keys = monitorKeys()
+        return StateReporter.report(workspaces,
+                                    tracked: tracker.windows,
+                                    monitorKey: { keys[$0] },
+                                    version: AppIdentity.version)
+    }
+
+    private func layoutsReport() -> LayoutsReport {
+        LayoutsReport(directory: LayoutStore.directory.path, layouts: LayoutStore.names())
+    }
+
+    // MARK: Acting
+
+    /// One or more command lines, parsed and checked before any of them runs.
+    ///
+    /// Everything that can be refused is refused up front — a verb that does not exist, a verb
+    /// the config has not allowed over the socket, a `--window` that names two windows or none, a
+    /// verb that cannot be pointed at a window at all. A batch that fails halfway leaves a layout
+    /// nobody asked for and no way to say which half happened, so the whole of it is checked
+    /// while nothing has moved.
+    private func runBatch(_ request: ControlRequest) -> Data {
+        let lines = (request.commands ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !lines.isEmpty else {
+            return no("nothing to dispatch — `toe query commands` lists the verbs")
+        }
+
+        var commands: [Command] = []
+        for line in lines {
+            do {
+                let command = try CommandParser.parse(line)
+                if let refusal = config.cli.refusal(for: command) { return no(refusal) }
+                commands.append(command)
+            } catch {
+                return no("'\(line)': \(error) — `toe query commands` lists the verbs")
+            }
+        }
+
+        // Said rather than logged. On a key this is a press that does nothing and a line in the
+        // log; over the socket the caller cannot see the screen, and "the command was accepted
+        // and ignored" is indistinguishable from "toe is broken" unless somebody says which.
+        if commands.contains(where: \.suspendedByFullscreen), AX.frontmostFullscreenFrame != nil {
+            return no("a fullscreen window has the focus, so toe is refusing anything that would "
+                      + "move the focus, a window or a workspace behind it — leave fullscreen, or "
+                      + "act on another display")
+        }
+
+        var target: WindowID?
+        if let selector = request.window {
+            let resolution = WindowSelector.resolve(selector, in: state().windows)
+            guard case .one(let window) = resolution else {
+                return no(WindowSelector.explain(resolution, selector: selector) ?? "no such window")
+            }
+            if let refused = commands.first(where: { !$0.acceptsTarget }) {
+                return no("`\(CommandLabel.describe(refused))` cannot be pointed at another window "
+                          + "— it means \"from where the focus is\". Focus that window first, or "
+                          + "drop --window. `toe query commands` marks the verbs that take one")
+            }
+            target = window.id
+        }
+
+        batch {
+            for command in commands {
+                if let target { dispatch(command, on: target) } else { dispatch(command) }
+            }
+        }
+        return ok(DispatchReport(ran: lines, window: target))
+    }
+
+    /// Runs a run of commands as one change to the screen. See `batchDepth`.
+    private func batch(_ body: () -> Void) {
+        batchDepth += 1
+        body()
+        batchDepth -= 1
+        guard batchDepth == 0 else { return }
+        let refocus = batchRefocus
+        batchRefocus = false
+        apply(refocus: refocus)
+    }
+
+    /// A command aimed at a window that is not the focused one.
+    ///
+    /// Only the verbs `Command.acceptsTarget` admits reach this, and the caller has already been
+    /// told about the ones that do not. Each arm is its focused counterpart in `dispatch` with
+    /// the id handed in rather than looked up — deliberately duplicated rather than folded
+    /// together, because the two differ in the one place it matters and the difference is easier
+    /// to see written out than hidden behind an optional parameter.
+    private func dispatch(_ command: Command, on id: WindowID) {
+        switch command {
+        case .killActive:
+            guard let window = tracker.window(id) else { return }
+            WindowMover.close(window)
+
+        case .toggleFloating:
+            workspaces.toggleFloating(id)
+            desired.removeValue(forKey: id)
+            corrections.removeValue(forKey: id)
+            apply(refocus: false)
+            // Deliberately *not* raised, where the focused version raises. That raise is there
+            // because you have just floated the window you are looking at and a float belongs
+            // above the tiles; doing it to somebody else's window would take the focus off the
+            // one they are working in, which is a bigger surprise than a float sitting low.
+
+        case .moveToWorkspace(let index, let follow):
+            if workspaces.moveWindow(id, toWorkspace: index, follow: follow) {
+                apply(refocus: follow)
+            }
+
+        case .growActive(let dx, let dy):
+            if workspaces.growWindow(id, dx: dx, dy: dy) { apply(refocus: false) }
+
+        case .resizeActive(let dx, let dy):
+            if workspaces.resizeWindow(id, dx: dx, dy: dy) { apply(refocus: false) }
+
+        default:
+            break
+        }
+    }
+
+    private func focus(selector: String?) -> Data {
+        guard let selector, !selector.isEmpty else {
+            return no("focus needs a selector, such as app:Ghostty")
+        }
+        let resolution = WindowSelector.resolve(selector, in: state().windows)
+        guard case .one(let window) = resolution else {
+            return no(WindowSelector.explain(resolution, selector: selector) ?? "no such window")
+        }
+        // The window's workspace is brought to it rather than the window being dragged out of
+        // its workspace — `revealWindow`'s contract, and the same answer a click on a Dock icon
+        // gets. Which of the two happened decides how much work follows: a whole workspace
+        // arriving has to be written out, a window already on screen only needs the focus.
+        if workspaces.revealWindow(window.id) {
+            apply(refocus: true)
+        } else {
+            focus(window.id)
+        }
+        return ok(DispatchReport(ran: ["focus"], window: window.id))
+    }
+
+    // MARK: Layouts
+
+    private func saveLayout(_ name: String?) -> Data {
+        guard let name, !name.isEmpty else { return no("layout save needs a name") }
+        let profile = LayoutProfile.capture(name: name, from: state())
+        switch LayoutStore.save(profile) {
+        case .success:            return ok(profile)
+        case .failure(let why):   return no(why.description)
+        }
+    }
+
+    private func showLayout(_ name: String?) -> Data {
+        guard let name, !name.isEmpty else { return no("layout show needs a name") }
+        switch LayoutStore.load(name) {
+        case .success(let profile): return ok(profile)
+        case .failure(let why):     return no(why.description)
+        }
+    }
+
+    private func deleteLayout(_ name: String?) -> Data {
+        guard let name, !name.isEmpty else { return no("layout delete needs a name") }
+        switch LayoutStore.delete(name) {
+        // What is left rather than an acknowledgement of what went: the caller's next question
+        // after deleting one is which ones there still are.
+        case .success:          return ok(layoutsReport())
+        case .failure(let why): return no(why.description)
+        }
+    }
+
+    /// Puts a saved arrangement back, as one change to the screen.
+    ///
+    /// The plan is worked out against what is open before anything moves, so a profile naming
+    /// applications that are not running places the ones that are and reports the rest — rather
+    /// than half-applying and leaving the caller to work out where it stopped.
+    private func applyLayout(_ name: String?) -> Data {
+        guard let name, !name.isEmpty else { return no("layout apply needs a name") }
+        let profile: LayoutProfile
+        switch LayoutStore.load(name) {
+        case .success(let loaded): profile = loaded
+        case .failure(let why):    return no(why.description)
+        }
+
+        let plan = profile.plan(against: state().windows)
+        var moved: [WindowID] = []
+        batch {
+            for move in plan.moves {
+                // `follow: false` throughout: applying a layout is not a request to be taken to
+                // any particular workspace, and following each move in turn would walk the user
+                // through every workspace the profile mentions before landing on the last one.
+                var changed = workspaces.moveWindow(move.window, toWorkspace: move.workspace,
+                                                    follow: false)
+                // After the move, so the float is centred on the monitor it has arrived at
+                // rather than the one it left.
+                changed = workspaces.setFloating(move.window, move.floating) || changed
+                guard changed else { continue }
+                // A window that has changed tree or floating state has no valid remembered frame;
+                // clearing both is what makes `apply` write it afresh rather than deciding it is
+                // already where it belongs.
+                desired.removeValue(forKey: move.window)
+                corrections.removeValue(forKey: move.window)
+                moved.append(move.window)
+            }
+        }
+        Log.info("layout '\(name)': moved \(moved.count) window(s), "
+                 + "\(plan.missing.count) not open, \(plan.untouched.count) left alone")
+        return ok(LayoutApplyReport(profile: name, plan: plan, moved: moved))
+    }
+
+    // MARK: The envelope
+
+    private func ok<T: Encodable>(_ value: T) -> Data { ControlCoding.line(ControlSuccess(value)) }
+
+    private func no(_ message: String) -> Data { ControlCoding.line(ControlFailure(message)) }
 }

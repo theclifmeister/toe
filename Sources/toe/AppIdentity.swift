@@ -25,6 +25,23 @@ enum AppIdentity {
     /// eventually debug the wrong one of.
     static var isDevelopment: Bool { Bundle.main.bundleIdentifier == development }
 
+    /// What this copy was stamped with, or nil for a binary run straight out of `.build`, which
+    /// has no `Info.plist` to have been stamped.
+    static var version: String? {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    }
+
+    /// Where this binary is, absolutely.
+    ///
+    /// The skill document names it, because nothing puts toe on a PATH — it lives inside an
+    /// application bundle, and an agent that has to guess at the path is an agent that gives up.
+    /// `argv[0]` is the fallback for the case `Bundle` cannot answer, which is a binary invoked
+    /// through a symlink from somewhere odd; it is the path the caller actually used, which is
+    /// the next best thing to the real one.
+    static var binaryPath: String {
+        Bundle.main.executableURL?.resolvingSymlinksInPath().path ?? CommandLine.arguments[0]
+    }
+
     /// Asks every other copy of toe to quit, and waits for it to be gone.
     ///
     /// `SIGTERM`, not `NSRunningApplication.terminate()`: that sends a quit Apple Event, which

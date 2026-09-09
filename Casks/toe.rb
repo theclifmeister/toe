@@ -20,6 +20,15 @@ cask "toe" do
 
   app "Toe.app"
 
+  # `toe` on the PATH, pointing into the bundle rather than at a copy of it — the same binary is
+  # the window manager and the command line that steers it, told apart by its first argument, so
+  # there is nothing else to install and nothing that can fall out of step with the app.
+  #
+  # Homebrew symlinks this into its own bin, which is already on the PATH of anyone who installed
+  # toe this way, and removes it on uninstall. See `toe help`, and `toe skill install` for the
+  # Claude Code skill.
+  binary "#{appdir}/Toe.app/Contents/MacOS/toe"
+
   uninstall launchctl: "com.clifmeister.toe",
             quit:      "com.clifmeister.toe"
 
@@ -40,6 +49,10 @@ cask "toe" do
       notarized, where it used to carry a self-signed certificate. macOS keys Accessibility
       to the signature, so it sees this as a different app: remove the old toe entry from the
       Accessibility list, then add the new one. One time only — later upgrades keep the grant.
+
+      `toe` is now on your PATH as well: `toe query state` says what is open and where,
+      `toe dispatch "workspace 3"` drives it, and `toe help` lists the rest. `toe skill install`
+      writes a Claude Code skill so an agent can do the same.
 
       To start toe at login, see "Start at login" at #{cask.homepage}
     EOS
