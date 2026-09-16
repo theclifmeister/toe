@@ -63,7 +63,10 @@ final class ThemeCatalogue {
     /// being a day behind is one theme you cannot see yet.
     static let maxAge: TimeInterval = 24 * 60 * 60
     /// The tree of a repository this size is about 400 KB. Ten is not a limit anyone will meet;
-    /// it is there so a redirect to something enormous cannot be read into memory.
+    /// it is there so a redirect to something enormous cannot be read into memory — which it
+    /// once could, because the check ran after the whole answer was in memory. `BoundedGET`
+    /// refuses on the headers and cancels at the limit, so now the ceiling is on what is ever
+    /// held, not on what is kept afterwards (#130).
     private static let sizeLimit = 10 << 20
 
     private(set) var catalogue: Catalogue?
@@ -89,29 +92,22 @@ final class ThemeCatalogue {
 
         var request = URLRequest(url: Upstream.tree)
         request.timeoutInterval = 15
-        // GitHub refuses an unidentified client on some paths and rate-limits by IP; saying who
-        // this is costs nothing and makes the request explicable at the far end.
-        request.setValue("toe (macOS window manager)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        // The host after redirects, the status and the size are `BoundedGET`'s to check, on the
+        // headers rather than on a body that has already been taken in.
+        BoundedGET.task(request, limit: Self.sizeLimit) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isFetching = false
                 defer { self.onChange?() }
 
-                if let error {
+                let data: Data
+                switch result {
+                case .success(let fetched): data = fetched
+                case .failure(let why):
                     self.lastFailed = true
-                    Log.error("themes: could not fetch the list: \(error.localizedDescription)")
-                    return
-                }
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                      let host = response?.url?.host, Upstream.allowedHosts.contains(host),
-                      let data, data.count <= Self.sizeLimit
-                else {
-                    self.lastFailed = true
-                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    Log.error("themes: could not fetch the list (HTTP \(code))")
+                    Log.error("themes: could not fetch the list: \(why)")
                     return
                 }
                 do {
