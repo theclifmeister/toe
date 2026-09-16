@@ -244,6 +244,15 @@ private final class Connection {
             if read > 0 {
                 inbox.append(contentsOf: buffer[0..<read])
                 guard inbox.count <= limit else {
+                    // Through the same teardown as a request that arrived whole. The refusal
+                    // is forty bytes and almost always goes out in one write — but a client
+                    // that keeps sending and never reads can make that write come back EAGAIN,
+                    // and then `waitForRoom` arms a write source beside a reader still live:
+                    // the next bytes fire the reader, land back here, and `reply` replaces a
+                    // half-flushed refusal with a fresh copy, so the client gets its tail
+                    // followed by its head. `close` then finds two sources on one descriptor,
+                    // which is the arrangement it is written to avoid.
+                    finishReading()
                     reply(ControlCoding.line(ControlFailure("that request is too long")))
                     return
                 }
@@ -268,19 +277,42 @@ private final class Connection {
     }
 
     private func answer(_ request: Data.SubSequence) {
+        finishReading()
+        reply(onRequest(Data(request)))
+    }
+
+    /// The request is in, whole or refused, and nothing more will be read from this
+    /// descriptor: the deadline and the read source go before anything is written. Every reply
+    /// comes through here first, because a reader left live beside a write source is the one
+    /// arrangement `close` cannot take down cleanly — it would close the descriptor from the
+    /// reader's cancel handler while the writer's cancellation was still pending.
+    ///
+    /// No cancel handler on the reader, deliberately: the descriptor stays open for the reply,
+    /// and `close` closes it afterwards, from the writer if one is still holding it and
+    /// directly if not.
+    private func finishReading() {
         timeout?.cancel()
         timeout = nil
         reader?.cancel()
         reader = nil
-        reply(onRequest(Data(request)))
     }
 
     private func reply(_ data: Data) {
+        // `onRequest` can end in `ControlSocket.stop()` — `dispatch reload` after
+        // `[cli] enabled = false` was saved is one way — which closes this very connection from
+        // inside its own answer. The reply then has nowhere to go: the descriptor is closed, or
+        // its close is queued behind us on the main queue, and a write source armed on it now
+        // would be waiting on a descriptor that is about to be closed under it.
+        guard !isClosed else { return }
         outbox = data
         flush()
     }
 
     private func flush() {
+        // Also reached from the write source's event handler, so the guard is here as well as
+        // in `reply`: a source is cancelled by `close`, but the check costs nothing and the
+        // alternative is a write down a descriptor somebody else may have been handed.
+        guard !isClosed else { return }
         while !outbox.isEmpty {
             let written = outbox.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, outbox.count) }
             if written > 0 {
@@ -319,7 +351,9 @@ private final class Connection {
         timeout = nil
         // The descriptor is closed by whichever source still holds it, for the reason the
         // listener's is: cancellation is asynchronous. With neither source left it is closed
-        // here.
+        // here. A reader and a writer are never both here at once — `finishReading` takes the
+        // reader down before the first write — so the first branch is a connection closed
+        // while still reading: the deadline, a read error, or `stop()`.
         if let reader {
             reader.setCancelHandler { [fd] in Darwin.close(fd) }
             reader.cancel()

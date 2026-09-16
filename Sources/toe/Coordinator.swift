@@ -2129,6 +2129,8 @@ final class Coordinator: WindowTrackerDelegate {
                              style: styleMenu())
 
         case .quit:
+            // Over the socket this is reached one turn of the main queue after the batch that
+            // asked for it, so that the reply is out before the socket goes — see `runBatch`.
             shutDown()
             NSApp.terminate(nil)
 
@@ -2287,12 +2289,32 @@ extension Coordinator {
             target = window.id
         }
 
+        // `quit` is answered before it is obeyed. Run here it would end the process before the
+        // `return` below: `shutDown` closes the socket, and with it the connection this reply is
+        // for, and `NSApp.terminate` never comes back. The client read end of file with nothing
+        // in it and printed "toe answered with nothing", exit status 1 — the same as a refusal
+        // and the same as a toe that has wedged, so the one verb that stops toe was the one a
+        // script could not tell from toe being broken. So the batch runs up to the quit, the
+        // report goes back, and the quit is put one turn of the main queue behind it:
+        // `Connection.flush` writes the report synchronously on the way out of this call — a
+        // `DispatchReport` is a hundred bytes, which a fresh socket's send buffer always has
+        // room for — and `control.stop()` runs on the next turn, when there is no connection
+        // left to cut off. Anything on the line after `quit` is dropped, as it always was: there
+        // is no toe left to run it. The menu and the key still reach `dispatch(.quit)` directly
+        // and quit on the spot; only the socket has a reply to get out first.
+        let quit = commands.firstIndex { if case .quit = $0 { return true } else { return false } }
+        let live = quit.map { commands[..<$0] } ?? commands[...]
+
         batch {
-            for command in commands {
+            for command in live {
                 if let target { dispatch(command, on: target) } else { dispatch(command) }
             }
         }
-        return ok(DispatchReport(ran: lines, window: target))
+        guard let quit else {
+            return ok(DispatchReport(ran: lines, window: target))
+        }
+        DispatchQueue.main.async { [weak self] in self?.dispatch(.quit) }
+        return ok(DispatchReport(ran: Array(lines[...quit]), window: target))
     }
 
     /// Runs a run of commands as one change to the screen. See `batchDepth`.

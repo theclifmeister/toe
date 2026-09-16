@@ -155,8 +155,9 @@ public enum CommandCatalogue {
                                  + "[cli] allow_exec is on.",
                           sample: "exec open -a Safari"),
         CommandDescriptor(verb: "quit", aliases: ["exit"],
-                          summary: "Stop toe, putting every hidden workspace's windows back first. "
-                                 + "Refused over the socket unless [cli] allow_quit is on.",
+                          summary: "Stop toe, putting every hidden workspace's windows back first; "
+                                 + "the reply arrives before toe goes. Refused over the socket "
+                                 + "unless [cli] allow_quit is on.",
                           sample: "quit"),
     ]
 
