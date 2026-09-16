@@ -146,14 +146,51 @@ public enum MenuLayout {
         return Point(x: title.x, y: title.y + m.lineHeight + m.subtitleGap)
     }
 
-    /// The second column. `column` is a fraction of the row for the keybindings page, where the
-    /// arrows have to line up with each other; nil right-aligns it, which is where walker puts a
-    /// lone value like `on`.
-    public static func valueOrigin(inRow row: Box, valueWidth: Double, column: Double?,
-                                   _ m: MenuMetrics) -> Point {
-        let x = column.map { row.x + row.w * $0 }
-            ?? (row.x + row.w - m.itemPaddingLeft - valueWidth)
-        return Point(x: x, y: row.y + m.itemPaddingVertical)
+    /// The two columns of a row, laid out together — because whatever one takes the other cannot
+    /// have. Before this they were placed independently, and a value longer than the gap between
+    /// them drew straight through the title. Returning both boxes from one call is what keeps
+    /// that from coming back: there is no way to ask for the value's box without the title's
+    /// being clipped to match.
+    ///
+    /// `titleStart` is `titleOrigin(...).x` — where the title begins is decided by the icon, not
+    /// here — and `titleWidth` and `valueWidth` are what AppKit measured the strings at, the
+    /// same seam as `MenuMetrics.lineHeight`. `valueWidth` is nil for a row with no value, which
+    /// then takes the whole row for its title: the same box the right-aligned case hands back,
+    /// so `MenuView` has one path to draw a row's text down.
+    ///
+    /// `column` is a fraction of the row for the keybindings page, where the arrows have to line
+    /// up with the one above them, so the value takes a fixed x and the title yields to it. nil
+    /// right-aligns the value, which is where walker puts a lone value like `on`; there the
+    /// title has the room it needs and the value is cut to `valueSpace` — truncated rather than
+    /// drawn over the title, which is what a long one did before this existed.
+    ///
+    /// `value` comes back nil below about half a character, because there is nothing to say and
+    /// room only to say it badly. The fixed column can go negative that way too — a column
+    /// past the right padding — and reads as the same nothing.
+    public static func columns(inRow row: Box, titleStart: Double, titleWidth: Double,
+                               valueWidth: Double?, column: Double?,
+                               _ m: MenuMetrics) -> (title: Box, value: Box?) {
+        let y = row.y + m.itemPaddingVertical
+        let rightEdge = row.x + row.w - m.itemPaddingLeft
+        func titleBox(upTo limit: Double) -> Box {
+            Box(x: titleStart, y: y, w: max(0, limit - titleStart), h: m.lineHeight)
+        }
+        guard let valueWidth else {
+            return (titleBox(upTo: rightEdge), nil)
+        }
+        let title: Box
+        let value: Box
+        if let column {
+            let x = row.x + row.w * column
+            value = Box(x: x, y: y, w: rightEdge - x, h: m.lineHeight)
+            title = titleBox(upTo: x - m.iconGap)
+        } else {
+            let space = valueSpace(inRow: row, titleEnd: titleStart + titleWidth, m)
+            let fits = min(valueWidth, space)
+            value = Box(x: rightEdge - fits, y: y, w: fits, h: m.lineHeight)
+            title = titleBox(upTo: rightEdge)
+        }
+        return (title, value.w >= m.fontSize / 2 ? value : nil)
     }
 
     /// What is left for the second column once the title has taken the room it needs. A value
