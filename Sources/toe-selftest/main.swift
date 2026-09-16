@@ -2784,6 +2784,71 @@ h.test("the second column never runs into the title") { t in
             "a title longer than the row leaves nothing rather than a negative width")
 }
 
+h.test("the two columns share a row from one call") { t in
+    let m = MenuMetrics(lineHeight: 22)
+    let c = MenuConfig()
+    // Every number below is walker's stylesheet added up, so a drift in any of them is a change
+    // to what the eye was measured against. Content inset 22 (2 border + 20 padding), list top
+    // 74 (22 + a 42 search strip + 10), text 14 down in a 50 row, title past a 16 icon and its
+    // 14 gap at 66, right padding 14.
+    func titleStart(_ row: Box) -> Double { MenuLayout.titleOrigin(inRow: row, hasIcon: true, m).x }
+
+    // The keybindings page: a fixed column at half the 800 list, the same x on every row.
+    let keys = (0..<3).map { MenuLayout.rowFrame($0, width: c.listWidth, m) }
+    let fixed = keys.map {
+        MenuLayout.columns(inRow: $0, titleStart: titleStart($0), titleWidth: 120,
+                           valueWidth: 60, column: 0.5, m)
+    }
+    t.equal(fixed.map { $0.value?.x }, [400, 400, 400],
+            "every arrow starts at 22 + 756 / 2, whatever its row's title measured")
+    t.equalBox(fixed[0].value, Box(x: 400, y: 88, w: 364, h: 22),
+               "and the value runs from the column to the right padding, 764")
+    t.equalBox(fixed[1].value, Box(x: 400, y: 138, w: 364, h: 22), "one row height down")
+    t.equalBox(fixed[0].title, Box(x: 66, y: 88, w: 320, h: 22),
+               "the title is clipped a gap short of the column, 400 - 14 - 66, not to its own width")
+    let long = MenuLayout.columns(inRow: keys[0], titleStart: titleStart(keys[0]), titleWidth: 500,
+                                  valueWidth: 60, column: 0.5, m)
+    t.equalBox(long.title, Box(x: 66, y: 88, w: 320, h: 22),
+               "a title wider than its share yields to the column rather than the other way round")
+    t.equalBox(long.value!, Box(x: 400, y: 88, w: 364, h: 22), "which keeps the arrow where it was")
+
+    // The root menu: "Run on startup" at 151 with `off` at 32, the pair #74 was measured on.
+    let row = MenuLayout.rowFrame(0, width: c.width, m)
+    let aligned = MenuLayout.columns(inRow: row, titleStart: titleStart(row), titleWidth: 151,
+                                     valueWidth: 32, column: nil, m)
+    t.equalBox(aligned.value, Box(x: 332, y: 88, w: 32, h: 22),
+               "off ends at the right padding, 22 + 356 - 14, at its own width")
+    t.equalBox(aligned.title, Box(x: 66, y: 88, w: 298, h: 22),
+               "and the title has the row to the padding: it is the value that gives way here")
+    let wide = MenuLayout.columns(inRow: row, titleStart: titleStart(row), titleWidth: 151,
+                                  valueWidth: 200, column: nil, m)
+    t.equalBox(wide.value, Box(x: 231, y: 88, w: 133, h: 22),
+               "a value wider than the gap is cut to valueSpace — it starts a gap past the title's "
+               + "217 and still ends at 364, rather than running back through the title")
+    t.equalBox(wide.title, Box(x: 66, y: 88, w: 298, h: 22), "with the title untouched")
+
+    // The floor: below half a character, 9 points at 18, the value is not drawn at all.
+    let floor = MenuLayout.columns(inRow: row, titleStart: titleStart(row), titleWidth: 275,
+                                   valueWidth: 32, column: nil, m)
+    t.equalBox(floor.value, Box(x: 355, y: 88, w: 9, h: 22),
+               "a title ending at 341 leaves 364 - 14 - 341 = 9, which is just enough")
+    let under = MenuLayout.columns(inRow: row, titleStart: titleStart(row), titleWidth: 276,
+                                   valueWidth: 32, column: nil, m)
+    t.equal(under.value, nil, "one point less and there is nothing to say")
+    t.equalBox(under.title, Box(x: 66, y: 88, w: 298, h: 22), "the title keeps its box regardless")
+    let past = MenuLayout.columns(inRow: keys[0], titleStart: titleStart(keys[0]), titleWidth: 120,
+                                  valueWidth: 60, column: 1, m)
+    t.equal(past.value, nil, "a fixed column past the right padding is the same nothing, not a "
+                             + "negative width")
+
+    // No value: the title takes the row to the padding, column or not. A keybindings row without
+    // a second column is not clipped for a value that is not there.
+    let bare = MenuLayout.columns(inRow: keys[0], titleStart: titleStart(keys[0]), titleWidth: 120,
+                                  valueWidth: nil, column: 0.5, m)
+    t.equal(bare.value, nil, "nothing to draw")
+    t.equalBox(bare.title, Box(x: 66, y: 88, w: 698, h: 22), "and the whole 764 - 66 for the title")
+}
+
 // MARK: - A download, in the menu
 
 /// A Theme level mid-download: two themes on disk, two to be had, and Solitude being fetched.

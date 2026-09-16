@@ -38,8 +38,6 @@ final class SlideOverlay {
     /// just put up.
     private var generation = 0
 
-    var isShowing: Bool { panel.isVisible }
-
     init() {
         panel = NSPanel(contentRect: .zero,
                         styleMask: [.borderless, .nonactivatingPanel],

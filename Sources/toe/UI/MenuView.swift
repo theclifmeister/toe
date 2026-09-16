@@ -148,43 +148,20 @@ final class MenuView: NSView {
             }
 
             let title = MenuLayout.titleOrigin(inRow: row, hasIcon: item.icon != nil, m)
-            let titleWidth = Double(measure(item.title, font: textFont))
             let rightEdge = row.x + row.w - m.itemPaddingLeft
 
-            if let value = item.value {
-                // The two columns are laid out together, because whatever one takes the other
-                // cannot have. Before this they were placed independently, and a value longer
-                // than the gap between them drew straight through the title.
-                let valueBox: NSRect
-                let titleLimit: Double
-                if let column = s.valueColumn {
-                    // The keybindings page: a fixed column, so every arrow lines up with the one
-                    // above it. The title yields to it.
-                    let x = row.x + row.w * column
-                    valueBox = NSRect(x: x, y: title.y, width: rightEdge - x, height: m.lineHeight)
-                    titleLimit = x - m.iconGap
-                } else {
-                    let space = MenuLayout.valueSpace(inRow: row, titleEnd: title.x + titleWidth, m)
-                    let natural = Double(measure(value, font: textFont))
-                    let fits = min(natural, space)
-                    valueBox = NSRect(x: rightEdge - fits, y: title.y,
-                                      width: fits, height: m.lineHeight)
-                    titleLimit = rightEdge
-                }
-                draw(item.title,
-                     in: NSRect(x: title.x, y: title.y,
-                                width: max(0, titleLimit - title.x), height: m.lineHeight),
-                     font: textFont, colour: colour, alignment: .left)
-                // Below about a character there is nothing to say and room only to say it badly.
-                if valueBox.width >= CGFloat(m.fontSize) / 2 {
-                    draw(value, in: valueBox, font: textFont, colour: colour,
-                         alignment: s.valueColumn == nil ? .right : .left)
-                }
-            } else {
-                draw(item.title,
-                     in: NSRect(x: title.x, y: title.y,
-                                width: max(0, rightEdge - title.x), height: m.lineHeight),
-                     font: textFont, colour: colour, alignment: .left)
+            // Both columns from one call, so they cannot be placed independently again — the why
+            // is on `MenuLayout.columns`. This view measures the strings and draws the boxes it
+            // is handed, nothing more.
+            let boxes = MenuLayout.columns(
+                inRow: row, titleStart: title.x,
+                titleWidth: Double(measure(item.title, font: textFont)),
+                valueWidth: item.value.map { Double(measure($0, font: textFont)) },
+                column: s.valueColumn, m)
+            draw(item.title, in: rect(boxes.title), font: textFont, colour: colour, alignment: .left)
+            if let value = item.value, let box = boxes.value {
+                draw(value, in: rect(box), font: textFont, colour: colour,
+                     alignment: s.valueColumn == nil ? .right : .left)
             }
 
             if let subtitle = item.subtitle, m.showsSubtitles {
