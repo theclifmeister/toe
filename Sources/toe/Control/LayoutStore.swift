@@ -27,12 +27,13 @@ enum LayoutStore {
         return files
             .filter { $0.pathExtension == "json" }
             .map { $0.deletingPathExtension().lastPathComponent }
-            .filter { Slug.make($0) == $0 }
+            .filter { Slug($0) != nil }
             .sorted()
     }
 
     static func load(_ name: String) -> Result<LayoutProfile, Refusal> {
-        guard let url = url(for: name) else { return .failure(Refusal(badName(name))) }
+        guard let slug = Slug(name) else { return .failure(Refusal(badName(name))) }
+        let url = url(for: slug)
         guard let data = try? Data(contentsOf: url) else {
             let known = names()
             let suffix = known.isEmpty ? " — nothing has been saved yet"
@@ -52,7 +53,8 @@ enum LayoutStore {
     }
 
     static func save(_ profile: LayoutProfile) -> Result<URL, Refusal> {
-        guard let url = url(for: profile.name) else { return .failure(Refusal(badName(profile.name))) }
+        guard let slug = Slug(profile.name) else { return .failure(Refusal(badName(profile.name))) }
+        let url = url(for: slug)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
@@ -64,7 +66,8 @@ enum LayoutStore {
     }
 
     static func delete(_ name: String) -> Result<Void, Refusal> {
-        guard let url = url(for: name) else { return .failure(Refusal(badName(name))) }
+        guard let slug = Slug(name) else { return .failure(Refusal(badName(name))) }
+        let url = url(for: slug)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure(Refusal("no layout called '\(name)'"))
         }
@@ -80,10 +83,11 @@ enum LayoutStore {
     /// puts between a name and a path join. This name arrives over a socket and is joined onto a
     /// directory that is about to be written to and deleted from, so a `/` or a `..` in it must
     /// not become part of the path. Rejecting rather than silently slugifying: a caller that
-    /// asked for `../../x` should be told no, not handed a file called something else.
-    private static func url(for name: String) -> URL? {
-        guard !name.isEmpty, Slug.make(name) == name else { return nil }
-        return directory.appendingPathComponent(name).appendingPathExtension("json")
+    /// asked for `../../x` should be told no, not handed a file called something else. The
+    /// refusing is `Slug.init?`, at each caller's door; this takes the `Slug` so that nothing
+    /// unchecked can reach the join.
+    private static func url(for slug: Slug) -> URL {
+        directory.appendingPathComponent(slug.value).appendingPathExtension("json")
     }
 
     private static func badName(_ name: String) -> String {

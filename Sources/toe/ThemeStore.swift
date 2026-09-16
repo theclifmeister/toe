@@ -39,8 +39,7 @@ enum ThemeStore {
             // Through the slug rather than taken as read: this name came off a filesystem, and
             // everything downstream — the config line it is written into, the path it is joined
             // back onto — expects a slug. A directory whose name is not one is not a theme.
-            let slug = Slug.make(url.lastPathComponent)
-            guard slug == url.lastPathComponent else { return nil }
+            guard let slug = Slug(url.lastPathComponent)?.value else { return nil }
             return ThemeRef(slug: slug, name: Slug.title(slug))
         }
     }
@@ -91,18 +90,15 @@ enum ThemeStore {
     /// is held to the shape of a theme name before it joins the path rather than after: a slug
     /// has no `/` and cannot be `..`, and a name that is not one names nothing here. That is
     /// upstream's guard too, and for the same reason — a theme called `..` would take
-    /// `~/.config/toe` with it.
+    /// `~/.config/toe` with it. Held by the type: this takes a `Slug`, so the check has already
+    /// happened by the time there is anything to call it with.
     ///
     /// The trash rather than an unlink, because this is somebody's own colours and a menu row is
     /// a small thing to have pressed by accident. Falls back to removing outright where there is
     /// no trash to move it to.
     @discardableResult
-    static func remove(named slug: String) -> Bool {
-        guard !slug.isEmpty, slug == Slug.make(slug) else {
-            Log.error("theme remove: '\(slug)' is not a theme name")
-            return false
-        }
-        let folder = directory.appendingPathComponent(slug)
+    static func remove(_ slug: Slug) -> Bool {
+        let folder = directory.appendingPathComponent(slug.value)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {

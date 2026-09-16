@@ -112,8 +112,7 @@ public extension Catalogue {
             // Through the slug, not taken as read: this is a name from the network that ends up
             // as a directory under ~/.config/toe/themes, and a path component is the one thing it
             // is allowed to be. A directory whose name is not already a slug is not a theme.
-            let slug = parts[1]
-            guard Slug.make(slug) == slug else { continue }
+            guard let slug = Slug(parts[1])?.value else { continue }
 
             if parts.count == 3, parts[2] == "colors.toml" {
                 palettes.insert(slug)

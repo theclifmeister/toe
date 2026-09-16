@@ -163,14 +163,23 @@ public struct CLIConfig: Equatable {
     public var allowExec: Bool = false
     public var allowQuit: Bool = false
 
+    /// Whether this section has let a gated verb through.
+    ///
+    /// The one switch that must grow an arm when `CLIGate` grows a case, and it has no `default`
+    /// so that the compiler is the one to say so. The `default` it used to have refused, which
+    /// fails closed and is the right way round — but it failed *silently* closed, with a refusal
+    /// that named a setting the switch never read.
+    public func allows(_ gate: CLIGate) -> Bool {
+        switch gate {
+        case .exec: return allowExec
+        case .quit: return allowQuit
+        }
+    }
+
     /// Why this command may not come in over the socket, or nil when it may.
     public func refusal(for command: Command) -> String? {
-        guard let gate = CommandCatalogue.gate(command) else { return nil }
-        switch gate.key {
-        case "cli.allow_exec": return allowExec ? nil : gate.reason
-        case "cli.allow_quit": return allowQuit ? nil : gate.reason
-        default:               return gate.reason
-        }
+        guard let gate = CommandCatalogue.gate(command), !allows(gate) else { return nil }
+        return gate.reason
     }
 }
 

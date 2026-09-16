@@ -163,18 +163,47 @@ public enum CommandCatalogue {
 
     /// The verbs a caller may not send over the socket without saying so in the config first,
     /// and the setting that lets each through. See `CLIConfig`.
-    public static func gate(_ command: Command) -> (key: String, reason: String)? {
+    public static func gate(_ command: Command) -> CLIGate? {
         switch command {
+        case .exec: return .exec
+        case .quit: return .quit
+        default:    return nil
+        }
+    }
+}
+
+/// A verb the socket holds back until `[cli]` says otherwise, and what to say about it.
+///
+/// An enum rather than the `(key, reason)` pair of strings `gate` used to return, because the
+/// rule has two halves in two files: `CommandCatalogue.gate` says which verbs are held, and
+/// `CLIConfig.allows` says whether each has been let through — and with strings the only thing
+/// tying them together was the spelling of `cli.allow_exec`. A third gated verb given a key
+/// here and no arm over there would have been refused with its flag set to `true`, by a refusal
+/// naming a setting that did nothing, and silently, because the `default` arm refused as well.
+/// As cases, the switch in `allows` has no default and the forgotten arm is a compile error; and
+/// the selftest walks `allCases` against the config rather than the two verbs it happens to know.
+public enum CLIGate: CaseIterable, Sendable {
+    case exec
+    case quit
+
+    /// The setting that opens it, as a config diagnostic would spell it.
+    public var key: String {
+        switch self {
+        case .exec: return "cli.allow_exec"
+        case .quit: return "cli.allow_quit"
+        }
+    }
+
+    /// What the caller is told. This is what `toe exec` prints, so it names the setting to flip
+    /// in the words the config file uses — a setting nobody can find reads as a bug.
+    public var reason: String {
+        switch self {
         case .exec:
-            return ("cli.allow_exec",
-                    "`exec` runs a shell command as you, so the socket refuses it by default — "
-                    + "set allow_exec = true under [cli] if you want it")
+            return "`exec` runs a shell command as you, so the socket refuses it by default — "
+                 + "set allow_exec = true under [cli] if you want it"
         case .quit:
-            return ("cli.allow_quit",
-                    "`quit` stops toe, and a caller that stops toe cannot start it again — "
-                    + "set allow_quit = true under [cli] if you want it")
-        default:
-            return nil
+            return "`quit` stops toe, and a caller that stops toe cannot start it again — "
+                 + "set allow_quit = true under [cli] if you want it"
         }
     }
 }
