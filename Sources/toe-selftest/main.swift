@@ -4518,6 +4518,145 @@ h.test("a layout profile names windows in a way that survives quitting them") { 
     t.equal(short.untouched, [22], "and a window the profile says nothing about is left alone")
 }
 
+/// A `TrackedWindow` for the reporter tests: the pid doubles as the app-name lookup's key.
+func tracked(_ id: WindowID, pid: pid_t, bundle: String? = nil, title: String? = nil) -> TrackedWindow {
+    TrackedWindow(id: id, pid: pid, bundleID: bundle, title: title)
+}
+
+h.test("the state report is the layout's own account of every window") { t in
+    let second = Monitor(id: 2, frame: box(1512, 0, 1920, 1080), usable: box(1512, 0, 1920, 1080))
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA), second])
+
+    // Workspace 1 on monitor 1: two tiles and a float whose id sorts *before* them, so that the
+    // order the row reports is visibly the tree's and not the ids'.
+    wm.addWindow(2); wm.addWindow(3); wm.addWindow(1, floating: true)
+    wm.noteFocus(2)
+    // Workspace 3, hidden on monitor 1.
+    wm.addWindow(5); t.expect(wm.moveWindow(5, toWorkspace: 3, follow: false), "5 goes to workspace 3")
+    // Workspace 2 on monitor 2, showing there — until the display is unplugged and `setMonitors`
+    // re-homes it onto monitor 1, where it is not the active workspace and so is hidden.
+    wm.switchTo(workspace: 2)
+    wm.addWindow(4)
+    wm.switchTo(workspace: 1)
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    t.equal(wm.workspaces[2]?.monitorID, 1, "workspace 2 came home to monitor 1")
+
+    let names: [pid_t: String] = [10: "Ghostty", 20: "Safari", 30: ""]
+    let windows = [tracked(5, pid: 10, bundle: "com.mitchellh.ghostty", title: "notes"),
+                   tracked(1, pid: 20, bundle: "com.apple.Safari", title: "GitHub"),
+                   tracked(3, pid: 10, bundle: "com.mitchellh.ghostty", title: "toe — zsh"),
+                   tracked(2, pid: 40, bundle: nil, title: "nameless"),
+                   tracked(4, pid: 30, bundle: "com.example.mute"),
+                   // Tracked but never placed: what the tracker holds between a session restore
+                   // and `reap`, and what a caller must not mistake for a window somewhere.
+                   tracked(6, pid: 20, bundle: "com.apple.Safari", title: "orphan")]
+    let state = StateReporter.report(wm, tracked: windows,
+                                     monitorKey: { $0 == 1 ? "UUID-1" : nil },
+                                     appName: { names[$0] },
+                                     screenName: { $0 == 1 ? "Built-in Retina Display" : nil },
+                                     version: "1.2.3")
+    let plan = wm.render()
+    let byID = Dictionary(uniqueKeysWithValues: state.windows.map { ($0.id, $0) })
+
+    t.equal(state.version, "1.2.3", "the version is passed through")
+    t.equal(state.windows.map(\.id), [1, 2, 3, 4, 5, 6], "windows are reported by id, whatever order they arrived in")
+    t.equal(state.focusedWindow, 2, "the focus is the layout's")
+    t.equal(state.focusedWorkspace, 1, "and so is the focused workspace")
+    t.equal(state.focusedMonitor, 1, "and the monitor")
+
+    // The frame is the layout's — a tile's from the tree, a float's from the floating plan —
+    // and nil for a window parked in the stash corner, which is the promise on `WindowReport.frame`.
+    t.equal(byID[2]?.frame, plan.frames[2], "a tile reports the frame the layout intends")
+    t.equal(byID[1]?.frame, plan.floating[1], "a float reports its floating frame")
+    t.expect(byID[1]?.floating == true && byID[2]?.floating == false, "and floating says which is which")
+    t.expect(byID[5]?.hidden == true, "a window on a hidden workspace is hidden")
+    t.expect(byID[5]?.frame == nil, "and has no frame while it is stashed")
+    t.expect(byID[2]?.hidden == false && byID[1]?.hidden == false, "windows on the showing workspace are not")
+    t.expect(byID[2]?.focused == true, "the focused window says so")
+    t.expect(byID[3]?.focused == false && byID[5]?.focused == false, "and nothing else does")
+
+    // The re-homed workspace: its window reports the monitor it now lives on, hidden there.
+    t.equal(byID[4]?.workspace, 2, "window 4 is still on workspace 2")
+    t.equal(byID[4]?.monitor, 1, "which is now on monitor 1")
+    t.expect(byID[4]?.hidden == true && byID[4]?.frame == nil, "hidden, since monitor 1 is showing workspace 1")
+    // And the one on no workspace at all: nothing invented for it.
+    t.expect(byID[6]?.workspace == nil && byID[6]?.monitor == nil, "a window on no workspace has no workspace and no monitor")
+    t.expect(byID[6]?.frame == nil && byID[6]?.hidden == false, "no frame either, and it is not hidden — it is nowhere")
+
+    // Naming: the lookup's answer, then the bundle, then the pid; an empty answer is no answer.
+    t.equal(byID[3]?.app, "Ghostty", "the application's own name where the lookup has one")
+    t.equal(byID[4]?.app, "com.example.mute", "an empty name falls back to the bundle identifier")
+    t.equal(byID[2]?.app, "pid 40", "and with no bundle either, the pid")
+    t.equal(byID[3]?.bundle, "com.mitchellh.ghostty", "the bundle is reported beside the name")
+    t.equal(byID[3]?.title, "toe — zsh", "and the title as tracked")
+
+    // Workspace rows: tiles in tree order, then floats — the order a profile replays.
+    t.equal(state.workspaces.map(\.index), [1, 2, 3], "every workspace that exists, in order")
+    t.equal(state.workspaces[0].windows, [2, 3, 1], "tiles in tree order, then the float, not sorted by id")
+    t.expect(state.workspaces[0].visible && state.workspaces[0].focused, "workspace 1 is showing and focused")
+    t.expect(!state.workspaces[1].visible && !state.workspaces[1].focused, "the re-homed workspace 2 is neither")
+    t.equal(state.workspaces[1].monitor, 1, "and reports its new monitor")
+    t.equal(state.workspaces[2].windows, [5], "workspace 3 holds its one window")
+
+    // Monitors: the unplugged one is gone, the lookups fill key and name.
+    t.equal(state.monitors.map(\.id), [1], "only the display that is still plugged in")
+    t.equal(state.monitors[0].key, "UUID-1", "with the session file's key")
+    t.equal(state.monitors[0].name, "Built-in Retina Display", "and the screen's name")
+    t.equal(state.monitors[0].workspace, 1, "showing workspace 1")
+    t.expect(state.monitors[0].focused, "and focused")
+    t.equal(state.monitors[0].usable, AREA, "with the tiling area")
+}
+
+h.test("a profile captured from the report replays to the same shape") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(2); wm.addWindow(3); wm.addWindow(1, floating: true)
+    wm.noteFocus(2)
+    wm.addWindow(5); t.expect(wm.moveWindow(5, toWorkspace: 3, follow: false), "5 goes to workspace 3")
+
+    // Two Ghostty windows on workspace 1, so the capture has to reach for a title to tell them
+    // apart, and the replay has to match on it.
+    let windows = [tracked(1, pid: 20, bundle: "com.apple.Safari", title: "GitHub"),
+                   tracked(2, pid: 10, bundle: "com.mitchellh.ghostty", title: "toe — zsh"),
+                   tracked(3, pid: 10, bundle: "com.mitchellh.ghostty", title: "notes — nvim"),
+                   tracked(5, pid: 30, bundle: "com.apple.mail", title: "Inbox")]
+    let names: [pid_t: String] = [10: "Ghostty", 20: "Safari", 30: "Mail"]
+    let state = StateReporter.report(wm, tracked: windows,
+                                     monitorKey: { _ in nil }, appName: { names[$0] },
+                                     screenName: { _ in nil }, version: nil)
+
+    let profile = LayoutProfile.capture(name: "work", from: state)
+    t.equal(profile.workspaces.map(\.index), [1, 3], "the workspaces with windows on them")
+    t.equal(profile.workspaces[0].windows.map(\.app), ["Ghostty", "Ghostty", "Safari"],
+            "in the order the report gave: tiles, then the float")
+    t.equal(profile.workspaces[0].windows.map(\.floating), [false, false, true], "with the float marked")
+    t.equal(profile.workspaces[0].windows.map(\.title), [nil, "notes — nvim", nil],
+            "and only the second terminal carrying a title")
+
+    // Replayed against the same report, the plan puts every window back where it came from, in
+    // the order the tree was built — which is the whole of what reproduces the shape.
+    let replay = profile.plan(against: state.windows)
+    t.equal(replay.moves.map(\.window), [2, 3, 1, 5], "every window, tiles first")
+    t.equal(replay.moves.map(\.workspace), [1, 1, 1, 3], "each on the workspace it was reported on")
+    t.equal(replay.moves.map(\.floating), [false, false, true, false], "with the float still a float")
+    t.expect(replay.missing.isEmpty && replay.untouched.isEmpty, "nothing missing, nothing left over")
+
+    // Carrying the moves out on a fresh manager rebuilds the same rows the report had.
+    let fresh = WorkspaceManager()
+    fresh.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    for move in replay.moves {
+        fresh.addWindow(move.window, floating: move.floating, toWorkspace: move.workspace)
+    }
+    let again = StateReporter.report(fresh, tracked: windows,
+                                     monitorKey: { _ in nil }, appName: { names[$0] },
+                                     screenName: { _ in nil }, version: nil)
+    t.equal(again.workspaces.map(\.windows), state.workspaces.map(\.windows),
+            "the same windows in the same order on the same workspaces")
+    t.equal(LayoutProfile.capture(name: "work", from: again).workspaces, profile.workspaces,
+            "so capturing again gives the same profile")
+}
+
 h.test("the skill row is Install's, with Omarchy's already-have-it guard") { t in
     let none = StyleMenu()
     t.expect(MenuModel.agentSkill(none) == nil,

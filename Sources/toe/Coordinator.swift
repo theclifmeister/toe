@@ -2238,9 +2238,12 @@ extension Coordinator {
 
     private func state() -> StateReport {
         let keys = monitorKeys()
+        let screens = StateReporter.screenNames()
         return StateReporter.report(workspaces,
-                                    tracked: tracker.windows,
+                                    tracked: tracker.windows.values.map(\.tracked),
                                     monitorKey: { keys[$0] },
+                                    appName: StateReporter.appName(of:),
+                                    screenName: { screens[$0] },
                                     version: AppIdentity.version)
     }
 
