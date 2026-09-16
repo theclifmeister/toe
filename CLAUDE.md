@@ -126,7 +126,9 @@ wallpaper-click and edge-tiling preferences and the Dock's auto-hide
 (`CoreDockSetAutoHideEnabled`) belong to the window server or the Dock, not to toe, so a `kill -9`
 during development would leave `Ctrl`+`↑` dead — or the Dock hiding itself — with nothing to
 explain why. All four are journalled to `~/.local/state/toe/` *before* the change is made and
-replayed in reverse at startup. If you add another such global toggle, follow that pattern.
+replayed in reverse at startup. If you add another such global toggle, follow that pattern:
+`Journal` is the file, `JournalFormat` its lines, and `StateDirectory.ensure` the only thing that
+makes the directory — and a record that could not be written is a change that is not made.
 `CoreDock*` is also the one place toe reaches a symbol through `dlsym` instead of declaring it:
 unexported from every header, and a link-time dependency on it would turn its removal into a
 launch failure.

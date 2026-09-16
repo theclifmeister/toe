@@ -1,4 +1,5 @@
 import Foundation
+import ToeCore
 
 /// macOS's "Automatically hide and show the Dock", switched on for as long as toe runs.
 ///
@@ -57,9 +58,6 @@ enum DockAutoHide {
         return unsafeBitCast(address, to: T.self)
     }
 
-    private static let journalURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/dock-autohide")
-
     /// What the setting was before toe touched it, and so what `restore` owes the user back.
     /// One case, because `enable` returns early when auto-hiding is already on: there is then
     /// nothing to take and nothing to give back, so `off` is the only value ever journalled.
@@ -68,6 +66,12 @@ enum DockAutoHide {
     private enum Previous: String {
         case off
     }
+
+    /// The one value, written bare.
+    private static let journal = Journal<Previous>(
+        name: "dock-autohide",
+        serialise: JournalFormat.serialise(word:),
+        parse: { JournalFormat.parseWord($0) })
 
     private static var previous: Previous?
 
@@ -90,9 +94,16 @@ enum DockAutoHide {
         guard getAutoHide() == 0 else { return }
 
         // Journalled before the change, not after: a crash between the two must leave a record
-        // that says too much, never one that says too little.
+        // that says too much, never one that says too little. And no record, no change — see
+        // `Journal`: a Dock still showing costs the layout a strip of one edge, a Dock hiding
+        // itself with nothing to say so outlives toe. `previous` stays nil, so the next reload
+        // asks again — from the same place `command` leaves it, so the read above is no less
+        // safe for it.
+        guard journal.write(.off) else {
+            Log.error("dock: no journal, so auto-hide is left off")
+            return
+        }
         previous = .off
-        writeJournal(.off)
         setAutoHide(1)
         // Nothing to relayout here. Auto-hiding changes `visibleFrame`, which macOS reports as a
         // screen-parameters change, and `WindowTracker` already turns that into `screensChanged`.
@@ -102,12 +113,12 @@ enum DockAutoHide {
     /// Gives back exactly what `enable` took, and clears the journal. Safe to call twice.
     static func restore() {
         guard previous != nil else {
-            clearJournal()
+            journal.clear()
             return
         }
         setAutoHide?(0)
         previous = nil
-        clearJournal()
+        journal.clear()
         Log.info("dock: auto-hide restored")
     }
 
@@ -131,30 +142,16 @@ enum DockAutoHide {
         guard let setAutoHide else { return }
         setAutoHide(on ? 1 : 0)
         previous = nil
-        clearJournal()
+        journal.clear()
         Log.info("dock: auto-hide \(on ? "on" : "off"), from the menu")
     }
 
     /// Replays a journal left behind by a toe that did not get to restore — a crash, a `kill -9`,
     /// a logout. Call once at startup, before `enable`.
     static func repairAfterUncleanExit() {
-        guard let text = try? String(contentsOf: journalURL, encoding: .utf8) else { return }
-        if Previous(rawValue: text.trimmingCharacters(in: .whitespacesAndNewlines)) != nil {
+        journal.replay { _ in
             setAutoHide?(0)
             Log.info("dock: repaired auto-hide after an unclean exit")
         }
-        clearJournal()
-    }
-
-    // MARK: - The journal
-
-    private static func writeJournal(_ previous: Previous) {
-        try? FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? previous.rawValue.write(to: journalURL, atomically: true, encoding: .utf8)
-    }
-
-    private static func clearJournal() {
-        try? FileManager.default.removeItem(at: journalURL)
     }
 }

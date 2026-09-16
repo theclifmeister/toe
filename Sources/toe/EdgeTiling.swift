@@ -1,5 +1,6 @@
 import CoreFoundation
 import Foundation
+import ToeCore
 
 /// macOS's own drag-a-window-to-an-edge tiling, switched off for as long as toe runs.
 ///
@@ -39,9 +40,6 @@ enum EdgeTiling {
     /// way the settings pane does.
     private static let keys = ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"]
 
-    private static let journalURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/edge-tiling")
-
     /// What a preference was before toe touched it, and so what `restore` owes the user back.
     /// `absent` is not the same as `on`: writing `true` where there was no key at all would leave
     /// the user's settings holding a value they never set.
@@ -49,6 +47,16 @@ enum EdgeTiling {
         case on
         case absent
     }
+
+    /// One `key=state` per line. `WallpaperClick` has a single value and writes it bare; two
+    /// need naming, and naming them means a file that survives one of the pair being added or
+    /// dropped later — a line the parser does not recognise is ignored, and a truncated or
+    /// hand-edited one is dropped rather than read as a state to put back, which is the rule
+    /// `WallpaperClick` applies to its one value, line by line.
+    private static let journal = Journal<[String: Previous]>(
+        name: "edge-tiling",
+        serialise: { JournalFormat.serialise(keyed: $0, order: keys) },
+        parse: { let was = JournalFormat.parseKeyed($0, keys: keys, as: Previous.self); return was.isEmpty ? nil : was })
 
     /// The keys `disable` actually took, and what each of them was. Empty until it takes one — a
     /// preference the user had already switched off themselves is not in here, and is never
@@ -75,9 +83,14 @@ enum EdgeTiling {
         guard !taken.isEmpty else { return }
 
         // Journalled before the change, not after: a crash between the two must leave a record
-        // that says too much, never one that says too little.
+        // that says too much, never one that says too little. And no record, no change — see
+        // `Journal`: a snap toe has to settle is three quarters of a second of nuisance, a
+        // tiling switched off with nothing to say so outlives toe.
+        guard journal.write(taken) else {
+            Log.error("edge tiling: no journal, so macOS's drag-to-edge tiling is left on")
+            return
+        }
         previous = taken
-        writeJournal(taken)
         for key in taken.keys { write(false, to: key) }
         synchronize()
         Log.info("edge tiling: macOS's drag-to-edge tiling switched off")
@@ -86,25 +99,22 @@ enum EdgeTiling {
     /// Gives back exactly what `disable` took, and clears the journal. Safe to call twice.
     static func restore() {
         guard !previous.isEmpty else {
-            clearJournal()
+            journal.clear()
             return
         }
         put(back: previous)
         previous = [:]
-        clearJournal()
+        journal.clear()
         Log.info("edge tiling: drag-to-edge tiling restored")
     }
 
     /// Replays a journal left behind by a toe that did not get to restore — a crash, a `kill -9`,
     /// a logout. Call once at startup, before `disable`.
     static func repairAfterUncleanExit() {
-        guard let text = try? String(contentsOf: journalURL, encoding: .utf8) else { return }
-        let was = readJournal(text)
-        if !was.isEmpty {
+        journal.replay { was in
             put(back: was)
             Log.info("edge tiling: repaired drag-to-edge tiling after an unclean exit")
         }
-        clearJournal()
     }
 
     // MARK: - The preferences
@@ -128,38 +138,5 @@ enum EdgeTiling {
     /// very next drag to an edge lands in its tile with no snap at all, no restart of anything.
     private static func synchronize() {
         CFPreferencesAppSynchronize(domain)
-    }
-
-    // MARK: - The journal
-
-    /// One `key=state` per line. `WallpaperClick` has a single value and writes it bare; two
-    /// need naming, and naming them means a file that survives one of the pair being added or
-    /// dropped later — `readJournal` ignores a line it does not recognise.
-    private static func writeJournal(_ previous: [String: Previous]) {
-        try? FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        let text = keys.compactMap { key in previous[key].map { "\(key)=\($0.rawValue)" } }
-            .joined(separator: "\n")
-        try? text.write(to: journalURL, atomically: true, encoding: .utf8)
-    }
-
-    /// A truncated or hand-edited line is dropped rather than read as a state to put back, which
-    /// is the rule `WallpaperClick` applies to its one value, line by line.
-    private static func readJournal(_ text: String) -> [String: Previous] {
-        var previous: [String: Previous] = [:]
-        for line in text.split(whereSeparator: \.isNewline) {
-            let parts = line.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let key = String(parts[0]).trimmingCharacters(in: .whitespaces)
-            guard keys.contains(key),
-                  let was = Previous(rawValue: String(parts[1]).trimmingCharacters(in: .whitespaces))
-            else { continue }
-            previous[key] = was
-        }
-        return previous
-    }
-
-    private static func clearJournal() {
-        try? FileManager.default.removeItem(at: journalURL)
     }
 }

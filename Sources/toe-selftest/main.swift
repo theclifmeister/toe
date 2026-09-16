@@ -2280,6 +2280,82 @@ h.test("a snapshot names no monitor it cannot name durably") { t in
     t.equal(snapshot.focusedMonitor, nil, "nor is there a focused monitor to point at")
 }
 
+// MARK: - Journals
+
+// The journals are replayed straight into the window server and `cfprefsd` at startup, so the
+// one rule every line format shares is that a line the parser cannot read is dropped, never
+// guessed at: a truncated write or a hand-edit is at worst a setting toe forgets to give back,
+// and never a value the user did not have. The formats are frozen — an upgrade replays the file
+// the previous version left — so the serialised text is asserted byte for byte.
+
+enum PreviousState: String { case on, absent }
+
+h.test("a journal of key codes drops a line that is not a number") { t in
+    t.equal(JournalFormat.serialise(codes: [32, 34, 33, 35]), "32\n34\n33\n35", "one code per line, in order")
+    t.equal(JournalFormat.parseCodes("32\n34\n33\n35"), [32, 34, 33, 35], "and read back the same")
+    t.equal(JournalFormat.parseCodes("32\n3\u{0}4\n\n33x\n 35"), [32], "a torn, empty or padded line is dropped")
+    t.equal(JournalFormat.parseCodes("99999999999"), [], "a number that is not a key code is dropped too")
+    t.equal(JournalFormat.parseCodes(""), [], "an empty file is nothing to give back")
+}
+
+h.test("a journal of one word is that word or nothing") { t in
+    t.equal(JournalFormat.serialise(word: PreviousState.absent), "absent", "written bare")
+    t.equal(JournalFormat.parseWord("absent\n", as: PreviousState.self), .absent, "a trailing newline is forgiven")
+    t.equal(JournalFormat.parseWord("  on  ", as: PreviousState.self), .on, "and so is padding")
+    t.equal(JournalFormat.parseWord("ab", as: PreviousState.self), PreviousState?.none, "a truncated word is nothing")
+    t.equal(JournalFormat.parseWord("on\nabsent", as: PreviousState.self), PreviousState?.none, "two words are not one")
+    t.equal(JournalFormat.parseWord("", as: PreviousState.self), PreviousState?.none, "and an empty file is nothing")
+}
+
+h.test("a keyed journal keeps its keys in the settings pane's order and drops what it does not know") { t in
+    let keys = ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"]
+    let both: [String: PreviousState] = ["EnableTopTilingByEdgeDrag": .on, "EnableTilingByEdgeDrag": .absent]
+    t.equal(JournalFormat.serialise(keyed: both, order: keys),
+            "EnableTilingByEdgeDrag=absent\nEnableTopTilingByEdgeDrag=on",
+            "the sides first and the menu bar second, whatever order the dictionary offers")
+    t.equal(JournalFormat.serialise(keyed: ["EnableTopTilingByEdgeDrag": PreviousState.on], order: keys),
+            "EnableTopTilingByEdgeDrag=on", "one taken is one line")
+    t.equal(JournalFormat.parseKeyed("EnableTilingByEdgeDrag=absent\nEnableTopTilingByEdgeDrag=on",
+                                     keys: keys, as: PreviousState.self),
+            both, "read back the same")
+    t.equal(JournalFormat.parseKeyed(" EnableTilingByEdgeDrag = on ", keys: keys, as: PreviousState.self),
+            ["EnableTilingByEdgeDrag": .on], "a hand-edit's spaces are forgiven")
+
+    // The drop-a-malformed-line rule, one bad line at a time, each beside a good one so the test
+    // shows the good line surviving its neighbour.
+    let good = "EnableTopTilingByEdgeDrag=on"
+    let kept: [String: PreviousState] = ["EnableTopTilingByEdgeDrag": .on]
+    t.equal(JournalFormat.parseKeyed("EnableTilingByEdgeDrag=ab\n" + good, keys: keys, as: PreviousState.self),
+            kept, "a truncated state is dropped")
+    t.equal(JournalFormat.parseKeyed("EnableTilingByEdgeDrag\n" + good, keys: keys, as: PreviousState.self),
+            kept, "a line with no = is dropped")
+    t.equal(JournalFormat.parseKeyed("EnableTilingOptionAccelerator=on\n" + good, keys: keys, as: PreviousState.self),
+            kept, "a key toe never journals is dropped, which is what lets the pair grow or shrink")
+    t.equal(JournalFormat.parseKeyed("=on\n" + good, keys: keys, as: PreviousState.self), kept, "an empty key is dropped")
+    t.equal(JournalFormat.parseKeyed("EnableTilingByEdgeDrag=on=absent\n" + good, keys: keys, as: PreviousState.self),
+            kept, "a second = is part of the state, which is then not a state")
+    t.equal(JournalFormat.parseKeyed("", keys: keys, as: PreviousState.self), [:], "an empty file is nothing to give back")
+}
+
+h.test("a tabbed journal is one display per line and drops a line that is not one") { t in
+    let entries = ["B-UUID": "/Users/me/Pictures/b.jpg", "A-UUID": "/Users/me/Pictures/a with space.jpg"]
+    t.equal(JournalFormat.serialise(tabbed: entries),
+            "A-UUID\t/Users/me/Pictures/a with space.jpg\nB-UUID\t/Users/me/Pictures/b.jpg",
+            "sorted by key, so the file is the same whatever order the displays were seen in")
+    t.equal(JournalFormat.parseTabbed(JournalFormat.serialise(tabbed: entries)), entries, "read back the same")
+    t.equal(JournalFormat.parseTabbed("A-UUID\t/p/trailing "), ["A-UUID": "/p/trailing "],
+            "a path is never trimmed — it may end in a space")
+
+    let good = "B-UUID\t/p/b.jpg"
+    let kept = ["B-UUID": "/p/b.jpg"]
+    t.equal(JournalFormat.parseTabbed("A-UUID /p/a.jpg\n" + good), kept, "a line with no tab is dropped")
+    t.equal(JournalFormat.parseTabbed("A-UUID\t/p/a\t.jpg\n" + good), kept, "and so is one with two")
+    t.equal(JournalFormat.parseTabbed("A-UUID\t\n" + good), kept, "a key with no path is dropped")
+    t.equal(JournalFormat.parseTabbed("\t/p/a.jpg\n" + good), kept, "a path with no key is dropped")
+    t.equal(JournalFormat.parseTabbed("A-UUID\n" + good), kept, "a torn line is dropped")
+    t.equal(JournalFormat.parseTabbed(""), [:], "an empty file is nothing to give back")
+}
+
 // MARK: - Menu bar
 
 h.test("a workspace knows whether it holds anything") { t in

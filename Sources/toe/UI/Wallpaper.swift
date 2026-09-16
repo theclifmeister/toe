@@ -18,8 +18,12 @@ import ToeCore
 /// is given back when it is un-chosen, not when toe stops running.
 final class Wallpaper {
 
-    private static let journalURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/wallpaper")
+    /// One display per line, the key and the path tab-separated. Never `nil` on a read: an
+    /// empty record and no record mean the same thing here, nothing to give back.
+    private static let journal = Journal<[String: String]>(
+        name: "wallpaper",
+        serialise: JournalFormat.serialise(tabbed:),
+        parse: JournalFormat.parseTabbed)
 
     /// What was on each display before toe first touched it, by the same display UUID
     /// `SessionStore.monitorKey` derives — a `CGDirectDisplayID` is handed out per connection and
@@ -71,14 +75,14 @@ final class Wallpaper {
 
     /// Puts back what was there before toe first changed it. Called when the theme is cleared.
     func restore() {
-        let saved = previous.isEmpty ? Self.readJournal() : previous
+        let saved = previous.isEmpty ? Self.journal.read() ?? [:] : previous
         // Whatever is or is not restorable, toe is no longer choosing a picture: `current` has to
         // be dropped either way, or the next Space switch would have `reapply` push the very
         // picture that was just un-chosen onto a Space that never had it.
         defer {
             previous.removeAll()
             current = nil
-            Self.clearJournal()
+            Self.journal.clear()
         }
         guard !saved.isEmpty else { return }
         for screen in NSScreen.screens {
@@ -105,7 +109,7 @@ final class Wallpaper {
     /// startup means a theme picked in one run is still reversible in the next.
     func repairAfterUncleanExit() {
         guard previous.isEmpty else { return }
-        previous = Self.readJournal()
+        previous = Self.journal.read() ?? [:]
     }
 
     /// Notes what is on any display toe has not written down yet.
@@ -126,7 +130,16 @@ final class Wallpaper {
             added = true
         }
         guard added else { return }
-        Self.writeJournal(previous)                    // before the change, never after
+        // Before the change, never after. But unlike the four settings toe *borrows*, a record
+        // that fails to land does not stop the change: the picture is the one you just asked
+        // for by name in `Style › Background`, and a row that silently does nothing is a bug
+        // report, where what is at risk is an undo — and only the undo across a crash, since
+        // `previous` still holds the note for `restore` within this run, and it is a picture
+        // you chose yourself and can choose again. The error says what has been lost.
+        if !Self.journal.write(previous) {
+            Log.error("wallpaper: no journal, so the picture that was there is not given back "
+                      + "after an unclean exit")
+        }
     }
 
     // MARK: - The journal file
@@ -135,32 +148,6 @@ final class Wallpaper {
         guard let number = screen.deviceDescription[
                 NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
         return SessionStore.monitorKey(CGDirectDisplayID(number.uint32Value))
-    }
-
-    private static func writeJournal(_ entries: [String: String]) {
-        try? FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        // One display per line, tab-separated — a path can hold anything but a tab and a newline,
-        // and this file is read by the same code that wrote it.
-        let text = entries.sorted { $0.key < $1.key }
-            .map { "\($0.key)\t\($0.value)" }
-            .joined(separator: "\n")
-        try? text.write(to: journalURL, atomically: true, encoding: .utf8)
-    }
-
-    private static func readJournal() -> [String: String] {
-        guard let text = try? String(contentsOf: journalURL, encoding: .utf8) else { return [:] }
-        var out: [String: String] = [:]
-        for line in text.components(separatedBy: "\n") {
-            let parts = line.components(separatedBy: "\t")
-            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { continue }
-            out[parts[0]] = parts[1]
-        }
-        return out
-    }
-
-    private static func clearJournal() {
-        try? FileManager.default.removeItem(at: journalURL)
     }
 }
 
@@ -172,8 +159,7 @@ final class Wallpaper {
 /// starting from the first.
 enum BackgroundStore {
 
-    static let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/background")
+    static let url = StateDirectory.url.appendingPathComponent("background")
 
     static func load() -> String? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
@@ -182,8 +168,7 @@ enum BackgroundStore {
     }
 
     static func save(_ name: String) {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
+        guard StateDirectory.ensure() else { return }
         try? name.write(to: url, atomically: true, encoding: .utf8)
     }
 

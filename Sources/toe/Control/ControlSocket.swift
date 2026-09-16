@@ -59,12 +59,9 @@ final class ControlSocket {
             return "the socket path is too long for a Unix socket: \(path)"
         }
 
-        do {
-            try FileManager.default.createDirectory(at: Self.url.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-        } catch {
-            return "could not make \(Self.url.deletingLastPathComponent().path): \(error.localizedDescription)"
+        // The reason is in the log; `StateDirectory` has said it once for every file in there.
+        guard StateDirectory.ensure() else {
+            return "could not make \(StateDirectory.url.path) — see the log"
         }
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -92,9 +89,11 @@ final class ControlSocket {
             return message
         }
 
-        // After the bind, which is when the file exists. The directory is already 0700, so this
-        // is belt and braces — but the socket is the one thing in there that is an *entry point*
-        // rather than a record, and it should say so in its own mode.
+        // After the bind, which is when the file exists. The directory is 0700 — `StateDirectory`
+        // sets the mode on an existing directory too, so an install whose directory predates the
+        // socket is not left at the umask's 755 — so this is belt and braces; but the socket is
+        // the one thing in there that is an *entry point* rather than a record, and it should
+        // say so in its own mode.
         chmod(path, 0o600)
 
         guard listen(fd, 8) == 0 else {
