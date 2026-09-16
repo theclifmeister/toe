@@ -131,10 +131,13 @@ final class StatusItem: NSObject {
             return NSAttributedString(attributedString: markPiece)
         }
 
-        let strip = NSMutableAttributedString()
-        strip.append(markPiece)
-        for item in items {
-            if strip.length > 0 { strip.append(spacer) }
+        // `markPiece` already ends in the gap before the first workspace, so the spacer goes
+        // between workspaces only. It used to go before every one, `strip.length > 0` being
+        // true from the mark on, and the strip was drawn one `gap` wider than `hit` was told —
+        // every zone sat 3.5pt left of its digit, and the right half of `5` was nothing.
+        let strip = NSMutableAttributedString(attributedString: markPiece)
+        for (position, item) in items.enumerated() {
+            if position > 0 { strip.append(spacer) }
             strip.append(piece(for: item))
             stripItems.append(item)
             stripWidths.append(Double(width(of: item)))
@@ -253,8 +256,15 @@ final class StatusItem: NSObject {
             return
         }
 
-        guard let event = NSApp.currentEvent else { return }
-        let x = sender.convert(event.locationInWindow, from: nil).x
+        // The pointer, not `NSApp.currentEvent`. That used to be the click itself; on macOS 26 the
+        // event the action sees is a mouse-up AppKit has synthesised at the button's centre — x 56
+        // of 112 whichever digit was under the pointer — so every click on the strip resolved to
+        // whatever sat in the middle of it, which on a five-slot strip is workspace 2. From 1,
+        // clicking 2 therefore still worked, and from 2 nothing did. The pointer has not moved
+        // since the button released, so ask the screen where it is and bring that into the button.
+        guard let window = sender.window else { return }
+        let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let x = sender.convert(inWindow, from: nil).x
         switch WorkspaceStrip.hit(x: Double(x), widths: stripWidths, gap: Double(gap),
                                   buttonWidth: Double(sender.bounds.width),
                                   leading: Double(markWidth + gap)) {
