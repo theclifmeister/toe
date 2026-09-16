@@ -21,7 +21,9 @@ import ToeCore
 enum ThemeDownloader {
 
     /// No single background in Omarchy is past 4 MB. This is not a policy about how big a
-    /// wallpaper may be; it is a ceiling so a redirect to something enormous cannot fill a disk.
+    /// wallpaper may be; it is a ceiling so a redirect to something enormous cannot fill a disk —
+    /// or, since `BoundedGET` cancels the transfer at the limit rather than measuring the body
+    /// once it has all arrived, the memory it would have gone through on the way (#130).
     private static let fileLimit = 64 << 20
     private static let paletteLimit = 64 << 10
     /// How often a transfer in flight says how much of it has arrived.
@@ -194,42 +196,50 @@ enum ThemeDownloader {
     ///   toe does, and a bar that could only move when a whole file landed sat still for the
     ///   whole of it. Polling `countOfBytesReceived` rather than a delegate or KVO because this
     ///   function is already blocking on a semaphore with a deadline — the loop is the wait it
-    ///   was doing anyway, cut into slices.
+    ///   was doing anyway, cut into slices. (`BoundedGET` *is* a delegate, but for the limit, not
+    ///   for progress: it sees every chunk, and the bar does not need to.)
     private static func get(_ url: URL, limit: Int,
                             received: ((Int) -> Void)? = nil) -> Result<Data, Failure> {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
-        request.setValue("toe (macOS window manager)", forHTTPHeaderField: "User-Agent")
 
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: Result<Data, Failure> = .failure(.network("no answer"))
 
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            defer { semaphore.signal() }
-            if let error { return outcome = .failure(.network(error.localizedDescription)) }
-            guard let http = response as? HTTPURLResponse else {
-                return outcome = .failure(.network("no answer"))
-            }
-            // After redirects, not before: what matters is where the bytes came from.
-            guard let host = response?.url?.host, Upstream.allowedHosts.contains(host) else {
-                return outcome = .failure(.network("redirected off github.com"))
-            }
-            guard http.statusCode == 200 else {
-                return outcome = .failure(.network("HTTP \(http.statusCode)"))
-            }
-            guard let data, data.count <= limit else {
-                return outcome = .failure(.network("the answer was too large"))
-            }
-            outcome = .success(data)
+        // The limit, the host and the status are all `BoundedGET`'s to check, and it checks them
+        // when the headers arrive rather than after the body has — see there for why that is not
+        // the same thing.
+        let task = BoundedGET.task(request, limit: limit) { result in
+            outcome = result.mapError { .network($0.description) }
+            semaphore.signal()
         }
         task.resume()
 
         // The same deadline as before, waited out in slices. Reporting between them rather than
         // after the wait returns, because by then the transfer is over and there is nothing left
         // to say about it.
+        //
+        // `timeoutInterval` is an idle interval — the time since the last byte — not a total, so
+        // a response that trickles outlives this deadline with the task still running. The break
+        // used to leave it running: the transfer went on buffering after the theme had been
+        // reported as failed, and its completion handler wrote `outcome` from the session's queue
+        // after the function that declared it had returned (#130). Now the task is cancelled, and
+        // the loop waits once more for the signal that says the outcome is settled.
         let deadline = Date().addingTimeInterval(timeout + 5)
         while semaphore.wait(timeout: .now() + progressInterval) == .timedOut {
-            if Date() >= deadline { break }
+            if Date() >= deadline {
+                task.cancel()
+                // Without a deadline of its own, deliberately. `cancel()` is asynchronous — it
+                // asks, and the answer is a `didCompleteWithError` on the delegate queue some
+                // time later — but it is also a promise: a task that has been cancelled completes
+                // exactly once, with `NSURLErrorCancelled` if nothing else got there first. If
+                // the transfer finished between the slice above and the cancel, the signal is
+                // already pending and this returns at once; if not, it returns when the
+                // cancellation lands. Either way `outcome` has been written by the time it does,
+                // which a bounded wait here could not say.
+                semaphore.wait()
+                break
+            }
             received?(Int(task.countOfBytesReceived))
         }
         return outcome
