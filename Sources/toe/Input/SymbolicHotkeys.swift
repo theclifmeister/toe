@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ToeCore
 
 /// `CGSSetSymbolicHotKeyEnabled` is private, but it is how System Settings' own Mission Control
 /// pane turns these shortcuts on and off, and it is re-exported from CoreGraphics on every macOS
@@ -41,8 +42,11 @@ enum SymbolicHotkeys {
     /// alone matches leaving the gesture alone.
     static let expose: [Int32] = [32, 34, 33, 35]
 
-    private static let journalURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/symbolic-hotkeys")
+    /// One key code per line.
+    private static let journal = Journal<[Int32]>(
+        name: "symbolic-hotkeys",
+        serialise: JournalFormat.serialise(codes:),
+        parse: { let codes = JournalFormat.parseCodes($0); return codes.isEmpty ? nil : codes })
 
     private static var disabled: [Int32] = []
 
@@ -58,9 +62,15 @@ enum SymbolicHotkeys {
         guard !toDisable.isEmpty else { return }
 
         // Journalled before the change, not after: a crash between the two must leave a record
-        // that says too much, never one that says too little.
+        // that says too much, never one that says too little. And no record, no change: a key
+        // switched off with nothing on disk to say so is a key the next launch cannot give back,
+        // which is the failure the journal exists for. A shortcut that still works is the
+        // cheaper of the two — it shows the stash, and `Log` says why.
+        guard journal.write(disabled + toDisable) else {
+            Log.error("symbolic hotkeys: no journal, so Mission Control's shortcut is left on")
+            return
+        }
         disabled += toDisable
-        writeJournal()
         for key in toDisable { _ = set(key, false) }
         Log.info("symbolic hotkeys: disabled \(toDisable.map(String.init).joined(separator: ", "))")
     }
@@ -68,7 +78,7 @@ enum SymbolicHotkeys {
     /// Gives back exactly what `disable` took, and clears the journal. Safe to call twice.
     static func restoreAll() {
         guard !disabled.isEmpty else {
-            clearJournal()
+            journal.clear()
             return
         }
         if let set = setSymbolicHotKeyEnabled {
@@ -76,31 +86,16 @@ enum SymbolicHotkeys {
             Log.info("symbolic hotkeys: restored \(disabled.map(String.init).joined(separator: ", "))")
         }
         disabled.removeAll()
-        clearJournal()
+        journal.clear()
     }
 
     /// Replays a journal left behind by a toe that did not get to restore — a crash, a `kill -9`,
     /// a logout. Call once at startup, before `disable`.
     static func repairAfterUncleanExit() {
-        guard let text = try? String(contentsOf: journalURL, encoding: .utf8) else { return }
-        let keys = text.split(whereSeparator: \.isNewline).compactMap { Int32($0) }
-        if let set = setSymbolicHotKeyEnabled, !keys.isEmpty {
+        journal.replay { keys in
+            guard let set = setSymbolicHotKeyEnabled else { return }
             for key in keys { _ = set(key, true) }
             Log.info("symbolic hotkeys: repaired \(keys.map(String.init).joined(separator: ", ")) after an unclean exit")
         }
-        clearJournal()
-    }
-
-    // MARK: - The journal
-
-    private static func writeJournal() {
-        let text = disabled.map(String.init).joined(separator: "\n")
-        try? FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? text.write(to: journalURL, atomically: true, encoding: .utf8)
-    }
-
-    private static func clearJournal() {
-        try? FileManager.default.removeItem(at: journalURL)
     }
 }

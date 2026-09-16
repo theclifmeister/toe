@@ -1,5 +1,6 @@
 import CoreFoundation
 import Foundation
+import ToeCore
 
 /// macOS's "click the wallpaper to show desktop", switched off for as long as toe runs.
 ///
@@ -25,9 +26,6 @@ enum WallpaperClick {
     private static let domain = "com.apple.WindowManager" as CFString
     private static let key = "EnableStandardClickToShowDesktop" as CFString
 
-    private static let journalURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/wallpaper-click")
-
     /// What the preference was before toe touched it, and so what `restore` owes the user back.
     /// `absent` is not the same as `on`: writing `true` where there was no key at all would leave
     /// the user's settings holding a value they never set.
@@ -35,6 +33,12 @@ enum WallpaperClick {
         case on
         case absent
     }
+
+    /// The one value, written bare.
+    private static let journal = Journal<Previous>(
+        name: "wallpaper-click",
+        serialise: JournalFormat.serialise(word:),
+        parse: { JournalFormat.parseWord($0) })
 
     private static var previous: Previous?
 
@@ -48,10 +52,15 @@ enum WallpaperClick {
         guard current ?? true else { return }
 
         // Journalled before the change, not after: a crash between the two must leave a record
-        // that says too much, never one that says too little.
+        // that says too much, never one that says too little. And no record, no change — see
+        // `Journal`: a reveal that still works is a nuisance, a reveal switched off with nothing
+        // to say so outlives toe.
         let was: Previous = current == nil ? .absent : .on
+        guard journal.write(was) else {
+            Log.error("wallpaper click: no journal, so reveal-desktop is left on")
+            return
+        }
         previous = was
-        writeJournal(was)
         write(false)
         Log.info("wallpaper click: reveal-desktop switched off")
     }
@@ -59,24 +68,22 @@ enum WallpaperClick {
     /// Gives back exactly what `disable` took, and clears the journal. Safe to call twice.
     static func restore() {
         guard let previous else {
-            clearJournal()
+            journal.clear()
             return
         }
         put(back: previous)
         Self.previous = nil
-        clearJournal()
+        journal.clear()
         Log.info("wallpaper click: reveal-desktop restored")
     }
 
     /// Replays a journal left behind by a toe that did not get to restore — a crash, a `kill -9`,
     /// a logout. Call once at startup, before `disable`.
     static func repairAfterUncleanExit() {
-        guard let text = try? String(contentsOf: journalURL, encoding: .utf8) else { return }
-        if let was = Previous(rawValue: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+        journal.replay { was in
             put(back: was)
             Log.info("wallpaper click: repaired reveal-desktop after an unclean exit")
         }
-        clearJournal()
     }
 
     // MARK: - The preference
@@ -95,17 +102,5 @@ enum WallpaperClick {
         // WindowManager reads the preference rather than being told, so the write has to be out of
         // toe's own cache and in `cfprefsd` before the next click asks.
         CFPreferencesAppSynchronize(domain)
-    }
-
-    // MARK: - The journal
-
-    private static func writeJournal(_ previous: Previous) {
-        try? FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? previous.rawValue.write(to: journalURL, atomically: true, encoding: .utf8)
-    }
-
-    private static func clearJournal() {
-        try? FileManager.default.removeItem(at: journalURL)
     }
 }

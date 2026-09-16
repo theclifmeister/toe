@@ -16,8 +16,7 @@ import ToeCore
 /// they were issued in.
 enum SessionStore {
 
-    static let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/session.json")
+    static let url = StateDirectory.url.appendingPathComponent("session.json")
 
     /// A snapshot is a few hundred bytes per window. Anything past this is not something toe
     /// wrote, and it is read before it is trusted.
@@ -59,8 +58,7 @@ enum SessionStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(snapshot) else { return }
 
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
+        guard StateDirectory.ensure() else { return }
         // Atomically: toe is very often written to on the way out, and a half-written file
         // read back at the next launch is exactly the state this is meant to avoid.
         do {

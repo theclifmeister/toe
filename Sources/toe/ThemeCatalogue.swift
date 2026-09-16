@@ -57,8 +57,7 @@ enum Upstream {
 /// next time you look.
 final class ThemeCatalogue {
 
-    static let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/state/toe/catalogue.json")
+    static let url = StateDirectory.url.appendingPathComponent("catalogue.json")
 
     /// A day. The list changes when Omarchy adds a theme, which is not often, and the cost of
     /// being a day behind is one theme you cannot see yet.
@@ -145,9 +144,7 @@ final class ThemeCatalogue {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(catalogue) else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
+        guard let data = try? encoder.encode(catalogue), StateDirectory.ensure() else { return }
         try? data.write(to: url, options: .atomic)
     }
 }
