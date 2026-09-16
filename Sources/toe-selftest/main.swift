@@ -3669,6 +3669,21 @@ h.test("a theme name is slugified the way Omarchy slugifies it") { t in
     t.expect(Slug.make(String(repeating: "z", count: 200)).count <= 64, "and it cannot run away")
 }
 
+h.test("a name is a Slug only when it already was one") { t in
+    // `Slug.init?` is the guard between a name and a path join, and a `Slug` is a value whose
+    // existence is the check — so what matters is that it refuses rather than repairs.
+    t.equal(Slug("tokyo-night")?.value, "tokyo-night", "a name in slug form is one")
+    t.equal(Slug("gruvbox")?.value, "gruvbox", "one word too")
+    t.expect(Slug("Tokyo Night") == nil, "a name the slug would change is refused, not slugified")
+    t.expect(Slug("rose_pine") == nil, "even by one character")
+    t.expect(Slug("../../.ssh") == nil, "a path cannot be walked out of")
+    t.expect(Slug("tokyo-night/colors.toml") == nil, "nor a path component joined to")
+    t.expect(Slug("") == nil, "and the empty name names nothing — it is not a slug")
+    t.expect(Slug("-gruvbox") == nil, "a leading hyphen is one `make` would have trimmed")
+    t.equal(Slug("catppuccin-latte")?.description, "catppuccin-latte",
+            "and it prints as its value, so a log line can say which")
+}
+
 h.test("a directory name reads back as a title") { t in
     t.equal(Slug.title("catppuccin-latte"), "Catppuccin Latte", "hyphens are spaces again")
     t.equal(Slug.title("gruvbox"), "Gruvbox", "one word is capitalised")
@@ -4343,6 +4358,39 @@ h.test("[cli] keeps exec and quit off the socket until you say otherwise") { t i
     let shipped = try Config.parse(Config.defaultTOML)
     t.expect(shipped.cli.enabled && !shipped.cli.allowExec && !shipped.cli.allowQuit,
              "the shipped default opens the socket and gates the two verbs")
+}
+
+h.test("every gate answers to its own [cli] key, and only to that one") { t in
+    // Walked from `allCases` rather than named, so a third gated verb is covered the day it is
+    // added. Two things are pinned: that each gate opens for the setting its refusal names, and
+    // that it opens for nothing else — the failure this guards was a refusal that pointed the
+    // user at a key which, once set, changed nothing.
+    let closed = try Config.parse("")
+    for gate in CLIGate.allCases {
+        t.expect(!closed.cli.allows(gate), "\(gate) is shut by default")
+        t.expect(gate.key.hasPrefix("cli."), "\(gate)'s key is under [cli]")
+        let setting = String(gate.key.dropFirst("cli.".count))
+        t.expect(gate.reason.contains("\(setting) = true"),
+                 "\(gate)'s refusal names the setting that would have let it through")
+
+        // The key, as the config file spells it, is what the parser reads.
+        let opened = try Config.parse("[cli]\n\(setting) = true\n")
+        t.expect(opened.warnings.isEmpty, "\(gate.key) is a setting the parser knows")
+        t.expect(opened.cli.allows(gate), "and setting it opens \(gate)")
+        for other in CLIGate.allCases where other != gate {
+            t.expect(!opened.cli.allows(other), "but not \(other)")
+        }
+    }
+
+    // Every flag on at once: nothing gated is refused, and nothing ungated ever was.
+    let all = CLIGate.allCases.map { "\(String($0.key.dropFirst("cli.".count))) = true" }
+    let open = try Config.parse("[cli]\n" + all.joined(separator: "\n") + "\n")
+    t.expect(CLIGate.allCases.allSatisfy { open.cli.allows($0) }, "with every flag on, every gate opens")
+    t.expect(open.cli.refusal(for: .exec("ls")) == nil && open.cli.refusal(for: .quit) == nil,
+             "and the two gated verbs go through")
+    t.expect(closed.cli.refusal(for: .exec("ls")) == CLIGate.exec.reason,
+             "shut, the refusal is the gate's own reason, word for word")
+    t.expect(closed.cli.refusal(for: .quit) == CLIGate.quit.reason, "for quit as well")
 }
 
 h.test("a window can be moved and floated without being the focused one") { t in

@@ -12,11 +12,39 @@ import Foundation
 /// anything outside `a-z0-9-` is *dropped* rather than escaped, which makes both of those safe by
 /// construction rather than by remembering: `../` and a bare `"` are simply not slug characters,
 /// and there is no second place that has to know it.
-public enum Slug {
+///
+/// That holds for the *making* of a slug. The other direction — a name that arrives claiming to
+/// be one already, off a filesystem, out of a catalogue, over the socket — is `init?(_:)`, and
+/// it is the one place that rule lives too. It used to be spelled `Slug.make(x) == x` at six
+/// sites, none of them wrong, and the failure that shape invites is the seventh: a new join of a
+/// name onto a path that writes `Slug.make(name)` and forgets the comparison, so `../evil`
+/// becomes `evil` and carries on. A `Slug` is a value whose existence *is* the check, so a
+/// function that takes one cannot be handed anything else, and there is nothing to forget.
+public struct Slug: Hashable, Sendable, CustomStringConvertible {
 
     /// Long enough for the longest theme name anyone has written; short enough that the result is
     /// still a sane path component.
     private static let limit = 64
+
+    public let value: String
+
+    /// `raw` as a slug, or nil unless it already was one — refused rather than repaired, because
+    /// every caller is about to join it onto a path or delete what it names, and a caller that
+    /// asked for `../../x` should be told no, not handed a file called something else.
+    ///
+    /// The empty string is not a slug either. `make("")` is `""`, which is how a theme is
+    /// cleared, but as a *name* it names nothing: joined onto a directory it is the directory
+    /// itself, which is not a thing to write into or remove. Two of the six sites this replaced
+    /// checked for it and four did not; for all four the empty name was either impossible (a
+    /// directory entry has a name) or refused one step later (`ThemeDownloader.fetch` would not
+    /// download a theme called nothing), so refusing it here changes what is listed only in the
+    /// case where the listing was already a promise that could not be kept.
+    public init?(_ raw: String) {
+        guard !raw.isEmpty, Slug.make(raw) == raw else { return nil }
+        value = raw
+    }
+
+    public var description: String { value }
 
     public static func make(_ raw: String) -> String {
         var out = ""

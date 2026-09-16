@@ -695,12 +695,20 @@ final class Coordinator: WindowTrackerDelegate {
     /// but real, because writing the config reloads it — in which the palette in effect names a
     /// directory that is no longer there, and toe would report the theme it just removed as
     /// broken rather than as gone.
-    private func removeTheme(_ slug: String) {
+    private func removeTheme(_ name: String) {
+        // Held to the shape of a theme name before anything else happens — `ThemeStore.remove`
+        // takes a `Slug` and cannot be handed the string. The dispatcher slugified the argument
+        // already, so what is refused here is the empty name: `removetheme` with nothing after
+        // it, which `ThemeStore.remove` used to refuse one line later with the same words.
+        guard let slug = Slug(name) else {
+            Log.error("theme remove: '\(name)' is not a theme name")
+            return
+        }
         // Through the slug, because a hand-written config may say `name = "Tokyo Night"` where
         // the folder is `tokyo-night`, and the theme about to be deleted would otherwise not be
         // recognised as the one in effect.
-        if slug == Slug.make(config.theme.name) { setTheme("") }
-        guard ThemeStore.remove(named: slug) else { return }
+        if slug.value == Slug.make(config.theme.name) { setTheme("") }
+        guard ThemeStore.remove(slug) else { return }
         themes = ThemeStore.installed()
         refreshMenu()
     }

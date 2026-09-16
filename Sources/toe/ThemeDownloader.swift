@@ -59,13 +59,15 @@ enum ThemeDownloader {
                       into directory: URL,
                       progress: @escaping (ThemeDownload) -> Void,
                       completion: @escaping (Result<Void, Failure>) -> Void) {
-        let slug = Slug.make(theme.slug)
-        guard slug == theme.slug, !slug.isEmpty else {
+        // At the door, and not trusted from the catalogue that produced it: `RemoteTheme` is also
+        // read back out of a cached `catalogue.json`, and a file in the config directory is
+        // something the user — or a script — may have edited.
+        guard let slug = Slug(theme.slug) else {
             return completion(.failure(.couldNotWrite("'\(theme.slug)' is not a theme name")))
         }
 
         DispatchQueue.global(qos: .utility).async {
-            let result = fetchSynchronously(theme, slug: slug, into: directory, progress: progress)
+            let result = fetchSynchronously(theme, slug: slug.value, into: directory, progress: progress)
             DispatchQueue.main.async { completion(result) }
         }
     }
