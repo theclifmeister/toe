@@ -26,19 +26,48 @@ public enum CloseVerdict: Equatable {
     /// Send the application a quit and let it close the window itself.
     case quitApplication
 
+    /// One entry in the application's own window list.
+    public struct Sibling: Equatable {
+        /// `nil` when the window would not say — and a window that would not say might be a
+        /// second one, so the answer is then `.closeWindow`.
+        public var id: WindowID?
+        /// The window's size, `nil` when unreadable. A window a pixel or less on a side is not
+        /// one anybody can see and does not count: Steam keeps a 1×1 `AXUnknown` window at
+        /// x = −15000 in its list for as long as it runs — a Chromium helper — and counting it
+        /// meant Steam's one real window was never its last, and SUPER+W on it hid Steam to
+        /// the menu bar the way its own ⌘W does, which is exactly the outcome this exists to
+        /// replace. Anything larger counts, minimized and never-adopted windows included.
+        public var size: Size?
+
+        public init(id: WindowID?, size: Size? = nil) {
+            self.id = id
+            self.size = size
+        }
+
+        /// Whether this is a window at all, by the one measure that cannot be argued with.
+        var visible: Bool {
+            guard let size else { return true }
+            return size.w > 1 && size.h > 1
+        }
+    }
+
+    public struct Size: Equatable {
+        public var w: Double
+        public var h: Double
+        public init(w: Double, h: Double) { self.w = w; self.h = h }
+    }
+
     /// What the application says about itself, gathered by the caller.
     public struct Application: Equatable {
         public var bundleID: String?
-        /// The id of every window the application reports, on any Space, minimized or not. An
-        /// entry is `nil` when a window would not say — and a window that would not say might
-        /// be a second one, so the answer is then `.closeWindow`.
-        public var windows: [WindowID?]
+        /// Every window the application reports, on any Space, minimized or not.
+        public var windows: [Sibling]
         /// Whether the application is an ordinary one — `activationPolicy == .regular`, a Dock
         /// tile and a menu bar. An accessory or a background process has no ⌘Q to stand in for
         /// and only ever loses the window.
         public var ordinary: Bool
 
-        public init(bundleID: String?, windows: [WindowID?], ordinary: Bool) {
+        public init(bundleID: String?, windows: [Sibling], ordinary: Bool) {
             self.bundleID = bundleID
             self.windows = windows
             self.ordinary = ordinary
@@ -60,8 +89,10 @@ public enum CloseVerdict: Equatable {
         if let bundleID = app.bundleID, neverQuit.contains(bundleID) { return .closeWindow }
         // Exactly this window and nothing else: an empty list is an application that would not
         // answer, a list without this window is one whose answer cannot be trusted, and either
-        // is a doubt.
-        guard app.windows.count == 1, app.windows[0] == id else { return .closeWindow }
+        // is a doubt. The window being closed is judged by its id alone — it is on screen, or
+        // the user could not have asked.
+        let windows = app.windows.filter { $0.id == id || $0.visible }
+        guard windows.count == 1, windows[0].id == id else { return .closeWindow }
         return .quitApplication
     }
 }

@@ -1836,7 +1836,8 @@ h.test("quit_on_last_window is on by default, and a bad value keeps it on") { t 
 h.test("killactive quits the application on its last window and only then") { t in
     func app(_ windows: [WindowID?], bundle: String? = "com.apple.Safari", ordinary: Bool = true)
         -> CloseVerdict.Application {
-        CloseVerdict.Application(bundleID: bundle, windows: windows, ordinary: ordinary)
+        CloseVerdict.Application(bundleID: bundle, windows: windows.map { CloseVerdict.Sibling(id: $0) },
+                                 ordinary: ordinary)
     }
     func verdict(_ app: CloseVerdict.Application, closing id: WindowID = 7, on: Bool = true) -> CloseVerdict {
         CloseVerdict.decide(closing: id, of: app, quitOnLastWindow: on)
@@ -1863,6 +1864,26 @@ h.test("killactive quits the application on its last window and only then") { t 
     t.equal(verdict(app([7], ordinary: false)), .closeWindow,
             "an accessory has no Dock tile to stand for a quit, and only loses the window")
     t.equal(verdict(app([7]), on: false), .closeWindow, "switched off, SUPER+W is ⌘W")
+
+    // Steam: one real window and, for as long as it runs, a 1×1 AXUnknown helper at x = −15000.
+    // Counting the helper made the real window never the last one, and SUPER+W hid Steam to
+    // the menu bar the way its own ⌘W does.
+    func sized(_ id: WindowID?, _ w: Double, _ h: Double) -> CloseVerdict.Sibling {
+        CloseVerdict.Sibling(id: id, size: CloseVerdict.Size(w: w, h: h))
+    }
+    func steam(_ windows: [CloseVerdict.Sibling]) -> CloseVerdict.Application {
+        CloseVerdict.Application(bundleID: "com.valvesoftware.steam", windows: windows, ordinary: true)
+    }
+    t.equal(verdict(steam([sized(128, 1, 1), sized(7, 1280, 800)])), .quitApplication,
+            "a window a pixel across is not a window anybody can see")
+    t.equal(verdict(steam([sized(128, 1, 1), sized(7, 1280, 800), sized(9, 1280, 800)])), .closeWindow,
+            "and a second real one still keeps Steam running")
+    t.equal(verdict(steam([sized(128, 1, 1), sized(nil, 1280, 800)])), .closeWindow,
+            "a real-sized window with no id is still a doubt")
+    t.equal(verdict(steam([sized(7, 1, 1)])), .quitApplication,
+            "the window being closed is judged by id, not size — the user is looking at it")
+    t.equal(verdict(steam([sized(8, 2, 2), sized(7, 1280, 800)])), .closeWindow,
+            "the line is one pixel: a sibling two across counts")
 
     // The switch is consulted before the application is asked anything: with it off, gathering
     // the window list would be Accessibility round trips spent on a question with no answer.

@@ -72,11 +72,15 @@ enum WindowMover {
     /// the tracker only holds what `isManageable` let it adopt, and a minimized window or a
     /// Preferences panel it never took is a window ⌘Q would close (#156). `kAXWindows` lists a
     /// window on any Space, which is what makes a fullscreen sibling on a Space of its own count.
+    /// The size is what lets the verdict discount Steam's 1×1 helper window — see `Sibling`.
     static func application(of window: ManagedWindow) -> CloseVerdict.Application {
         let app = NSRunningApplication(processIdentifier: window.pid)
         return CloseVerdict.Application(
             bundleID: app?.bundleIdentifier ?? window.bundleID,
-            windows: AX.application(window.pid).windows.map(\.windowID),
+            windows: AX.application(window.pid).windows.map {
+                CloseVerdict.Sibling(id: $0.windowID,
+                                     size: $0.size.map { CloseVerdict.Size(w: $0.width, h: $0.height) })
+            },
             ordinary: app?.activationPolicy == .regular)
     }
 }
