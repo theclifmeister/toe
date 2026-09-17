@@ -67,6 +67,14 @@ final class WindowTracker {
 
     func window(_ id: CGWindowID) -> ManagedWindow? { windows[id] }
 
+    /// Drop a window the window server says no longer exists — a `kAXUIElementDestroyed` that
+    /// never arrived. Its notifications die with the element, so there is nothing to remove;
+    /// the entry just has to go, or `adopt` would go on answering "already known" for an id
+    /// the window server may reuse.
+    func forget(_ id: CGWindowID) {
+        windows.removeValue(forKey: id)
+    }
+
     // MARK: - Lifecycle
 
     func start() {

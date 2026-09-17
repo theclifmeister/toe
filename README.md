@@ -95,7 +95,9 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 **The layout.** A new window splits the focused one and takes the right or bottom half. A split's
 orientation is decided once, from the shape of the space it is in, and then kept, so the layout
 stays put as windows come and go. Closing a window hands its space to its sibling. Dialogs,
-sheets, palettes, minimized and native-fullscreen windows are left alone.
+sheets, palettes, minimized and native-fullscreen windows are left alone — and a tiled window
+that goes fullscreen hands its tile to its neighbours until it comes back, rather than leaving
+a hole on the desktop behind it.
 
 **The menu bar** shows the workspace strip: the workspace you are on as a filled square, every
 other workspace in use as its digit, and workspaces 1–5 always present. Click a workspace to

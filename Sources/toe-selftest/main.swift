@@ -1419,6 +1419,248 @@ h.test("a fullscreen window suspends the verbs that act on the Space underneath"
     }
 }
 
+// MARK: - Tiles with nothing behind them
+
+/// Two displays for the presence tests, and a sample with every on-screen window sitting in
+/// an ordinary tile-sized box on the first — the bounds only matter when one covers a display.
+let PRESENCE_MONITORS = [Monitor(id: 1, frame: box(0, 0, 1728, 1117), usable: box(0, 33, 1728, 1006)),
+                         Monitor(id: 2, frame: box(1728, 0, 1920, 1080), usable: box(1728, 0, 1920, 1080))]
+
+func presenceSample(existing: Set<WindowID>, onScreen: Set<WindowID>,
+                    covering: [WindowID: Box] = [:]) -> Presence.Sample {
+    var boxes: [WindowID: Box] = [:]
+    for id in onScreen { boxes[id] = covering[id] ?? box(15, 48, 841, 480) }
+    return Presence.Sample(existing: existing, onScreen: onScreen, covering: boxes)
+}
+
+h.test("a display-sized window at the Dock's level does not make a display fullscreen") { t in
+    // The Dock keeps one on screen at all times, at level 20, and the app layer leaves it out
+    // of `covering` — measured the hard way, when it made every desktop read as covered and
+    // the failsafe never fired.
+    let sample = Presence.Sample(existing: [1, 2, 3, 50], onScreen: [1, 2, 50],
+                                 covering: [1: box(15, 48, 841, 480), 2: box(872, 48, 841, 976)])
+    let verdict = Presence.assess(tiles: [1: [1, 2, 3]], monitors: PRESENCE_MONITORS, suspended: [],
+                                  sample: sample)
+    t.equal(verdict.away, [3], "the desktop is showing, and 3 is not on it")
+}
+
+h.test("a tile whose window is on another Space is away, and one that does not exist is gone") { t in
+    // On display 1 the tiles are 1, 2 and 3; on 2 they are 4 and 5. Window 3 has gone
+    // fullscreen — it exists, on a Space of its own — and window 5 was closed without a word.
+    let tiles: [UInt32: Set<WindowID>] = [1: [1, 2, 3], 2: [4, 5]]
+    let sample = presenceSample(existing: [1, 2, 3, 4, 9], onScreen: [1, 2, 4, 9])
+    let verdict = Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [], sample: sample)
+    t.equal(verdict.away, [3], "the fullscreen window is away")
+    t.equal(verdict.gone, [5], "the closed window is gone")
+    t.equal(verdict.returned, [], "nothing was waiting to come back")
+}
+
+h.test("a display showing a fullscreen Space is not judged") { t in
+    // The user is looking at window 3, fullscreen on display 1: from there 1 and 2 read "off
+    // screen" and 3 reads on, covering the display less its menu bar — measured, the bounds a
+    // fullscreen window reports. Suspending 1 and 2 on that evidence, and restoring them on
+    // the way back, would reshuffle a layout nothing was wrong with.
+    let tiles: [UInt32: Set<WindowID>] = [1: [1, 2, 3], 2: [4, 5]]
+    let sample = presenceSample(existing: [1, 2, 3, 4, 5], onScreen: [3, 4, 5],
+                                covering: [3: box(0, 33, 1728, 1084)])
+    let verdict = Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [], sample: sample)
+    t.equal(verdict.away, [], "display 1 is covered, so 1 and 2 are left alone")
+    t.equal(verdict.gone, [], "and nothing is missing")
+
+    // With the menu bar hidden in fullscreen the bounds are the whole display; either way
+    // they contain the usable area, which is the test.
+    let bare = presenceSample(existing: [1, 2, 3], onScreen: [3], covering: [3: box(0, 0, 1728, 1117)])
+    t.equal(Presence.assess(tiles: [1: [1, 2, 3]], monitors: PRESENCE_MONITORS, suspended: [], sample: bare).away,
+            [], "a fullscreen window filling the display covers it too")
+
+    // The other display is still judged on its own evidence.
+    let other = presenceSample(existing: [1, 2, 3, 4, 5], onScreen: [3, 4],
+                               covering: [3: box(0, 33, 1728, 1084)])
+    t.equal(Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [], sample: other).away,
+            [5], "display 2 is showing the desktop, and 5 is not on it")
+}
+
+h.test("a display with no tile on screen is not judged") { t in
+    // A lock screen, or an animation nobody measured: every tile on a display reads "off
+    // screen" and nothing on it reads on. The failure to avoid is every tile leaving the tree
+    // together, so nothing on it is touched. Gone is still gone: a window that does not exist
+    // is not a matter of what the display is showing.
+    let tiles: [UInt32: Set<WindowID>] = [1: [1, 2], 2: [4, 5]]
+    let sample = presenceSample(existing: [1, 2, 4], onScreen: [4])
+    let verdict = Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [], sample: sample)
+    t.equal(verdict.away, [], "display 1 has no tile on screen, so 1 and 2 are left alone")
+    t.equal(verdict.gone, [5], "display 2's missing window is reaped regardless")
+
+    // The corollary: a workspace of one window going fullscreen takes the only tile with it,
+    // and is never acted on. One window leaving a tree of one leaves no hole to close.
+    let alone = Presence.assess(tiles: [1: [7]], monitors: PRESENCE_MONITORS, suspended: [],
+                                sample: presenceSample(existing: [7], onScreen: []))
+    t.equal(alone.away, [], "a lone window going fullscreen is not suspended")
+
+    // A display the manager does not know is not judged either.
+    let unknown = Presence.assess(tiles: [9: [1, 2]], monitors: PRESENCE_MONITORS, suspended: [],
+                                  sample: presenceSample(existing: [1, 2], onScreen: [1]))
+    t.equal(unknown.away, [], "no display, no verdict")
+}
+
+h.test("a suspended window is returned when it is on screen, and gone when it no longer exists") { t in
+    let tiles: [UInt32: Set<WindowID>] = [1: [1, 2]]
+    let sample = presenceSample(existing: [1, 2, 3], onScreen: [1, 2, 3])
+    let verdict = Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [3, 4], sample: sample)
+    t.equal(verdict.returned, [3], "3 is back on the Space the user is looking at")
+    t.equal(verdict.gone, [4], "4 was closed while it was away — nothing to wait for")
+    t.equal(verdict.away, [], "nothing else moved")
+
+    let still = Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [3],
+                                sample: presenceSample(existing: [1, 2, 3], onScreen: [1, 2]))
+    t.equal(still.isEmpty, true, "a suspended window still away is nothing to do")
+
+    // Visiting the fullscreen Space puts the suspended window on screen — as the fullscreen
+    // window, covering the display. That is not a return; it is the same window on the same
+    // Space of its own, with the user looking at it.
+    let visiting = Presence.assess(tiles: tiles, monitors: PRESENCE_MONITORS, suspended: [3],
+                                   sample: presenceSample(existing: [1, 2, 3], onScreen: [3],
+                                                          covering: [3: box(0, 33, 1728, 1084)]))
+    t.equal(visiting.returned, [], "looking at the fullscreen window does not bring it back")
+    t.equal(visiting.away, [], "and 1 and 2 are not away — display 1 is covered")
+}
+
+h.test("away and returned are believed on a second look old enough, gone on the first") { t in
+    // A fullscreen transition takes ~560 ms and a tile reads as away from its first Space
+    // notification — and a window on its way to fullscreen reads as back, on screen and not
+    // yet covering the display. The watch holds both until a look at least `minimumAge` later
+    // says the same.
+    var watch = Presence.Watch(minimumAge: 0.7)
+    let first = watch.confirm(Presence.Verdict(gone: [5], away: [3], returned: [8]), now: 10.0)
+    t.equal(first.away, [], "the first look only raises 3 as a candidate")
+    t.equal(first.returned, [], "and 8")
+    t.equal(first.gone, [5], "gone needs no second look")
+    t.equal(watch.isPending, true, "the coordinator is told to look again")
+
+    // A stack change is reported three times over 400 ms. The second and third are the same
+    // transition the first was, and confirm nothing.
+    let soon = watch.confirm(Presence.Verdict(away: [3], returned: [8]), now: 10.15)
+    t.equal(soon.away, [], "150 ms later is too soon to believe")
+    t.equal(soon.returned, [], "either way")
+    let stillSoon = watch.confirm(Presence.Verdict(away: [3], returned: [8]), now: 10.4)
+    t.equal(stillSoon.isEmpty, true, "and so is 400 ms")
+    t.equal(watch.isPending, true, "the candidates are kept, from when they were first seen")
+
+    let later = watch.confirm(Presence.Verdict(away: [3], returned: [8]), now: 10.7)
+    t.equal(later.away, [3], "700 ms after the first look, the departure is believed")
+    t.equal(later.returned, [8], "and the return")
+    t.equal(watch.isPending, false, "and nothing is left waiting")
+
+    // A candidate that reads as present on the next look was a transition, not a departure.
+    var flicker = Presence.Watch(minimumAge: 0.7)
+    _ = flicker.confirm(Presence.Verdict(away: [3]), now: 0)
+    let calm = flicker.confirm(Presence.Verdict(), now: 0.3)
+    t.equal(calm.away, [], "a tile that came back on its own was never away")
+    t.equal(flicker.isPending, false, "and is forgotten")
+    let again = flicker.confirm(Presence.Verdict(away: [3]), now: 1.0)
+    t.equal(again.away, [], "so seeing it again starts the count afresh")
+
+    // A new candidate on a later look has its own count.
+    var rolling = Presence.Watch(minimumAge: 0.7)
+    _ = rolling.confirm(Presence.Verdict(away: [3]), now: 0)
+    let mixed = rolling.confirm(Presence.Verdict(away: [3, 4]), now: 0.7)
+    t.equal(mixed.away, [3], "3 is confirmed; 4 has only just been seen")
+    t.equal(rolling.isPending, true, "so 4 is waiting")
+    t.equal(rolling.confirm(Presence.Verdict(away: [4]), now: 1.4).away, [4], "and is believed in its turn")
+}
+
+h.test("suspending a tile closes the hole, and resuming it splits the neighbour it left") { t in
+    let wm = WorkspaceManager(options: { var o = DwindleOptions(); o.forceSplit = 2; return o }(),
+                              gaps: Gaps(inner: 0, outer: 0))
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
+    let before = wm.render().frames
+    // The staircase: 1 left, 2 top-right, 3 bottom-right.
+    t.equalBox(before[2], box(756, 0, 756, 491), "2 has the top right")
+    t.equalBox(before[3], box(756, 491, 756, 491), "3 has the bottom right")
+
+    t.equal(wm.suspend(3), true, "3 was a tile")
+    let during = wm.render()
+    t.equalBox(during.frames[2], box(756, 0, 756, 982), "2 takes the whole right column")
+    t.equal(during.frames[3], nil, "3 has no tile")
+    t.equal(during.stashed.contains(3), false, "and is not parked either — it is on its own Space")
+    t.equal(wm.workspaceIndex(of: 3), nil, "it is on no workspace")
+    t.equal(wm.suspended[3], WorkspaceManager.Suspension(workspace: 1, anchor: 2),
+            "but toe remembers where it goes back, and beside whom")
+    t.equal(wm.visibleTilesByMonitor(), [1: [1, 2]], "the presence check no longer sees it")
+    t.equal(wm.focusedWindow, 2, "the focus falls to a window that is there")
+
+    t.equal(wm.resume(3), 1, "it goes back to workspace 1")
+    let after = wm.render().frames
+    t.equal(after, before, "and the layout is exactly what it was")
+    t.equal(wm.focusedWindow, 3, "with the returning window focused — it is the one the user is looking at")
+    t.equal(wm.suspended.isEmpty, true, "nothing is left suspended")
+}
+
+h.test("a suspended window whose neighbour has gone comes back where a new window would") { t in
+    let wm = WorkspaceManager(options: { var o = DwindleOptions(); o.forceSplit = 2; return o }(),
+                              gaps: Gaps(inner: 0, outer: 0))
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
+    wm.suspend(3)
+    wm.removeWindow(2)
+    wm.noteFocus(1)
+    t.equal(wm.resume(3), 1, "still workspace 1")
+    let frames = wm.render().frames
+    t.equalBox(frames[1], box(0, 0, 756, 982), "1 keeps the left")
+    t.equalBox(frames[3], box(756, 0, 756, 982), "3 splits the focused window, as a new one would")
+}
+
+h.test("a suspended window is forgotten by removal, and not by a workspace switch") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.suspend(2)
+
+    // Switching away and back is the ordinary path while a window is fullscreen: the desktop
+    // is one swipe from the fullscreen Space. The suspension survives it.
+    wm.switchTo(workspace: 2)
+    t.equal(wm.render().stashed, [1], "only the tile that is there is parked")
+    wm.switchTo(workspace: 1)
+    t.equal(wm.suspended[2]?.workspace, 1, "2 still owes workspace 1 a tile")
+
+    // Resuming while its workspace is hidden puts it back there — the coordinator then
+    // follows it, as `settleFullscreenReturns` does.
+    wm.switchTo(workspace: 2)
+    t.equal(wm.resume(2), 1, "the workspace it went back to, for the caller to switch to")
+    t.equal(wm.render().stashed, [1, 2], "it is on the hidden workspace with its neighbour")
+    t.equal(wm.suspend(2), true, "and a second suspension is the same as the first")
+    t.equal(wm.suspend(2), false, "though not twice over")
+}
+
+h.test("suspend takes a tile only") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2, floating: true)
+    t.equal(wm.suspend(2), false, "a float takes no space, so it leaves no hole")
+    t.equal(wm.suspend(9), false, "an unknown window is nothing to suspend")
+    t.equal(wm.resume(9), nil, "and nothing to resume")
+    wm.suspend(1)
+    wm.removeWindow(1)
+    t.equal(wm.suspended.isEmpty, true, "removal forgets the suspension")
+    t.equal(wm.resume(1), nil, "so there is nothing to resume")
+}
+
+h.test("the state report puts a suspended window on the workspace it will return to, hidden") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.suspend(2)
+    let state = StateReporter.report(wm, tracked: [tracked(1, pid: 10), tracked(2, pid: 10)],
+                                     monitorKey: { _ in "UUID-1" }, appName: { _ in "App" },
+                                     screenName: { _ in nil }, version: nil)
+    let two = state.windows.first { $0.id == 2 }
+    t.equal(two?.workspace, 1, "reported on workspace 1")
+    t.equal(two?.hidden, true, "and hidden: toe has it, and it is not on screen")
+    t.equal(two?.frame, nil, "with no frame — it has no tile right now")
+    t.equal(state.workspaces.first { $0.index == 1 }?.windows, [1], "the workspace lists only the tile that is there")
+}
+
 // MARK: - Config
 
 h.test("the second floating size is configurable, and a bad one warns") { t in

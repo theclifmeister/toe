@@ -4,10 +4,10 @@ import ToeCore
 
 /// The window server's stacking order, which Accessibility does not expose at all.
 ///
-/// Reads `kCGWindowNumber`, `kCGWindowBounds`, `kCGWindowLayer`, `kCGWindowOwnerPID` and
-/// `kCGWindowAlpha`, and nothing else. `kCGWindowName` would need Screen Recording, which toe asks
-/// for only when the workspace slide is switched on (`ScreenSnapshot`), so the window list is read
-/// for geometry and never for content.
+/// Reads `kCGWindowNumber`, `kCGWindowBounds`, `kCGWindowLayer`, `kCGWindowOwnerPID`,
+/// `kCGWindowAlpha` and `kCGWindowIsOnscreen`, and nothing else. `kCGWindowName` would need
+/// Screen Recording, which toe asks for only when the workspace slide is switched on
+/// (`ScreenSnapshot`), so the window list is read for geometry and never for content.
 enum WindowStack {
 
     /// The levels worth considering. A window above `.floating` — a menu, the Dock, a system
@@ -41,6 +41,43 @@ enum WindowStack {
             if let alpha = info[kCGWindowAlpha as String] as? Double, alpha < 0.01 { return false }
             return true
         }
+    }
+
+    /// Every window that exists and which of them are on the Space their display is showing —
+    /// the input to `Presence.assess`. One call, and it reads `kCGWindowNumber`,
+    /// `kCGWindowIsOnscreen`, `kCGWindowBounds` and `kCGWindowLayer` only. The level gates
+    /// nothing but the bounds: a tile whose application has lifted it a level for a moment is
+    /// still a window that exists and is on screen, but only a window at an ordinary level can
+    /// say a display is showing a fullscreen Space — the Dock keeps a display-sized window on
+    /// screen at all times at level 20, and it would otherwise say so of every display.
+    ///
+    /// `kCGWindowIsOnscreen` means "on the current Space", not "inside the display": a window
+    /// toe has parked at `stashPoint` reads as on screen, a window on a fullscreen Space reads as
+    /// off it, and from a fullscreen Space every desktop window reads as off — measured, and the
+    /// reason `Presence` judges a display only when at least one of its tiles is on screen.
+    static func presence() -> Presence.Sample? {
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            // No answer is not "nothing exists": an empty sample would read as every tile on
+            // screen having been closed. Nil, and the caller does nothing this time.
+            return nil
+        }
+        var existing: Set<WindowID> = []
+        var onScreen: Set<WindowID> = []
+        var covering: [WindowID: Box] = [:]
+        for info in list {
+            guard let id = info[kCGWindowNumber as String] as? WindowID else { continue }
+            existing.insert(id)
+            guard info[kCGWindowIsOnscreen as String] as? Bool == true else { continue }
+            onScreen.insert(id)
+            guard let layer = info[kCGWindowLayer as String] as? Int, levels.contains(layer),
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+            else { continue }
+            // The same space as `Box`, and no conversion — see `ordinaryWindowsAbove`.
+            covering[id] = Box(x: rect.minX, y: rect.minY, w: rect.width, h: rect.height)
+        }
+        return Presence.Sample(existing: existing, onScreen: onScreen, covering: covering)
     }
 
     /// The ids of the windows above `id`. This is how toe knows whether a float it has already

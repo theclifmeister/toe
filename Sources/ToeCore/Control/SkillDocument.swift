@@ -142,7 +142,9 @@ public enum SkillDocument {
         - **A native-fullscreen window suspends half the verbs.** While one holds the focus,
           anything that moves the focus, a window or a workspace is refused — it would act on the
           workspace behind a screen the user cannot see. Check `query state` if a dispatch appears
-          to have done nothing.
+          to have done nothing. The window itself leaves the layout for as long as it is
+          fullscreen — its neighbours take its tile, and it is reported `hidden` on the workspace
+          it will go back to — and takes a tile again when it returns.
         - **Floating windows are the user's.** toe writes a floating window's frame once and never
           re-asserts it, on purpose. Do not repeatedly place one.
         - **Never write to a window being dragged.** toe already refuses; a burst of commands

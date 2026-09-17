@@ -116,6 +116,18 @@ asks the window server about an off-screen window gets an answer that means "not
 "nothing there". `WindowStack.windowsAbove` returning an empty set is the trap — `Stacking.raiseOrder`
 reads empty as *this float is on top*, not *no idea*.
 
+**A tile can outlive what was in it.** The tracker hears that a window has gone from exactly two
+places — `kAXUIElementDestroyed` / `kAXWindowMiniaturized` on the element, and the application
+terminating — and a tile going native fullscreen is neither, so the desktop kept a hole where it
+was (#147). `Coordinator.checkPresence` is the failsafe: one `CGWindowListCopyWindowInfo`, on
+every stack and Space change and every three seconds, judged by `Presence.assess` in ToeCore. A
+tile the window server does not list is reaped; one it lists on another Space is *suspended* —
+`WorkspaceManager.suspend` takes it out of the tree and remembers its workspace and neighbour,
+`resume` puts it back. Two things to keep straight: a suspended window is on **no** workspace
+(`workspaceIndex(of:)` is nil, the state report says `hidden` on the workspace it will return
+to), and `Presence.Watch` will not believe "away" or "back" until the same answer has held for
+`presenceRecheckLatency`, because a fullscreen transition reads as both on the way through.
+
 **Native-fullscreen windows** are never managed (`isManageable` rejects them) but do affect the
 border: the border panel is `.canJoinAllSpaces` + `.fullScreenAuxiliary`, so it will happily paint
 across a fullscreen Space unless something stops it. With *Displays have separate Spaces* on (the

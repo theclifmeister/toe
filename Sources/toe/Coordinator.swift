@@ -161,6 +161,25 @@ final class Coordinator: WindowTrackerDelegate {
     /// while it is, which is the whole of its job — a ring that keeps its old position through
     /// a fullscreen animation is a ring painted over somebody's fullscreen window.
     private var spaceSettle: DispatchWorkItem?
+    /// The two-look rule for a tile the window server says is on another Space, and for a
+    /// suspended window it says is back. See `checkPresence` and `Presence.Watch`.
+    private var presenceWatch = Presence.Watch(minimumAge: Coordinator.presenceRecheckLatency)
+    /// The second look, when the first found a candidate. See `presenceRecheckLatency`.
+    private var presenceRecheck: DispatchWorkItem?
+    /// The look nothing else prompted. See `presenceInterval`.
+    private var presenceTimer: Timer?
+    /// How long after a tile first reads "on another Space" — or a suspended window first
+    /// reads "back" — the same answer has to hold before it is believed. Longer than a
+    /// fullscreen transition, ~560 ms measured for #115, so that a window still animating out
+    /// to its own Space, which reads as away from the first Space notification, is not taken
+    /// out of the tree until it has genuinely left — and one animating *in*, on screen and not
+    /// yet covering the display, is not taken for a return.
+    private static let presenceRecheckLatency: TimeInterval = 0.7
+    /// How often the window server is asked about the tiles on screen when nothing has
+    /// happened to prompt it. This is the only thing that catches a `kAXUIElementDestroyed`
+    /// an application never sent, and a window nobody has since clicked near — so it cannot be
+    /// event-driven, and a window list every few seconds is cheap: no Accessibility, one call.
+    private static let presenceInterval: TimeInterval = 3.0
     /// Where a swipe's slide has got to. See `swipeToWorkspace` for the sequence and `apply`
     /// for the two phases a render from elsewhere cuts short.
     private enum SlidePhase {
@@ -368,6 +387,7 @@ final class Coordinator: WindowTrackerDelegate {
         applyCLISetting()
         refreshStatus()
         apply(refocus: false)
+        startPresenceTimer()
         Log.info("managing \(tracker.windows.count) window(s) across \(workspaces.monitors.count) monitor(s)")
     }
 
@@ -1343,6 +1363,9 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     func windowFocused(_ id: WindowID) {
+        // A suspended window has no workspace to focus on. Leaving fullscreen focuses it as it
+        // lands, and that is also a Space change and an activation — `checkPresence` brings it
+        // back from either, and `resume` gives it the focus then.
         guard workspaces.workspaceIndex(of: id) != nil, !isEchoOfOwnRaise(id) else { return }
         // Following the focus onto a workspace that is not showing is right only when the user
         // asked for it. Clicking an application's Dock icon, Cmd-Tab and Spotlight all activate
@@ -1558,6 +1581,95 @@ final class Coordinator: WindowTrackerDelegate {
         // window server says is up there now, before the border is asked where it belongs.
         sinkUnfocusedFloats(workspaces.render())
         updateBorder()
+        // After the border, and every time: an application coming forward is also how a window
+        // comes back from another Space, and how one hidden with `⌘H` returns.
+        checkPresence()
+    }
+
+    // MARK: - Tiles with nothing behind them
+
+    /// Asks the window server whether the tiles on screen are actually there, and closes the
+    /// hole behind any that is not. The decision is `Presence.assess`; this is the plumbing.
+    ///
+    /// Three ways a tile ends up with nothing visible in it, and this catches all of them:
+    /// a window gone native fullscreen (#147 — macOS moves it to a Space of its own and its
+    /// tile stays, so the desktop shows a gap where it was), a window dragged to another
+    /// desktop in Mission Control or hidden with `prevent_hiding` off, and a window closed
+    /// without the `kAXUIElementDestroyed` that would have told the tracker. The first two
+    /// leave the tree and come back when the window does; the last is reaped.
+    ///
+    /// Not while the user has hold of a window — the tree must not reflow under a drag — and
+    /// not while a restored session is still settling, because `settleSession`'s own reap
+    /// covers that and a tile whose window has not turned up yet is not one to judge.
+    private func checkPresence() {
+        guard isManaging, !isSettlingSession, draggedWindow == nil,
+              let sample = WindowStack.presence()
+        else { return }
+
+        let assessed = Presence.assess(tiles: workspaces.visibleTilesByMonitor(),
+                                       monitors: workspaces.monitors,
+                                       suspended: Set(workspaces.suspended.keys),
+                                       sample: sample)
+        let verdict = presenceWatch.confirm(assessed, now: ProcessInfo.processInfo.systemUptime)
+        if presenceWatch.isPending { schedulePresenceRecheck() }
+        guard !verdict.isEmpty else { return }
+
+        for id in verdict.gone {
+            Log.info("window \(id) is gone and nothing said so — reaping its tile")
+            tracker.forget(id)
+            windowDisappeared(id)
+        }
+
+        for id in verdict.away where workspaces.suspend(id) {
+            Log.info("window \(id) is on another Space — its tile goes to its neighbours until it is back")
+            // Nothing re-asserts a tile on a window that has none: the next external move of a
+            // fullscreen window is it settling on its own display, not an app fighting a tile.
+            desired.removeValue(forKey: id)
+            corrections.removeValue(forKey: id)
+            settleWork.removeValue(forKey: id)?.cancel()
+            settleAttempts.removeValue(forKey: id)
+            if focusApplied == id { focusApplied = nil }
+        }
+
+        // A window back from fullscreen is put back on its workspace, and the workspace is
+        // brought to it if it is not showing — `settleFullscreenReturns`'s reasoning, arrived
+        // at from the other end: leaving fullscreen is the user saying they want this window
+        // back at its ordinary size, and it is the window they are looking at.
+        var followed = false
+        for id in verdict.returned.sorted() {
+            guard let index = workspaces.resume(id) else { continue }
+            Log.info("window \(id) is back on screen — restoring its tile on workspace \(index)")
+            if !followed, !workspaces.visibleWorkspaceIndices.contains(index) {
+                workspaces.switchTo(workspace: index)
+                workspaces.noteFocus(id)
+                followed = true
+            }
+        }
+
+        apply(refocus: !verdict.returned.isEmpty)
+        refreshStatus()
+    }
+
+    /// The second look at a tile that read as away, or a suspended window that read as back.
+    /// `Presence.Watch` will not believe a look younger than `presenceRecheckLatency`, so this
+    /// is what guarantees one arrives once it can be believed; anything else that prompts a
+    /// look in between merely keeps the candidate alive.
+    private func schedulePresenceRecheck() {
+        presenceRecheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.presenceRecheck = nil
+            self.checkPresence()
+        }
+        presenceRecheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.presenceRecheckLatency, execute: work)
+    }
+
+    private func startPresenceTimer() {
+        presenceTimer?.invalidate()
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: Self.presenceInterval, repeats: true) {
+            [weak self] _ in self?.checkPresence()
+        }
     }
 
     /// A different Space is on show. The layout is untouched and so is the stacking inside it,
@@ -1580,6 +1692,11 @@ final class Coordinator: WindowTrackerDelegate {
         // fullscreen on a since-hidden workspace asks for its workspace back.
         settleFullscreenReturns()
         updateBorder()
+        // A Space change is how a window leaves for fullscreen and how it comes back, and how
+        // the desktop the user swiped to turns out to have a hole in it. The first look here
+        // is during the transition and only raises a candidate; `presenceRecheckLatency` is
+        // what decides.
+        checkPresence()
         // With *Displays have separate Spaces* on — the macOS default — a desktop picture is set
         // per Space and not per screen, so a Space that has not been visited since the theme
         // changed is still showing the old one. `reapply` checks before it writes, which is what
@@ -1862,6 +1979,8 @@ final class Coordinator: WindowTrackerDelegate {
         // First, and before `unstashEverything` starts moving windows around: this is the one
         // write that matters, since it is the one a deliberate restart depends on.
         saveSession()
+        presenceTimer?.invalidate()
+        presenceRecheck?.cancel()
         unstashEverything()
         // A filtering tap left registered against a callback that is about to go away spins
         // WindowServer, so it is taken down deliberately rather than left to process death.
