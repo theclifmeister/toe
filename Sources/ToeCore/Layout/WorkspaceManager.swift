@@ -79,6 +79,11 @@ public final class WorkspaceManager {
     /// strip, so the layout has to know how long the strip is.
     public var persistentWorkspaces = WorkspaceStrip.defaultPersistent
 
+    /// `misc.cycle_empty_workspaces`. Whether the padding above is on the ring TAB walks, or
+    /// only the slots the strip earned. The strip is drawn the same either way — this is the
+    /// layout's own reading of it, not the bar's.
+    public var cycleEmptyWorkspaces = true
+
     public init(options: DwindleOptions = DwindleOptions(), gaps: Gaps = Gaps()) {
         self.options = options
         self.gaps = gaps
@@ -635,9 +640,16 @@ public final class WorkspaceManager {
     /// out to — rather than all ten. So a press never lands on a slot you cannot see, and
     /// never skips one you can: the strip is the map, and TAB walks it. With nothing else on
     /// it the press does nothing, and the workspace you are on is always on it.
+    ///
+    /// Unless `cycleEmptyWorkspaces` is off, in which case the map is the strip *before* it was
+    /// padded: the workspaces with windows on them and the ones on screen, which is what
+    /// `WorkspaceStrip.slots` earns with no floor to pad to (#150). The bar still draws its
+    /// five slots; the ring just does not stop at the empty ones. The workspace you are on is
+    /// still always on it, being visible, so a press on an empty workspace still goes somewhere.
     public func switchToRelativeWorkspace(_ delta: Int) {
         let current = focusedWorkspaceIndex
-        let ring = WorkspaceStrip.slots(for: stripStates(), persistent: persistentWorkspaces)
+        let ring = WorkspaceStrip.slots(for: stripStates(),
+                                        persistent: cycleEmptyWorkspaces ? persistentWorkspaces : 0)
         guard ring.count > 1, let position = ring.firstIndex(of: current) else { return }
         var next = (position + delta) % ring.count
         if next < 0 { next += ring.count }

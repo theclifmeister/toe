@@ -181,6 +181,15 @@ prevent_hiding = true
 # choice you made rather than a window arrangement toe worked out for you.
 restore_session = true
 
+# SUPER+TAB walks the slots on the menu bar, and with two workspaces in use that is three empty
+# ones on the way from 1 to 4 — bar.persistent_workspaces pads the strip to five, and a press
+# visits every slot it can see. Set false and TAB skips the padding: only the workspaces with
+# windows on them, plus the one you are on, are on the ring. The bar keeps its five slots either
+# way; this changes what TAB does with them, not what is drawn. The sideways Dock swipe walks the
+# same ring TAB does, so it follows this too. SUPER+SPACE > Setup has this switch as well, and
+# throwing it there rewrites this line.
+cycle_empty_workspaces = true
+
 [cli]
 # `toe` is a command line as well as a window manager. Run with a verb it talks to the copy already
 # running, over a socket at ~/.local/state/toe/toe.sock — 0600, in a 0700 directory, and refused to
@@ -291,7 +300,8 @@ font_size  = 18
 # ── Cycling ───────────────────────────────────────────────────────────────────
 # next/prev walk exactly the slots on the menu bar — the workspaces in use, plus the empty ones
 # bar.persistent_workspaces pads them out to — so a press never lands somewhere you cannot see
-# and never skips somewhere you can.
+# and never skips somewhere you can. misc.cycle_empty_workspaces = false leaves the padding out
+# of the ring, so TAB goes straight to the next workspace with windows on it.
 "super-tab"       = "workspace next"
 "super-shift-tab" = "workspace prev"
 "super-ctrl-tab"  = "workspace previous"

@@ -160,7 +160,9 @@ Other sections worth knowing about:
 - `[floating]` — the sizes `SUPER` + `T` cycles through.
 - `[gestures]` and `[misc]` — the switches for the Dock swipes, the Mission Control shortcuts, the
   wallpaper click, macOS's edge tiling, Dock auto-hide, un-hiding ⌘H'd apps and restoring the
-  layout across restarts.
+  layout across restarts. `[misc] cycle_empty_workspaces = false` makes `SUPER` + `TAB` skip the
+  empty slots on the bar and go straight to the next workspace with windows on it — Setup in the
+  quick menu has the same switch.
 - `[animations] slide_on_swipe` — slide the screen on a swipe the way Spaces does. Off by
   default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
   menu flips it.
