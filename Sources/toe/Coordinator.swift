@@ -509,6 +509,9 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.floatingSize = config.floating
         // Both the strip and `workspace next` read this: the bar draws the slots, TAB walks them.
         workspaces.persistentWorkspaces = config.bar.persistentWorkspaces
+        // ...unless this says TAB walks only the ones with windows on them. The strip does not
+        // read it: the bar is drawn the same either way.
+        workspaces.cycleEmptyWorkspaces = config.misc.cycleEmptyWorkspaces
         tracker.floatRules = config.floatRules
         border.apply(config.border)
         status.persistentWorkspaces = config.bar.persistentWorkspaces

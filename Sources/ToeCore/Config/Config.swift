@@ -138,6 +138,11 @@ public struct MiscConfig: Equatable {
     /// `SessionSnapshot`; off means toe starts from an empty first workspace every time and
     /// leaves nothing behind in `~/.local/state/toe`.
     public var restoreSession: Bool = true
+    /// Whether `workspace next` / `prev` visit the empty slots `bar.persistent_workspaces` pads
+    /// the strip out to. On, TAB walks the bar exactly as drawn; off, it walks only the
+    /// workspaces with windows on them — the bar keeps its padding either way. See
+    /// `WorkspaceManager.switchToRelativeWorkspace`.
+    public var cycleEmptyWorkspaces: Bool = true
     public init() {}
 }
 
@@ -655,6 +660,13 @@ public struct Config: Equatable {
                     config.misc.restoreSession = v
                 } else {
                     config.warnings.append("misc.restore_session: must be true or false, using \(config.misc.restoreSession)")
+                }
+            }
+            if let raw = m["cycle_empty_workspaces"] {
+                if let v = raw.boolValue {
+                    config.misc.cycleEmptyWorkspaces = v
+                } else {
+                    config.warnings.append("misc.cycle_empty_workspaces: must be true or false, using \(config.misc.cycleEmptyWorkspaces)")
                 }
             }
         }

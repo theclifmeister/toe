@@ -481,6 +481,41 @@ h.test("workspace next walks the padded slots the strip is showing") { t in
     t.equal(wm.focusedWorkspaceIndex, 9, "prev walks the same ring backwards")
 }
 
+h.test("cycle_empty_workspaces off takes the padding off the ring and leaves it on the bar") { t in
+    // The same 1, 4 and 9 with the same five-slot strip, but TAB no longer stops at 2 and 3.
+    // The bar is not consulted: it still pads to five, so what is drawn and what is walked
+    // part company here on purpose — that is the whole setting (#150).
+    let wm = WorkspaceManager()
+    wm.cycleEmptyWorkspaces = false
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+
+    wm.addWindow(1)
+    wm.switchTo(workspace: 4); wm.addWindow(2)
+    wm.switchTo(workspace: 9); wm.addWindow(3)
+    wm.switchTo(workspace: 1)
+
+    t.equal(WorkspaceStrip.slots(for: wm.stripStates(), persistent: wm.persistentWorkspaces),
+            [1, 2, 3, 4, 9], "the strip is still padded to five")
+
+    var walked: [Int] = []
+    for _ in 1...3 { wm.switchToRelativeWorkspace(1); walked.append(wm.focusedWorkspaceIndex) }
+    t.equal(walked, [4, 9, 1], "TAB visits only the workspaces with windows, and rounds")
+    wm.switchToRelativeWorkspace(-1)
+    t.equal(wm.focusedWorkspaceIndex, 9, "prev walks the same ring backwards")
+
+    // An empty workspace you are on is visible, and visible earns a slot without padding — so
+    // a press from there still goes somewhere rather than finding no ring to be on.
+    wm.switchTo(workspace: 6)
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 9, "from empty 6 the next busy one is 9")
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 1, "and 6 fell off the ring the moment it was left")
+
+    wm.cycleEmptyWorkspaces = true
+    wm.switchToRelativeWorkspace(1)
+    t.equal(wm.focusedWorkspaceIndex, 2, "back on, the padding is back on the ring")
+}
+
 h.test("workspace next stops padding once the strip is full") { t in
     // 1, 2, 3, 5, 6 and 9 in use is already six slots, so no empty workspace joins the ring —
     // and 4, sitting between two busy neighbours, is the one a naive `index <= persistent`
@@ -1774,6 +1809,18 @@ h.test("dock swipe swallowing is configurable") { t in
             "and says so in the menu bar")
 }
 
+h.test("cycle_empty_workspaces is on by default, and a bad value keeps it on") { t in
+    t.equal(Config.makeDefault().misc.cycleEmptyWorkspaces, true, "the shipped behaviour")
+    t.equal(try Config.parse(Config.defaultTOML).misc.cycleEmptyWorkspaces, true,
+            "and the shipped file says so in as many words")
+    t.equal(try Config.parse("[misc]\ncycle_empty_workspaces = false").misc.cycleEmptyWorkspaces,
+            false, "false is the opt-in")
+    let bad = try Config.parse("[misc]\ncycle_empty_workspaces = \"no\"")
+    t.equal(bad.misc.cycleEmptyWorkspaces, true, "a string is not a switch, so the default holds")
+    t.expect(bad.warnings.contains { $0.hasPrefix("misc.cycle_empty_workspaces") },
+             "and the tooltip names the key")
+}
+
 h.test("the slide on a swipe is configurable and off by default") { t in
     let c = Config.makeDefault()
     t.equal(c.animations.slideOnSwipe, false, "off until asked for: it needs Screen Recording")
@@ -2779,7 +2826,8 @@ h.test("a submenu is entered, backed out of, and clears the query on the way in"
     t.equal(m.breadcrumb, ["Setup"], "the level is named")
     t.equal(m.prompt, "Setup…", "and the placeholder says where you are")
     t.equal(m.visible.map(\.title),
-            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
+             "Cycle empty workspaces"],
             "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
     t.equal(m.pop(), .closed, "and closes at the root")
@@ -2906,8 +2954,8 @@ h.test("the switches live under Setup, and each row is the line it writes") { t 
         return rows
     }
     let shipped = try Config.parse(Config.defaultTOML)
-    t.equal(setup(shipped).map(\.title).suffix(3),
-            ["Workspace slide", "Focus border", "Auto-hide Dock"],
+    t.equal(setup(shipped).map(\.title).suffix(4),
+            ["Workspace slide", "Focus border", "Auto-hide Dock", "Cycle empty workspaces"],
             "toe's own switches, under the config and the startup row")
 
     // Each switch is checked through the writer the menu throws it with, against the parser the
@@ -2956,7 +3004,8 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // Omarchy's `setup.config` first, then toe's own row — the ported rows lead.
     let shipped = try rows(Config.defaultTOML)
     t.equal(shipped.map(\.title),
-            ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
+             "Cycle empty workspaces"],
             "every row, Omarchy's leading")
     t.equal(shipped.first?.action,
             .run(.exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml")),
@@ -2975,7 +3024,8 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // An exec that opens something else is not an editor for this file.
     let unrelated = try rows("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n")
     t.equal(unrelated.map(\.title),
-            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
+             "Cycle empty workspaces"],
             "no binding that opens the config, no row offering to")
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
                            config: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n"))
@@ -2986,7 +3036,8 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // The row is there even when the startup toggle cannot be.
     let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
     t.equal(buildDir.map(\.title),
-            ["Config", "Workspace slide", "Focus border", "Auto-hide Dock"],
+            ["Config", "Workspace slide", "Focus border", "Auto-hide Dock",
+             "Cycle empty workspaces"],
             "the rows that work are still offered")
 }
 
