@@ -59,7 +59,11 @@ public enum StateReporter {
         var windows: [WindowReport] = []
         for window in tracked.sorted(by: { $0.id < $1.id }) {
             let id = window.id
-            let index = workspaces.workspaceIndex(of: id)
+            // A suspended window is reported on the workspace it will go back to, and hidden:
+            // it is on a Space the user is not looking at, which to a reader is the same fact a
+            // stashed window's `hidden` states — toe has it, and it is not on screen.
+            let suspension = workspaces.suspended[id]
+            let index = workspaces.workspaceIndex(of: id) ?? suspension?.workspace
             windows.append(WindowReport(
                 id: id,
                 app: name(of: window, appName: appName),
@@ -70,7 +74,7 @@ public enum StateReporter {
                 frame: plan.frames[id] ?? plan.floating[id],
                 floating: workspaces.isFloating(id),
                 focused: id == focused,
-                hidden: plan.stashed.contains(id)))
+                hidden: plan.stashed.contains(id) || suspension != nil))
         }
 
         let visible = workspaces.visibleWorkspaceIndices

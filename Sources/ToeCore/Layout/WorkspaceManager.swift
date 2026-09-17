@@ -212,6 +212,76 @@ public final class WorkspaceManager {
         }
         floatingStage.removeValue(forKey: id)
         focusHistory.removeAll { $0 == id }
+        suspended.removeValue(forKey: id)
+    }
+
+    // MARK: - Suspension
+
+    /// Where a suspended window will go back: its workspace, and the tile it split from.
+    ///
+    /// The anchor is the leaf that took the window's space when it left — `remove` hands the
+    /// parent's box to the sibling — so re-inserting beside it splits that space again and the
+    /// window lands roughly where it was. A sibling that was a subtree is represented by its
+    /// first leaf, which is as close as a binary tree gets to "the same place".
+    public struct Suspension: Equatable {
+        public var workspace: Int
+        public var anchor: WindowID?
+
+        public init(workspace: Int, anchor: WindowID?) {
+            self.workspace = workspace
+            self.anchor = anchor
+        }
+    }
+
+    /// Tiles that have left the tree without leaving toe — on another Space, for now. See
+    /// `Presence`. Not in the session snapshot: a window that is fullscreen when toe restarts
+    /// is one `isManageable` turns away, and it is adopted afresh when it next takes the focus.
+    public private(set) var suspended: [WindowID: Suspension] = [:]
+
+    /// Take a tiled window out of its tree without forgetting it, so its siblings take the
+    /// space while it is on a Space the user is not looking at. What `kAXWindowMiniaturized`
+    /// does to a tile, with a way back.
+    ///
+    /// Floats are not suspended: a float takes no space, so there is no hole to close.
+    /// - Returns: whether the window was a tile, and has now left the tree.
+    @discardableResult
+    public func suspend(_ id: WindowID) -> Bool {
+        guard let index = workspaceIndex(of: id), let ws = workspaces[index],
+              let node = ws.layout.node(for: id)
+        else { return false }
+        let anchor = node.sibling?.leaves().first?.window
+        ws.layout.remove(id)
+        focusHistory.removeAll { $0 == id }
+        suspended[id] = Suspension(workspace: index, anchor: anchor)
+        return true
+    }
+
+    /// Put a suspended window back on its workspace, beside the tile it left — or, when that
+    /// tile has gone in the meantime, where a new window would go. The window takes the
+    /// focus: it is the one the user has just brought back.
+    ///
+    /// - Returns: the workspace it went back to, or nil when nothing was suspended under `id`.
+    @discardableResult
+    public func resume(_ id: WindowID) -> Int? {
+        guard let record = suspended.removeValue(forKey: id) else { return nil }
+        let ws = workspace(record.workspace)
+        guard !ws.windows.contains(id) else { return record.workspace }
+        let anchor = record.anchor.flatMap { ws.layout.contains($0) ? $0 : nil }
+            ?? self.anchor(on: ws, excluding: id)
+        ws.layout.insert(id, anchor: anchor, focalPoint: focalPoint(on: ws))
+        noteFocus(id)
+        return record.workspace
+    }
+
+    /// The visible plan's tiles, by the display each is on — the shape `Presence.assess`
+    /// wants, since it judges a display at a time.
+    public func visibleTilesByMonitor() -> [UInt32: Set<WindowID>] {
+        var out: [UInt32: Set<WindowID>] = [:]
+        for index in visibleWorkspaceIndices {
+            guard let ws = workspaces[index] else { continue }
+            out[ws.monitorID, default: []].formUnion(ws.layout.windowIDs)
+        }
+        return out
     }
 
     /// Walk a window one step around `togglefloating`'s cycle: tiled, floating at the first

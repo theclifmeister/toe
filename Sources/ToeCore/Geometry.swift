@@ -42,6 +42,15 @@ public struct Box: Equatable, Hashable, Sendable, Codable {
         p.x >= x && p.x < maxX && p.y >= y && p.y < maxY
     }
 
+    /// Whether `other` lies entirely inside this box, edges included — so a box contains
+    /// itself. Half a point of slack, because the two sides of this question come from
+    /// different sources (`kCGWindowBounds` and `NSScreen.visibleFrame`) and a display's
+    /// usable area is not always a whole number of points.
+    public func contains(_ other: Box) -> Bool {
+        other.minX >= minX - 0.5 && other.minY >= minY - 0.5
+            && other.maxX <= maxX + 0.5 && other.maxY <= maxY + 0.5
+    }
+
     /// Hyprland's `vecToRectDistanceSquared` — zero when the point is inside the box.
     public func distanceSquared(to p: Point) -> Double {
         let dx = max(0.0, minX - p.x, p.x - maxX)
