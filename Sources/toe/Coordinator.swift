@@ -58,6 +58,18 @@ final class Coordinator: WindowTrackerDelegate {
     /// plain reload does not touch what you are looking at.
     private var pictureFrom: String?
     private let wallpaper = Wallpaper()
+    /// The applications on the machine, for the `Apps` level — the last scan's answer.
+    ///
+    /// Held rather than read at the open, unlike `themes`: the themes directory is a dozen
+    /// folders and a listing, while this is a hundred and twenty bundles and a `displayName`
+    /// each, which is fifty milliseconds the first time the disk is cold. That is a pause
+    /// between the key and the menu, so the scan runs off the main thread — once at start, so
+    /// the first open has a list, and again on every open, so an application installed since
+    /// is in the list the *next* time. `rescanApps` says how the answer reaches an open menu.
+    private var apps: [AppRef] = []
+    /// One scan in flight at a time. A second open while the first scan is still reading
+    /// would start another walk of the same folders for the same answer.
+    private var scanningApps = false
     /// The bytes of the config last loaded, so the same file arriving three times over — the
     /// directory write, the rename, and the reload a theme pick asks for directly — costs one
     /// reload rather than three. See `loadConfig(force:)`.
@@ -266,6 +278,9 @@ final class Coordinator: WindowTrackerDelegate {
         // and then gives way to the themes it was waiting for, without the menu having to be
         // closed and opened again to notice.
         available.onChange = { [weak self] in self?.refreshMenu() }
+        // So that the first SUPER+SPACE already has an Apps row rather than one that appears a
+        // moment after the menu does.
+        rescanApps()
 
         watcher = ConfigWatcher(url: Coordinator.configURL)
         watcher?.onChange = { [weak self] in self?.loadConfig() }
@@ -708,7 +723,8 @@ final class Coordinator: WindowTrackerDelegate {
                          // on the open: it is one small file, the row it draws is the whole of
                          // what toe says about installing it, and a file somebody deleted by
                          // hand should stop being ticked without a reload.
-                         skill: SkillStore.state())
+                         skill: SkillStore.state(),
+                         apps: apps)
     }
 
     /// Takes a theme off the disk, and off your border if you were wearing it.
@@ -1011,6 +1027,30 @@ final class Coordinator: WindowTrackerDelegate {
         status.update(workspaces: workspaceStates(),
                       warnings: warnings + setupWarnings + runtimeWarnings.values.sorted(),
                       accessibilityGranted: AXIsProcessTrusted())
+    }
+
+    /// Reads the application folders again, off the main thread, and pushes the answer into
+    /// the menu if it is open and the list changed.
+    ///
+    /// Pushed rather than waited for: the open path hands over the list it has, and if this
+    /// scan finds a difference the menu is rebuilt under the user the way a theme catalogue
+    /// arriving rebuilds it — `MenuState.rebuild` keeps them on their level and their row. In
+    /// practice the difference is the first open of a fresh process, when the start-up scan
+    /// has not finished, or an application installed since the last open; every other time the
+    /// answer matches and nothing is redrawn.
+    private func rescanApps() {
+        guard !scanningApps else { return }
+        scanningApps = true
+        DispatchQueue.global(qos: .utility).async {
+            let found = Apps.ordered(AppLibrary.installed())
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                scanningApps = false
+                guard found != apps else { return }
+                apps = found
+                refreshMenu()
+            }
+        }
     }
 
     /// Pushes the theme state into the menu, if it is open.
@@ -2253,10 +2293,13 @@ final class Coordinator: WindowTrackerDelegate {
         case .menu(let route):
             // `styleMenu()` re-reads the themes directory here rather than relying on the last
             // reload, which is what makes a theme folder you created a moment ago appear the
-            // first time you look. It is a directory listing; nothing is opened.
+            // first time you look. It is a directory listing; nothing is opened. The
+            // application folders are the exception — see `apps` — and are read behind the
+            // menu rather than in front of it.
             quickMenu.toggle(route: route, config: config,
                              usable: workspaces.monitor(id: workspaces.focusedMonitorID)?.usable,
                              style: styleMenu())
+            rescanApps()
 
         case .quit:
             // Over the socket this is reached one turn of the main queue after the batch that

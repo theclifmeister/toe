@@ -9,6 +9,9 @@ public enum MenuOutcome: Equatable {
     case toggleLoginItem
     case toggleSetting(ConfigSwitch)
     case page(MenuPage)
+    /// Open the application at this path — an `Apps` row. Beside `toggleLoginItem` rather than
+    /// inside `run`, because it is not a `Command`: see `MenuItem.Action.launch`.
+    case launch(String)
     /// Nothing under the cursor — an empty list, filtered down to no rows at all.
     case none
 }
@@ -146,6 +149,8 @@ public struct MenuState: Equatable {
             return .toggleLoginItem
         case .toggleSetting(let setting):
             return .toggleSetting(setting)
+        case .launch(let path):
+            return .launch(path)
         case .note:
             // Pressing it does nothing, and `.none` is what the menu already does when there is
             // nothing to do — the panel stays open on the row you are looking at.

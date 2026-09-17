@@ -30,6 +30,7 @@ public struct MenuRoute: Equatable, Sendable {
 
     public static let root = MenuRoute()
     public static let keybindings = MenuRoute(page: .keybindings)
+    public static let apps = MenuRoute(path: ["Apps"])
     public static let learn = MenuRoute(path: ["Learn"])
     public static let style = MenuRoute(path: ["Style"])
     public static let theme = MenuRoute(path: ["Style", "Theme"])
@@ -51,6 +52,13 @@ public struct MenuItem: Equatable {
         case download, trash, info, globe
         /// The command line, and the one row that is about it — see `MenuModel.agentSkill`.
         case terminal
+        /// The `Apps` row — a grid of squares, which is what the glyph Omarchy puts on it is.
+        case apps
+        /// An application's own icon, by the bundle it is read from. Still symbolic to ToeCore —
+        /// a path is not a picture — and it is the UI layer that asks `NSWorkspace` what the
+        /// bundle looks like, so the selftest can assert a row carries one without a pixel in
+        /// sight. The one icon that is not a glyph, and the reason `foundAt` treats it apart.
+        case application(path: String)
     }
 
     public indirect enum Action: Equatable {
@@ -66,6 +74,12 @@ public struct MenuItem: Equatable {
         /// themes…". The alternative was leaving the level looking like a short list rather than
         /// an unfinished one, which is the sort of thing you stare at wondering if it is broken.
         case note
+        /// Open the application at this path. Its own case rather than a `.run(.exec("open …"))`
+        /// for two reasons: an `exec` goes through `/bin/sh`, so a path with an apostrophe in it
+        /// (`Sid Meier's Civilization V.app`) would need quoting that gets it wrong somewhere; and
+        /// a `Command` is a verb in the config and on the command line, which a menu row that
+        /// launches whatever happens to be in `/Applications` is not.
+        case launch(String)
     }
 
     public let title: String
@@ -107,17 +121,26 @@ public struct MenuItem: Equatable {
         self.action = action
     }
 
-    /// The same row as a search hit: it gains the path it was found at and loses its icon.
+    /// The same row as a search hit: it gains the path it was found at and loses its glyph.
     ///
-    /// Losing the icon is the point. One level of the tree is a handful of rows that mostly
-    /// carry a glyph, so the icons form a column and the titles start after it. A search mixes
+    /// Losing the glyph is the point. One level of the tree is a handful of rows that mostly
+    /// carry one, so the icons form a column and the titles start after it. A search mixes
     /// levels, and most of what it turns up — a theme, a wallpaper, a keybinding — never had an
     /// icon, so that column is a column no longer: a few rows indent while the rest do not, and
     /// the eye reads the ragged left edge before it reads any of the titles. Dropping the glyph
     /// costs a hint that the subtitle now gives better, and buys back the straight edge.
+    ///
+    /// An application's icon is not a glyph and stays. It is not a hint about the row, it is
+    /// what the row *is* — the thing that tells `Zen` the browser from `Install › Zen` at a
+    /// glance, and what Omarchy's own search keeps on an app row while every other row goes
+    /// bare. Inside the `Apps` level it is also what keeps typing from turning a launcher into a
+    /// list that lost its pictures on the first keystroke; there every row has one, so the edge
+    /// stays straight anyway.
     public func foundAt(path: String?) -> MenuItem {
-        MenuItem(title: title, subtitle: path, icon: nil, value: value, progress: progress,
-                 isDisabled: isDisabled, action: action)
+        let kept: Icon?
+        if case .application = icon { kept = icon } else { kept = nil }
+        return MenuItem(title: title, subtitle: path, icon: kept, value: value, progress: progress,
+                        isDisabled: isDisabled, action: action)
     }
 
     /// walker marks the rows that lead somewhere with a trailing `›`, right-aligned.
@@ -176,11 +199,17 @@ public struct StyleMenu: Equatable {
     /// would write. nil where nobody has asked — the selftest, and every construction of this
     /// value that is not the menu opening — and the row is then left out rather than guessing.
     public var skill: SkillReport?
+    /// The applications on the machine, in the order the `Apps` level lists them — see
+    /// `Apps.ordered`. Empty is a machine the scan found nothing on, or has not looked at yet,
+    /// and the row is then left out: the Setup rule, that a row into an empty level is worse
+    /// than no row. Here for the reason the skill is — one value, threaded once.
+    public var apps: [AppRef]
 
     public init(themes: [ThemeRef] = [], available: [RemoteTheme] = [], fetching: Bool = false,
                 current: String? = nil,
                 backgrounds: [String] = [], currentBackground: String? = nil,
-                downloading: ThemeDownload? = nil, skill: SkillReport? = nil) {
+                downloading: ThemeDownload? = nil, skill: SkillReport? = nil,
+                apps: [AppRef] = []) {
         self.themes = themes
         self.available = available
         self.fetching = fetching
@@ -189,6 +218,7 @@ public struct StyleMenu: Equatable {
         self.currentBackground = currentBackground
         self.downloading = downloading
         self.skill = skill
+        self.apps = apps
     }
 }
 
@@ -289,13 +319,21 @@ public enum MenuModel {
     public static func root(loginItem: LoginItemState, config: Config,
                             style: StyleMenu = StyleMenu(),
                             version: String? = nil) -> [MenuItem] {
-        // Omarchy's root order, with the rows toe has no analogue for left out: Apps, **Learn**,
-        // Trigger, **Style**, **Setup**, **Install**, **Remove**, Update, **About**, System.
-        // Quit is toe's own and goes last, after everything ported.
-        var items: [MenuItem] = [
-            MenuItem(title: "Learn", icon: .book, action: .submenu(learn())),
-            MenuItem(title: "Style", icon: .paintbrush, action: .submenu(MenuModel.style(style))),
-        ]
+        // Omarchy's root order, with the rows toe has no analogue for left out: **Apps**,
+        // **Learn**, Trigger, **Style**, **Setup**, **Install**, **Remove**, Update, **About**,
+        // System. Quit is toe's own and goes last, after everything ported.
+        var items: [MenuItem] = []
+        // Upstream's first row, and a provider level rather than a written one: its rows are
+        // whatever the machine has at the moment you look, the way `Style › Theme` is the
+        // themes directory. Absent when the scan found nothing — a sandbox, or the first open
+        // before the scan has answered — for the Setup rule below.
+        let appRows = apps(style)
+        if !appRows.isEmpty {
+            items.append(MenuItem(title: "Apps", icon: .apps, action: .submenu(appRows)))
+        }
+        items.append(MenuItem(title: "Learn", icon: .book, action: .submenu(learn())))
+        items.append(MenuItem(title: "Style", icon: .paintbrush,
+                              action: .submenu(MenuModel.style(style))))
         // A row that leads into an empty level is worse than no row, so the parent goes with an
         // empty Setup. That is Omarchy's rule for a submenu whose children have all failed their
         // `when`, applied here by hand because toe's levels are built rather than filtered. The
@@ -323,6 +361,21 @@ public enum MenuModel {
         }
         items.append(MenuItem(title: "Quit", icon: .power, action: .run(.quit)))
         return items
+    }
+
+    /// Omarchy's `Apps` level: every application found, each wearing its own icon, and Return
+    /// launches it.
+    ///
+    /// Shaped like the theme list — no value column, nothing ticked, nothing dimmed. Omarchy
+    /// shows no running state on an app row, and toe has no more to say about an application
+    /// than that it is there: the row is the name and the picture, and the picture is the one
+    /// thing here that is not a glyph from the menu font, which is why `MenuItem.Icon` has a
+    /// case that names a path.
+    public static func apps(_ style: StyleMenu) -> [MenuItem] {
+        style.apps.map { app in
+            MenuItem(title: app.name, icon: .application(path: app.path),
+                     action: .launch(app.path))
+        }
     }
 
     /// Omarchy's `Learn` level: the keybindings, then the manuals.

@@ -103,9 +103,14 @@ a hole on the desktop behind it.
 other workspace in use as its digit, and workspaces 1–5 always present. Click a workspace to
 switch to it, or the `T` at the front to open the quick menu.
 
-**The quick menu** (`SUPER` + `SPACE`) mirrors Omarchy's: Learn, Trigger, Style, Setup, Install,
+**The quick menu** (`SUPER` + `SPACE`) mirrors Omarchy's: Apps, Learn, Style, Setup, Install,
 Remove, About and Quit. Arrows move, `ENTER` chooses, `ESC` backs out, and typing searches the
 whole tree — type `startup` at the top and *Run on startup* comes back ready to pick.
+
+**Apps** is the launcher: every application in `/Applications`, `~/Applications` and
+`/System/Applications`, with its icon, and `ENTER` opens it. Typing at the top of the menu finds
+an application the same way it finds a row — `saf` and *Safari* is the first hit — and
+`"super-alt-space" = "menu apps"` in `toe.toml` is a key that opens straight onto the list.
 
 **Themes.** Style › Theme lists the themes in `~/.config/toe/themes`, and Install › Style › Theme
 lists everything Omarchy publishes; choosing one there downloads it and applies it. A theme is a

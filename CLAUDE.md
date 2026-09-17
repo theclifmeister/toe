@@ -97,6 +97,14 @@ Two divergences are deliberate and should stay:
 - **`About` is a `.note` row carrying the version**, where upstream's opens a branding window.
   toe has no window to open and one fact to report.
 
+**`Apps` is a provider level** in Omarchy's sense — its rows come from the machine, not the
+menu file. `AppLibrary` (in `toe`) scans the application folders off the main thread, once at
+start and again on every open, and the Coordinator holds the last answer; `Apps.ordered` and
+`MenuModel.apps` (in `ToeCore`) do everything after that. An app row's icon is `.application(path:)`,
+the one `MenuItem.Icon` that is a picture rather than a glyph, and the one `foundAt` keeps on a
+search hit. Pressing one is `MenuOutcome.launch`, not a `Command`: it is not a verb, and a path
+with an apostrophe in it does not want to go through `/bin/sh`.
+
 `disabled` (dim, ticked, unselectable, omitted from search) is upstream's guard for "you already
 have this" and is why `Install › Style › Theme` can list the whole catalogue. `MenuState` enforces
 it in four places — `move`, `select`, `activate` and the search filter — so a new way of reaching a

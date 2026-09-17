@@ -343,9 +343,11 @@ font_size  = 18
 # ⌥Space and ⌥K away from typing ` ` and ˚ for as long as toe runs.
 #
 # `menu` takes a route, the way `omarchy-menu toggle <route>` does, and opens the tree at that
-# level: root, keybindings, learn, style, theme, background, setup, install, remove. Pressing the
-# same key again closes; pressing another one moves to its level. Omarchy's own aliases work too,
-# so `menu settings` and `menu wallpaper` are lines you can copy across.
+# level: root, keybindings, apps, learn, style, theme, background, setup, install, remove.
+# Pressing the same key again closes; pressing another one moves to its level. Omarchy's own
+# aliases work too, so `menu settings` and `menu wallpaper` are lines you can copy across.
+# `menu apps` is the launcher — every application on the machine, and ENTER opens one:
+#   "super-alt-space" = "menu apps"
 "super-space"   = "menu"
 "super-k"       = "keybindings"
 # Omarchy's two look-and-feel keys, doing what they do there: SUPER+CTRL+SPACE opens the

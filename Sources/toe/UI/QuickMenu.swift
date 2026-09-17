@@ -296,6 +296,13 @@ final class QuickMenu {
             setting.set(on, in: &shown)
             state?.replaceLevel(with: MenuModel.setup(loginItem: loginItem, config: shown))
             layoutAndRender()
+        case .launch(let path):
+            // Closed first, for the reason an `exec` is: the application is about to come
+            // forward, and the panel wants to be gone and the keyboard handed back before it
+            // does. Not through `onCommand`, because it is not a `Command` — see
+            // `MenuItem.Action.launch` — and the Coordinator has nothing to add to it.
+            close()
+            DispatchQueue.main.async { AppLibrary.launch(path) }
         case .run(let command):
             // Theme rows stay — `Command.keepsMenuOpen` says why at length. Everything else
             // goes: an `exec` brings another application forward and `quit` tears the process

@@ -144,7 +144,7 @@ public enum CommandCatalogue {
         CommandDescriptor(verb: "removeskill",
                           summary: "Take that skill file away again.",
                           sample: "removeskill"),
-        CommandDescriptor(verb: "menu", argument: "[root|keybindings|style|theme|background|setup|install|remove]",
+        CommandDescriptor(verb: "menu", argument: "[root|keybindings|apps|learn|style|theme|background|setup|install|remove]",
                           summary: "Open the quick menu, at a level.",
                           sample: "menu theme"),
         CommandDescriptor(verb: "reload",
