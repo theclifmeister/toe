@@ -145,6 +145,11 @@ public enum SkillDocument {
           to have done nothing. The window itself leaves the layout for as long as it is
           fullscreen — its neighbours take its tile, and it is reported `hidden` on the workspace
           it will go back to — and takes a tile again when it returns.
+        - **Closing an application's last window quits the application.** `killactive` on a
+          window with no siblings — on any workspace, minimized, or ones toe does not tile —
+          sends the application ⌘Q rather than ⌘W, unless `[misc] quit_on_last_window` is off.
+          The application may put up a save prompt and the user may decline it; check
+          `query state` before assuming the window has gone. The Finder is never quit.
         - **Floating windows are the user's.** toe writes a floating window's frame once and never
           re-asserts it, on purpose. Do not repeatedly place one.
         - **Never write to a window being dragged.** toe already refuses; a burst of commands

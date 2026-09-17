@@ -1821,6 +1821,61 @@ h.test("cycle_empty_workspaces is on by default, and a bad value keeps it on") {
              "and the tooltip names the key")
 }
 
+h.test("quit_on_last_window is on by default, and a bad value keeps it on") { t in
+    t.equal(Config.makeDefault().misc.quitOnLastWindow, true, "SUPER+W means what it means on Omarchy")
+    t.equal(try Config.parse(Config.defaultTOML).misc.quitOnLastWindow, true,
+            "and the shipped file says so in as many words")
+    t.equal(try Config.parse("[misc]\nquit_on_last_window = false").misc.quitOnLastWindow,
+            false, "false is ⌘W, always")
+    let bad = try Config.parse("[misc]\nquit_on_last_window = \"never\"")
+    t.equal(bad.misc.quitOnLastWindow, true, "a string is not a switch, so the default holds")
+    t.expect(bad.warnings.contains { $0.hasPrefix("misc.quit_on_last_window") },
+             "and the tooltip names the key")
+}
+
+h.test("killactive quits the application on its last window and only then") { t in
+    func app(_ windows: [WindowID?], bundle: String? = "com.apple.Safari", ordinary: Bool = true)
+        -> CloseVerdict.Application {
+        CloseVerdict.Application(bundleID: bundle, windows: windows, ordinary: ordinary)
+    }
+    func verdict(_ app: CloseVerdict.Application, closing id: WindowID = 7, on: Bool = true) -> CloseVerdict {
+        CloseVerdict.decide(closing: id, of: app, quitOnLastWindow: on)
+    }
+
+    t.equal(verdict(app([7])), .quitApplication, "exactly this window: ⌘Q")
+    // The one outcome that must never happen, in every shape it comes in. The app's own list
+    // is app-wide, so a sibling is a sibling wherever it is — stashed on another workspace,
+    // floating, minimized, fullscreen on a Space of its own, or a panel toe never adopted.
+    t.equal(verdict(app([7, 8])), .closeWindow, "two Safari windows: close this one, keep the other")
+    t.equal(verdict(app([8, 7])), .closeWindow, "in either order")
+    t.equal(verdict(app([7, nil])), .closeWindow,
+            "a window that would not give its id might be a second one, so it counts as one")
+    t.equal(verdict(app([])), .closeWindow, "an application that would not answer is not quit")
+    t.equal(verdict(app([8])), .closeWindow,
+            "a list that does not contain the window being closed is an answer not to trust")
+    t.equal(verdict(app([nil])), .closeWindow, "the same, when the one entry is unreadable")
+
+    t.equal(verdict(app([7], bundle: "com.apple.finder")), .closeWindow,
+            "the Finder has no ⌘Q and is never quit")
+    t.equal(verdict(app([7], bundle: nil)), .quitApplication,
+            "no bundle id is not the Finder — the deny list is by name, and doubt about the name "
+            + "is not doubt about the count")
+    t.equal(verdict(app([7], ordinary: false)), .closeWindow,
+            "an accessory has no Dock tile to stand for a quit, and only loses the window")
+    t.equal(verdict(app([7]), on: false), .closeWindow, "switched off, SUPER+W is ⌘W")
+
+    // The switch is consulted before the application is asked anything: with it off, gathering
+    // the window list would be Accessibility round trips spent on a question with no answer.
+    var asked = false
+    func gathered() -> CloseVerdict.Application { asked = true; return app([7]) }
+    t.equal(CloseVerdict.decide(closing: 7, of: gathered(), quitOnLastWindow: false), .closeWindow,
+            "off")
+    t.equal(asked, false, "and the application was never asked")
+    t.equal(CloseVerdict.decide(closing: 7, of: gathered(), quitOnLastWindow: true), .quitApplication,
+            "on")
+    t.equal(asked, true, "and now it was")
+}
+
 h.test("the slide on a swipe is configurable and off by default") { t in
     let c = Config.makeDefault()
     t.equal(c.animations.slideOnSwipe, false, "off until asked for: it needs Screen Recording")
@@ -2813,7 +2868,9 @@ h.test("typing puts the selection back at the top") { t in
     t.equal(m.selection, 2, "moved down two")
     m.type("q")
     t.equal(m.selection, 0, "a keystroke re-ranks the list, so the old index means nothing")
-    t.equal(m.visible.map(\.title), ["Quit"], "and the list is what was typed")
+    // Two rows, since the Setup switch that makes SUPER+W a quit shares the word; the root
+    // row's exact title ranks it first.
+    t.equal(m.visible.map(\.title), ["Quit", "Quit app on last window"], "and the list is what was typed")
 }
 
 h.test("a submenu is entered, backed out of, and clears the query on the way in") { t in
@@ -2827,7 +2884,7 @@ h.test("a submenu is entered, backed out of, and clears the query on the way in"
     t.equal(m.prompt, "Setup…", "and the placeholder says where you are")
     t.equal(m.visible.map(\.title),
             ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
-             "Cycle empty workspaces"],
+             "Cycle empty workspaces", "Quit app on last window"],
             "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
     t.equal(m.pop(), .closed, "and closes at the root")
@@ -2954,8 +3011,9 @@ h.test("the switches live under Setup, and each row is the line it writes") { t 
         return rows
     }
     let shipped = try Config.parse(Config.defaultTOML)
-    t.equal(setup(shipped).map(\.title).suffix(4),
-            ["Workspace slide", "Focus border", "Auto-hide Dock", "Cycle empty workspaces"],
+    t.equal(setup(shipped).map(\.title).suffix(5),
+            ["Workspace slide", "Focus border", "Auto-hide Dock", "Cycle empty workspaces",
+             "Quit app on last window"],
             "toe's own switches, under the config and the startup row")
 
     // Each switch is checked through the writer the menu throws it with, against the parser the
@@ -3005,7 +3063,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     let shipped = try rows(Config.defaultTOML)
     t.equal(shipped.map(\.title),
             ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
-             "Cycle empty workspaces"],
+             "Cycle empty workspaces", "Quit app on last window"],
             "every row, Omarchy's leading")
     t.equal(shipped.first?.action,
             .run(.exec("open -a \"Visual Studio Code\" ~/.config/toe/toe.toml")),
@@ -3025,7 +3083,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     let unrelated = try rows("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n")
     t.equal(unrelated.map(\.title),
             ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
-             "Cycle empty workspaces"],
+             "Cycle empty workspaces", "Quit app on last window"],
             "no binding that opens the config, no row offering to")
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
                            config: try Config.parse("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n"))
@@ -3037,7 +3095,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
     t.equal(buildDir.map(\.title),
             ["Config", "Workspace slide", "Focus border", "Auto-hide Dock",
-             "Cycle empty workspaces"],
+             "Cycle empty workspaces", "Quit app on last window"],
             "the rows that work are still offered")
 }
 

@@ -2231,7 +2231,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .killActive:
             guard let id = workspaces.focusedWindow, let window = tracker.window(id) else { return }
-            WindowMover.close(window)
+            closeWindow(window)
 
         case .toggleFloating:
             guard let id = workspaces.focusedWindow else { return }
@@ -2504,6 +2504,18 @@ extension Coordinator {
         apply(refocus: refocus)
     }
 
+    /// `killactive`, for both arms of `dispatch`: the close button, or ⌘Q when this is the
+    /// application's last window and `[misc] quit_on_last_window` says so. The decision is
+    /// `CloseVerdict`'s, in ToeCore, so the selftest can hold it to "never quit an application
+    /// that had another window"; what is here is the two system calls either side of it.
+    private func closeWindow(_ window: ManagedWindow) {
+        switch CloseVerdict.decide(closing: window.id, of: WindowMover.application(of: window),
+                                   quitOnLastWindow: config.misc.quitOnLastWindow) {
+        case .closeWindow:     WindowMover.close(window)
+        case .quitApplication: WindowMover.quit(window)
+        }
+    }
+
     /// A command aimed at a window that is not the focused one.
     ///
     /// Only the verbs `Command.acceptsTarget` admits reach this, and the caller has already been
@@ -2515,7 +2527,7 @@ extension Coordinator {
         switch command {
         case .killActive:
             guard let window = tracker.window(id) else { return }
-            WindowMover.close(window)
+            closeWindow(window)
 
         case .toggleFloating:
             workspaces.toggleFloating(id)

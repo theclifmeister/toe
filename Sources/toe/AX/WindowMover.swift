@@ -56,6 +56,29 @@ enum WindowMover {
         guard let button = window.element.elementValue(kAXCloseButtonAttribute) else { return }
         AXUIElementPerformAction(button, kAXPressAction as CFString)
     }
+
+    /// Asks the application to quit — `terminate()`, the quit Apple Event ⌘Q sends, so the
+    /// application closes its own windows and puts up its own "save changes?" first. Never
+    /// `forceTerminate()`: this is a window manager closing a window, not a kill. (`AppIdentity`
+    /// avoids `terminate()` for toe's *own* other copy because AppKit answers the event without
+    /// going near `shutDown`; that is about toe, and here the event is the point.)
+    static func quit(_ window: ManagedWindow) {
+        NSRunningApplication(processIdentifier: window.pid)?.terminate()
+    }
+
+    /// What `CloseVerdict` needs to know about the application a window belongs to, gathered
+    /// only when the verdict asks — one round trip for the window list and one per window for
+    /// its id, on a keypress. The application's own `kAXWindows`, not the tracker's, because
+    /// the tracker only holds what `isManageable` let it adopt, and a minimized window or a
+    /// Preferences panel it never took is a window ⌘Q would close (#156). `kAXWindows` lists a
+    /// window on any Space, which is what makes a fullscreen sibling on a Space of its own count.
+    static func application(of window: ManagedWindow) -> CloseVerdict.Application {
+        let app = NSRunningApplication(processIdentifier: window.pid)
+        return CloseVerdict.Application(
+            bundleID: app?.bundleIdentifier ?? window.bundleID,
+            windows: AX.application(window.pid).windows.map(\.windowID),
+            ordinary: app?.activationPolicy == .regular)
+    }
 }
 
 let kAXEnhancedUserInterface = "AXEnhancedUserInterface"
