@@ -4519,7 +4519,14 @@ h.test("Apps is a provider level: the machine's applications, each wearing its o
     t.expect(m.visible.allSatisfy { $0.icon != nil },
              "without taking the pictures away — every row here has one, so the edge stays straight")
     t.equal(m.visible.first?.subtitle, nil, "and no path, because the search never left the level")
+    t.equal(m.showsPaths, false,
+            "so the rows stay one line tall — grown, the title sat a line above the icon")
     t.equal(m.activate(), .launch("/Applications/Safari.app"), "Return launches the first hit")
+
+    var root = MenuState(root: MenuModel.root(loginItem: .off, config: Config(),
+                                              style: StyleMenu(apps: apps)), visibleRows: 10)
+    root.type("saf")
+    t.equal(root.showsPaths, true, "found from the root, the same rows have a path to show")
 }
 
 h.test("an application found from the root keeps its icon where a glyph would go") { t in

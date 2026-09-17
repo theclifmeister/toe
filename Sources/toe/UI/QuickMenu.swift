@@ -323,10 +323,11 @@ final class QuickMenu {
 
     private func layoutAndRender() {
         guard var current = state else { return }
-        // Rows grow a second line while the list is a search rather than one level of the tree,
-        // and they grow together — a list of rows that were each as tall as their own contents
-        // would be a ragged one.
-        metrics.showsSubtitles = !current.query.isEmpty
+        // Rows grow a second line while the list is a search that reached below the level, and
+        // they grow together — a list of rows that were each as tall as their own contents would
+        // be a ragged one. `MenuState.showsPaths` says why it is the rows that decide and not
+        // the query.
+        metrics.showsSubtitles = current.showsPaths
         let area = usable ?? Coordinates.toAX(NSScreen.main?.visibleFrame ?? .zero)
         let wanted = route.page == .keybindings ? config.menu.listWidth : config.menu.width
         // Clamped, so `list_width = 800` on a laptop is a wide menu rather than one with its

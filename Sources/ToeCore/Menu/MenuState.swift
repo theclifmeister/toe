@@ -63,6 +63,17 @@ public struct MenuState: Equatable {
 
     public var breadcrumb: [String] { titles }
 
+    /// Whether the rows on screen want a second line for the path they were found at.
+    ///
+    /// Asked of the rows rather than of the query. A search grows every row together so the
+    /// list stays a grid, but a search that never left the level — `saf` inside `Apps`, where
+    /// there is nothing below to descend into — turns up rows with no path at all, and growing
+    /// those left each title on the upper line of a row whose icon sat centred on both: the
+    /// text a line above the picture beside it. `foundAt` sets the subtitle only on a hit found
+    /// below the level, so the rows are the authority on whether there is anything to make room
+    /// for.
+    public var showsPaths: Bool { filtered.contains { $0.subtitle != nil } }
+
     /// walker's placeholder line: `Go…` at the root, the level's own name inside it.
     public var prompt: String { (titles.last ?? "Go") + "…" }
 
