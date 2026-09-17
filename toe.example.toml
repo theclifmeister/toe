@@ -181,6 +181,17 @@ restore_session = true
 # throwing it there rewrites this line.
 cycle_empty_workspaces = true
 
+# SUPER+W closes the window. When it is the application's last window, the application is quit
+# as well — what ⌘Q does — because a Mac application with no windows keeps running with a menu
+# bar and a Dock light and nothing to show for it, and on Omarchy a program with no window has
+# exited. Only on the last one: with two Safari windows SUPER+W closes the one under the focus
+# and leaves the other alone. Last means the application's own count, on every workspace and
+# every Space, windows toe never tiled included, so a minimized window or a Preferences panel
+# elsewhere keeps the application running. The Finder is never quit. It is a quit, not a kill:
+# an application with an unsaved document asks about it, and you can say no. Set false and
+# SUPER+W is ⌘W, always. SUPER+SPACE > Setup has this switch too.
+quit_on_last_window = true
+
 [cli]
 # `toe` is a command line as well as a window manager. Run with a verb it talks to the copy already
 # running, over a socket at ~/.local/state/toe/toe.sock — 0600, in a 0700 directory, and refused to

@@ -227,14 +227,15 @@ public struct StyleMenu: Equatable {
 /// The case names the line it writes — which table, which key, and how to read it back — because
 /// everything between the row and the file is otherwise the same code once per switch: the menu
 /// builds a row from `value(in:)`, `MenuState` hands the case straight back, and
-/// `Coordinator.toggle` writes `key` into `table` and reloads. A fifth switch is a case here and
+/// `Coordinator.toggle` writes `key` into `table` and reloads. A sixth switch is a case here and
 /// nothing anywhere else.
 ///
 /// Only settings that are *worth* a row belong here — a switch in the menu is a switch somebody
 /// will throw while looking at what it does, so it wants an effect they can see. The first three
-/// change the screen the moment they are written; the fourth changes the next SUPER+TAB, which
-/// is the key under the same hand that closed the menu, and close enough to count. That is the
-/// bar to clear: `restore_session` shows nothing until the next launch, and is not here.
+/// change the screen the moment they are written; the fourth changes the next SUPER+TAB and the
+/// fifth the next SUPER+W, keys under the same hand that closed the menu, and close enough to
+/// count. That is the bar to clear: `restore_session` shows nothing until the next launch, and
+/// is not here.
 public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     /// `[animations] slide_on_swipe`. The one that can ask for a permission — see
     /// `Coordinator.toggle` on why the flip goes through the file.
@@ -245,6 +246,8 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     case dock
     /// `[misc] cycle_empty_workspaces`. Whether SUPER+TAB stops at the empty slots on the bar.
     case cycleEmpty
+    /// `[misc] quit_on_last_window`. Whether SUPER+W on an application's last window is ⌘Q.
+    case quitOnLast
 
     /// The row's title. Says what the setting does rather than what the key is called, because
     /// the key is one grep away and the row is not.
@@ -254,6 +257,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .border: return "Focus border"
         case .dock:   return "Auto-hide Dock"
         case .cycleEmpty: return "Cycle empty workspaces"
+        case .quitOnLast: return "Quit app on last window"
         }
     }
 
@@ -263,6 +267,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .border: return "border"
         case .dock:   return "misc"
         case .cycleEmpty: return "misc"
+        case .quitOnLast: return "misc"
         }
     }
 
@@ -272,6 +277,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .border: return "enabled"
         case .dock:   return "autohide_dock"
         case .cycleEmpty: return "cycle_empty_workspaces"
+        case .quitOnLast: return "quit_on_last_window"
         }
     }
 
@@ -281,6 +287,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .border: return config.border.enabled
         case .dock:   return config.misc.autohideDock
         case .cycleEmpty: return config.misc.cycleEmptyWorkspaces
+        case .quitOnLast: return config.misc.quitOnLastWindow
         }
     }
 
@@ -292,6 +299,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .border: config.border.enabled = on
         case .dock:   config.misc.autohideDock = on
         case .cycleEmpty: config.misc.cycleEmptyWorkspaces = on
+        case .quitOnLast: config.misc.quitOnLastWindow = on
         }
     }
 }

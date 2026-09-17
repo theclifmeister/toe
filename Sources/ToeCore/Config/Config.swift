@@ -143,6 +143,10 @@ public struct MiscConfig: Equatable {
     /// workspaces with windows on them — the bar keeps its padding either way. See
     /// `WorkspaceManager.switchToRelativeWorkspace`.
     public var cycleEmptyWorkspaces: Bool = true
+    /// Whether `killactive` on an application's last window quits the application — ⌘Q in
+    /// place of ⌘W — so a program with no window left is a program that has exited, as it is
+    /// on Omarchy. See `CloseVerdict` for what counts as last and who is never quit.
+    public var quitOnLastWindow: Bool = true
     public init() {}
 }
 
@@ -667,6 +671,13 @@ public struct Config: Equatable {
                     config.misc.cycleEmptyWorkspaces = v
                 } else {
                     config.warnings.append("misc.cycle_empty_workspaces: must be true or false, using \(config.misc.cycleEmptyWorkspaces)")
+                }
+            }
+            if let raw = m["quit_on_last_window"] {
+                if let v = raw.boolValue {
+                    config.misc.quitOnLastWindow = v
+                } else {
+                    config.warnings.append("misc.quit_on_last_window: must be true or false, using \(config.misc.quitOnLastWindow)")
                 }
             }
         }
