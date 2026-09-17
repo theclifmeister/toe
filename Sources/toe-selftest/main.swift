@@ -3598,7 +3598,11 @@ h.test("a menu binding opens the level Omarchy's own key opens") { t in
             "Omarchy's alias for Setup, which is the name it gives the level")
     t.equal(try CommandParser.parse("menu uninstall"), .menu(.remove), "and for Remove")
     t.equal(try CommandParser.parse("menu install"), .menu(.install), "the level itself")
+    t.equal(try CommandParser.parse("menu apps"), .menu(.apps), "Omarchy's first row")
+    t.equal(try CommandParser.parse("menu applications"), .menu(.apps), "and its aliases")
+    t.equal(try CommandParser.parse("menu app"), .menu(.apps), "both of them")
     t.equal(MenuRoute.theme.path, ["Style", "Theme"], "a route is a path through the tree")
+    t.equal(MenuRoute.apps.path, ["Apps"], "and Apps is one rung in")
 
     t.equal(try CommandParser.parse("removetheme gruvbox"), .removeTheme("gruvbox"),
             "removing one is a command like any other")
@@ -4466,18 +4470,81 @@ h.test("the root is Omarchy's root, with what a Mac cannot do left out") { t in
     // switch is a Setup row here rather than two levels of scaffolding holding it up.
     let full = StyleMenu(themes: [ThemeRef(slug: "gruvbox", name: "Gruvbox")],
                          available: [RemoteTheme(slug: "nord", name: "Nord", backgrounds: [])],
-                         current: "gruvbox", backgrounds: ["a.jpg"])
+                         current: "gruvbox", backgrounds: ["a.jpg"],
+                         apps: [AppRef(name: "Safari", path: "/Applications/Safari.app")])
     let c = try Config.parse(Config.defaultTOML)
     let rows = MenuModel.root(loginItem: .off, config: c, style: full, version: "0.9.7")
     t.equal(rows.map(\.title),
-            ["Learn", "Style", "Setup", "Install", "Remove", "About", "Quit"],
+            ["Apps", "Learn", "Style", "Setup", "Install", "Remove", "About", "Quit"],
             "the same names at the same depth, in the same order")
+    t.equal(rows.first?.icon, .apps, "Apps wears the grid upstream gives it")
+    t.equal(MenuModel.root(loginItem: .off, config: c, style: StyleMenu()).first?.title, "Learn",
+            "and is left out where the scan found nothing, rather than leading into an empty level")
     t.equal(rows.first { $0.title == "About" }?.value, "0.9.7",
             "About is the one fact toe can report about itself, in the second column")
     t.equal(rows.first { $0.title == "About" }?.action, .note, "and nothing to press")
     t.expect(MenuModel.root(loginItem: .off, config: c, style: full)
                 .allSatisfy { $0.title != "About" },
              "a build with no stamped version leaves the row out rather than saying `unknown`")
+}
+
+h.test("Apps is a provider level: the machine's applications, each wearing its own icon") { t in
+    // Omarchy's `apps` row has `provider: "apps"` — its rows come from the desktop entries on the
+    // machine rather than from the menu file. Here the scan hands in `AppRef`s and the level is
+    // one row each: the name, the bundle's own icon, and Return launches it.
+    let found = [AppRef(name: "Zed", path: "/Applications/Zed.app"),
+                 AppRef(name: "activity monitor", path: "/System/Applications/Utilities/Activity Monitor.app"),
+                 AppRef(name: "Safari", path: "/Applications/Safari.app"),
+                 AppRef(name: "Safari", path: "/Users/me/Applications/Safari.app")]
+    let apps = Apps.ordered(found)
+    t.equal(apps.map(\.name), ["activity monitor", "Safari", "Safari", "Zed"],
+            "by name, ignoring case, so the system folder's rows are not all at the end")
+    t.equal(apps[1].path, "/Applications/Safari.app",
+            "two of a name are both listed, and the path is what orders them")
+
+    let rows = MenuModel.apps(StyleMenu(apps: apps))
+    t.equal(rows.map(\.title), apps.map(\.name), "one row per app, in the order handed in")
+    t.equal(rows.first?.icon, .application(path: apps[0].path), "the icon names the bundle")
+    t.equal(rows.first?.action, .launch(apps[0].path), "and pressing it launches that bundle")
+    t.expect(rows.allSatisfy { $0.value == nil && !$0.isDisabled && !$0.leadsOn },
+             "nothing ticked, nothing dimmed, nothing to descend into — Omarchy's app rows say no more")
+
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(),
+                                           style: StyleMenu(apps: apps)),
+                      visibleRows: 10, path: MenuRoute.apps.path)
+    t.equal(m.breadcrumb, ["Apps"], "`menu apps` opens on the launcher")
+    t.equal(m.prompt, "Apps…", "and the placeholder says so")
+    m.type("saf")
+    t.equal(m.visible.map(\.title), ["Safari", "Safari"], "typing filters the level")
+    t.expect(m.visible.allSatisfy { $0.icon != nil },
+             "without taking the pictures away — every row here has one, so the edge stays straight")
+    t.equal(m.visible.first?.subtitle, nil, "and no path, because the search never left the level")
+    t.equal(m.showsPaths, false,
+            "so the rows stay one line tall — grown, the title sat a line above the icon")
+    t.equal(m.activate(), .launch("/Applications/Safari.app"), "Return launches the first hit")
+
+    var root = MenuState(root: MenuModel.root(loginItem: .off, config: Config(),
+                                              style: StyleMenu(apps: apps)), visibleRows: 10)
+    root.type("saf")
+    t.equal(root.showsPaths, true, "found from the root, the same rows have a path to show")
+}
+
+h.test("an application found from the root keeps its icon where a glyph would go") { t in
+    // `foundAt` drops glyphs so a mixed-level search does not indent a few rows past the rest.
+    // An app's icon is not a glyph: it is what the row is, and it is the thing that tells the
+    // browser from `Install › Zen` at a glance, so it survives the search the way Omarchy's does.
+    let style = StyleMenu(apps: [AppRef(name: "Zed", path: "/Applications/Zed.app")])
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: style),
+                      visibleRows: 10)
+    m.type("zed")
+    t.equal(m.visible.map(\.title), ["Zed"], "found from the root")
+    t.equal(m.visible.first?.subtitle, "Apps", "with the path it was found at")
+    t.equal(m.visible.first?.icon, .application(path: "/Applications/Zed.app"),
+            "and the bundle's icon still on it")
+    m.backspace(); m.backspace(); m.backspace()
+    m.type("le")
+    t.equal(m.visible.first?.title, "Learn", "a menu row found the same way")
+    t.equal(m.visible.first?.icon, nil, "still loses its glyph — that rule has not changed")
 }
 
 h.test("Learn is the keybindings and the three manuals that are about this machine") { t in

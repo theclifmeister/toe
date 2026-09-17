@@ -128,7 +128,14 @@ final class MenuView: NSView {
 
             if let icon = item.icon {
                 let box = MenuLayout.iconFrame(inRow: row, m)
-                if let iconFont {
+                if case .application(let path) = icon {
+                    // The bundle's own picture, in the glyph's box. Not tinted: an icon that
+                    // took the accent when selected would be a blue Safari, and the row's text
+                    // already says which row is under the cursor. Not dimmed either, because
+                    // an app row is never disabled.
+                    appIcon(at: path).draw(in: rect(box), from: .zero, operation: .sourceOver,
+                                           fraction: 1, respectFlipped: true, hints: nil)
+                } else if let iconFont {
                     // Centred in the 16 pt box rather than sitting on the text baseline: the
                     // glyphs are square and the row is not.
                     let glyph = NSAttributedString(string: MenuFont.glyph(for: icon),
@@ -185,6 +192,20 @@ final class MenuView: NSView {
                 text.draw(at: NSPoint(x: at.x, y: at.y))
             }
         }
+    }
+
+    /// `NSWorkspace.icon(forFile:)` is not free — it opens the bundle and reads the `.icns` —
+    /// and a keystroke redraws every row on screen. Ten rows are drawn per frame, so the cache
+    /// fills ten at a time and a scroll through a hundred and twenty apps reads each one once.
+    /// Never emptied: an icon that changed on disk shows the old one until the process
+    /// restarts, which is the trade the Dock makes too.
+    private var appIcons: [String: NSImage] = [:]
+
+    private func appIcon(at path: String) -> NSImage {
+        if let cached = appIcons[path] { return cached }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        appIcons[path] = image
+        return image
     }
 
     @discardableResult

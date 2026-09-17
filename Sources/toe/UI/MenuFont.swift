@@ -111,6 +111,10 @@ enum MenuFont {
         case .info:      return "\u{F05A}"   // nf-fa-info_circle
         case .globe:     return "\u{F0AC}"   // nf-fa-globe
         case .terminal:  return "\u{F120}"   // nf-fa-terminal
+        case .apps:      return "\u{F00A}"   // nf-fa-th — the grid Omarchy's 󰀻 is, from this block
+        // Never asked for: `MenuView` draws an application's icon as a picture and comes here
+        // only for glyphs. The switch is exhaustive, and an empty square is the honest answer.
+        case .application: return "\u{F096}" // nf-fa-square_o
         }
     }
 
@@ -133,6 +137,8 @@ enum MenuFont {
         case .info:      return "info.circle"
         case .globe:     return "globe"
         case .terminal:  return "terminal"
+        case .apps:      return "square.grid.2x2"
+        case .application: return "app"
         }
     }
 }

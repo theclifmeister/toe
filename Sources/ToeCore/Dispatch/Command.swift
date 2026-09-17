@@ -294,6 +294,8 @@ public enum CommandParser {
             switch argument.lowercased() {
             case "", "root", "go":                    return .menu(.root)
             case "keybindings", "keys":               return .menu(.keybindings)
+            // Omarchy's aliases for its first row, so `omarchy menu toggle apps` reads across.
+            case "apps", "app", "applications":       return .menu(.apps)
             case "learn":                             return .menu(.learn)
             case "style":                             return .menu(.style)
             case "theme", "themes":                   return .menu(.theme)
