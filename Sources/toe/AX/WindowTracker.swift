@@ -2,10 +2,32 @@ import AppKit
 import ApplicationServices
 import ToeCore
 
+/// The ordinary application an accessory helper's windows belong to (#158).
+///
+/// Two handles rather than one, because Steam's are two different things. `application` is
+/// the `NSRunningApplication` for `com.valvesoftware.steam`, the record with the name, the
+/// bundle identifier, the activation policy and the `terminate()` that quits Steam — and a
+/// `processIdentifier` of −1, because Steam's launcher execs into `steam_osx` and
+/// LaunchServices keeps a record with no pid. `pid` is `steam_osx` itself, read from the
+/// helper's parent, and is the one Accessibility can be pointed at.
+struct HelperOwner {
+    let application: NSRunningApplication
+    let pid: pid_t
+}
+
 final class ManagedWindow {
     let id: CGWindowID
     let element: AXUIElement
+    /// The process that owns the `AXUIElement`: the one Accessibility is written to and the
+    /// one the window server, `frontmostApplication` and the hide notifications name. For a
+    /// helper's window this is the helper, not the application it stands for — see `owner`.
     let pid: pid_t
+    /// Set when the window belongs to an accessory helper spawned by an ordinary application,
+    /// as Steam's do. Everything that asks *which application* this window is — the float
+    /// rules, the `app:` selector, the state report, a layout profile, and the quit on a last
+    /// window — reads the owner; everything that talks to the window itself keeps using `pid`.
+    let owner: HelperOwner?
+    /// The owner's bundle identifier when there is one, else the process's own.
     let bundleID: String?
     var title: String?
     /// Where the window sat before it was stashed off-screen, so floating windows come back
@@ -22,13 +44,33 @@ final class ManagedWindow {
     /// the moment it becomes an ordinary window again.
     var stashPending = false
 
-    init(id: CGWindowID, element: AXUIElement, pid: pid_t,
+    init(id: CGWindowID, element: AXUIElement, pid: pid_t, owner: HelperOwner?,
          bundleID: String?, title: String?) {
         self.id = id
         self.element = element
         self.pid = pid
+        self.owner = owner
         self.bundleID = bundleID
         self.title = title
+    }
+
+    /// The application the window is a window of: the owner when it has one, and otherwise
+    /// the process itself. Nil for a process LaunchServices has no record of.
+    var application: NSRunningApplication? {
+        owner?.application ?? NSRunningApplication(processIdentifier: pid)
+    }
+
+    /// Whether `app` is this window's application by either of the names it goes under — the
+    /// process, or the owner it stands for. The callers compare against
+    /// `NSWorkspace.frontmostApplication` to tell a click from an application raising a window
+    /// of its own accord, and which of the two macOS reports as frontmost for a helper's window
+    /// is not something to assume.
+    func belongs(to app: NSRunningApplication?) -> Bool {
+        guard let app else { return false }
+        if app.processIdentifier == pid { return true }
+        guard let owner else { return false }
+        return app.processIdentifier == owner.pid
+            || (app.bundleIdentifier != nil && app.bundleIdentifier == owner.application.bundleIdentifier)
     }
 }
 
@@ -63,9 +105,23 @@ final class WindowTracker {
 
     private(set) var windows: [CGWindowID: ManagedWindow] = [:]
     private var observers: [pid_t: AXObserver] = [:]
+    /// The accessory helpers under observation, by their pid, and the application each one's
+    /// windows belong to. Entered by `observeIfHelper` and left with `stopObserving`.
+    private var owners: [pid_t: HelperOwner] = [:]
+    /// Helpers found before they finished launching, each watched until it has — see
+    /// `observeIfHelper`.
+    private var pendingHelpers: [pid_t: NSKeyValueObservation] = [:]
+    private var runningApplications: NSKeyValueObservation?
     private let ownPID = ProcessInfo.processInfo.processIdentifier
 
     func window(_ id: CGWindowID) -> ManagedWindow? { windows[id] }
+
+    /// The application a process's windows are windows of — the owner for a helper under
+    /// observation, and the process's own record for anything else. What the state report
+    /// names a window by: a Steam window is Steam's, not Steam Helper's.
+    func application(of pid: pid_t) -> NSRunningApplication? {
+        owners[pid]?.application ?? NSRunningApplication(processIdentifier: pid)
+    }
 
     /// Drop a window the window server says no longer exists — a `kAXUIElementDestroyed` that
     /// never arrived. Its notifications die with the element, so there is nothing to remove;
@@ -95,9 +151,22 @@ final class WindowTracker {
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
-        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+        // Helpers are found from the running-applications list rather than the launch
+        // notification, because the notification is not posted for them: Steam launching
+        // arrives as one `didLaunchApplication` for `com.valvesoftware.steam` and nothing at
+        // all for Steam Helper (measured, #158). `runningApplications` is key-value observable
+        // and does change when the helper registers, so every change sweeps it. Cheap: a
+        // sweep is one pass over the list, and the `sysctl` only for a name that matched.
+        runningApplications = NSWorkspace.shared.observe(\.runningApplications, options: [.new]) {
+            [weak self] workspace, _ in
+            self?.sweepHelpers(among: workspace.runningApplications)
+        }
+
+        let running = NSWorkspace.shared.runningApplications
+        for app in running where app.activationPolicy == .regular {
             observe(app)
         }
+        sweepHelpers(among: running)
     }
 
     @objc private func screensChanged() { delegate?.screensChanged() }
@@ -129,7 +198,10 @@ final class WindowTracker {
     @objc private func appTerminated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         else { return }
-        let pid = app.processIdentifier
+        forgetApplication(app.processIdentifier)
+    }
+
+    private func forgetApplication(_ pid: pid_t) {
         stopObserving(pid)
         for (id, window) in windows where window.pid == pid {
             windows.removeValue(forKey: id)
@@ -194,9 +266,71 @@ final class WindowTracker {
         }
     }
 
+    /// Observes every accessory that is an ordinary application's helper — Steam Helper,
+    /// which owns every window Steam shows (#158). The decision is `HelperOwnership`'s, in
+    /// ToeCore; what is here is finding the owner's record and the parent pid it needs.
+    ///
+    /// The whole list every time, in both directions: a helper that registered before the
+    /// application it belongs to — the order is the application's to choose — is found on the
+    /// change that brings the application, and one already under observation is skipped at
+    /// the top of `observeIfHelper`.
+    ///
+    /// The sweep is also where a helper's going is heard. `didTerminateApplication` is not
+    /// posted for one any more than `didLaunchApplication` was (measured: Steam quitting is one
+    /// notification, for `com.valvesoftware.steam`), so a helper under observation that the
+    /// list no longer has is let go here, as `appTerminated` lets an ordinary application go.
+    private func sweepHelpers(among running: [NSRunningApplication]) {
+        let alive = Set(running.map(\.processIdentifier))
+        for pid in owners.keys where !alive.contains(pid) { forgetApplication(pid) }
+        for pid in pendingHelpers.keys where !alive.contains(pid) { pendingHelpers.removeValue(forKey: pid) }
+        let regular = Set(running.lazy.filter { $0.activationPolicy == .regular }
+                                      .compactMap(\.bundleIdentifier))
+        for app in running where app.activationPolicy == .accessory {
+            observeIfHelper(app, regular: regular, among: running)
+        }
+    }
+
+    /// The owner is found by bundle identifier and not by walking the parent pid into
+    /// `NSWorkspace`: Steam's `NSRunningApplication` reports `processIdentifier == -1`, so a
+    /// lookup by pid finds nothing, where the identifier finds the record that names it and
+    /// quits it. The parent pid is kept as well, since it is the process Accessibility can be
+    /// asked about — see `HelperOwner`.
+    private func observeIfHelper(_ app: NSRunningApplication, regular: Set<String>,
+                                 among running: [NSRunningApplication]) {
+        let pid = app.processIdentifier
+        guard pid != ownPID, observers[pid] == nil else { return }
+        let parent = Processes.parentPID(of: pid)
+        guard let ownerID = HelperOwnership.owner(of: app.bundleIdentifier, regular: regular,
+                                                  spawnedByLaunchd: parent == nil || parent == 1),
+              let parent,
+              let owner = running.first(where: {
+                  $0.activationPolicy == .regular && $0.bundleIdentifier == ownerID
+              })
+        else { return }
+        // The list changes the moment the helper registers, which is before it has finished
+        // launching, and an `AXObserverAddNotification` made then fails with
+        // `cannotComplete` and is never retried — so Steam's window, which opens seconds later,
+        // was never heard of (measured). `didLaunchApplication` would have said when, for an
+        // application it is posted for; `isFinishedLaunching` is the same fact, observable.
+        guard app.isFinishedLaunching else {
+            guard pendingHelpers[pid] == nil else { return }
+            pendingHelpers[pid] = app.observe(\.isFinishedLaunching, options: [.new]) {
+                [weak self] app, _ in
+                guard let self, app.isFinishedLaunching else { return }
+                self.pendingHelpers.removeValue(forKey: pid)
+                self.sweepHelpers(among: NSWorkspace.shared.runningApplications)
+            }
+            return
+        }
+        owners[pid] = HelperOwner(application: owner, pid: parent)
+        Log.info("observing \(app.bundleIdentifier ?? "?") (pid \(pid)) as a helper of \(ownerID)")
+        observe(app)
+    }
+
     /// The run-loop source has to come off the run loop as well as out of `observers`, or
     /// every launched-and-quit application leaves one behind for the life of the session.
     private func stopObserving(_ pid: pid_t) {
+        owners.removeValue(forKey: pid)
         guard let observer = observers.removeValue(forKey: pid) else { return }
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     }
@@ -212,8 +346,9 @@ final class WindowTracker {
         guard let id = element.windowID else { return nil }
         if let existing = windows[id] { return existing }
 
-        let app = NSRunningApplication(processIdentifier: pid)
-        let window = ManagedWindow(id: id, element: element, pid: pid,
+        let owner = owners[pid]
+        let app = owner?.application ?? NSRunningApplication(processIdentifier: pid)
+        let window = ManagedWindow(id: id, element: element, pid: pid, owner: owner,
                                    bundleID: app?.bundleIdentifier, title: element.title)
         windows[id] = window
 
@@ -282,6 +417,19 @@ final class WindowTracker {
         default:
             break
         }
+    }
+}
+
+enum Processes {
+    /// The parent of `pid`, or nil for a process the kernel no longer has — one that quit
+    /// between the launch notification and now. `KERN_PROC_PID` is the one lookup that answers
+    /// for a process toe does not own and did not spawn.
+    static func parentPID(of pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_eproc.e_ppid
     }
 }
 
