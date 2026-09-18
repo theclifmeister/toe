@@ -1041,7 +1041,12 @@ final class Coordinator: WindowTrackerDelegate {
     private func rescanApps() {
         guard !scanningApps else { return }
         scanningApps = true
-        DispatchQueue.global(qos: .utility).async {
+        // Weak on the outer closure as well as the inner: the inner capture list would otherwise
+        // be built from a `self` the outer one holds strongly for the length of the scan, which
+        // Swift 6.4 flags and which was never the intent — a scan does not keep toe alive. The
+        // inner one still names it, because implicit `self` inside a closure is only allowed by
+        // that closure's own capture list.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let found = Apps.ordered(AppLibrary.installed())
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
