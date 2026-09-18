@@ -210,7 +210,30 @@ public final class WorkspaceManager {
         noteFocus(id)
     }
 
+    /// Take a window out of the layout — and, when it was the focused one, hand the focus to
+    /// the window that takes its place, so that a close leaves the focus on the workspace it
+    /// was on. Without that step the model's focus falls to whatever `focusHistory` has next
+    /// and the screen's falls to whatever macOS picks, and the two need not agree: macOS gives
+    /// the focus to the application's next window, wherever that is, and with a browser
+    /// window on every workspace that is a window on another workspace more often than not.
+    ///
+    /// What "takes its place" means is Hyprland's `getNextWindowCandidate`, port for port. A
+    /// tile leaves a hole its neighbour closes over, so the successor is whatever is under
+    /// the tile's middle once the tree has been recalculated — the neighbour that grew into
+    /// it, or a float lying across that point, which has always been what the eye lands on. A
+    /// float leaves no hole: another float under its middle comes first, then the tile the
+    /// user was in before floating things (`m_lastTiledWindow`, which is the focus history's
+    /// most recent tile), then whatever is under the middle, then any float at all. With
+    /// nothing left on the workspace there is no successor and the workspace stays focused
+    /// with no window — `focusedWindow` is nil on an empty workspace anyway.
+    ///
+    /// Noted here rather than in the app layer because `focusedWindow` is what the next
+    /// render's `focus` is read from, and every caller — a close, a minimise, a reap, a
+    /// snapshot that came back short — wants the same answer.
     public func removeWindow(_ id: WindowID) {
+        // The middle is taken before the removal, the successor looked up after it: the point
+        // is the departing window's, the window under it is the tree's once it has closed up.
+        let vacated = focusedWindow == id ? vacatedPlace(of: id) : nil
         for ws in workspaces.values {
             ws.layout.remove(id)
             ws.floating.remove(id)
@@ -218,6 +241,54 @@ public final class WorkspaceManager {
         floatingStage.removeValue(forKey: id)
         focusHistory.removeAll { $0 == id }
         suspended.removeValue(forKey: id)
+        if let vacated, let next = nextWindowCandidate(for: vacated) {
+            // The same workspace, so the same monitor; the plain history update is all it takes.
+            noteFocusWithoutMonitorChange(next)
+        }
+    }
+
+    /// Where a window was, for `nextWindowCandidate` to look once it has gone.
+    private struct VacatedPlace {
+        var workspace: Workspace
+        var middle: Point
+        var wasFloating: Bool
+    }
+
+    private func vacatedPlace(of id: WindowID) -> VacatedPlace? {
+        guard let index = workspaceIndex(of: id), let ws = workspaces[index] else { return nil }
+        if ws.floating.contains(id) {
+            guard let m = monitor(id: ws.monitorID) else { return nil }
+            return VacatedPlace(workspace: ws, middle: floatingBox(for: id, on: m).middle, wasFloating: true)
+        }
+        guard let box = ws.layout.idealBox(of: id) else { return nil }
+        return VacatedPlace(workspace: ws, middle: box.middle, wasFloating: false)
+    }
+
+    /// Hyprland's `getNextWindowCandidate`, for a window that has already left `place`.
+    private func nextWindowCandidate(for place: VacatedPlace) -> WindowID? {
+        let ws = place.workspace
+        // `vectorToWindowUnified` with `ALLOW_FLOATING`: a float over the point beats the tile
+        // under it, and of two floats the one the user was in most recently is the one on top.
+        func floatUnderMiddle() -> WindowID? {
+            guard let m = monitor(id: ws.monitorID) else { return nil }
+            let covering = ws.floating.filter { floatingBox(for: $0, on: m).contains(place.middle) }
+            return focusHistory.first { covering.contains($0) } ?? covering.min()
+        }
+        let tileUnderMiddle = ws.layout.node(at: place.middle)?.window
+
+        if place.wasFloating {
+            if let float = floatUnderMiddle() { return float }
+            if let lastTiled = focusHistory.first(where: { ws.layout.contains($0) }) { return lastTiled }
+            if let tile = tileUnderMiddle { return tile }
+            return ws.floating.min()
+        }
+
+        if let under = floatUnderMiddle() ?? tileUnderMiddle { return under }
+        // `getTopLeftWindow`, then `getFirstWindow`: a middle that fell between the leaves
+        // — rounding, or an area that has since changed shape — still finds a tile.
+        let area = ws.layout.area
+        if let topLeft = ws.layout.node(at: Point(x: area.minX, y: area.minY))?.window { return topLeft }
+        return ws.layout.windowIDs.first ?? ws.floating.min()
     }
 
     // MARK: - Native tabs
@@ -691,6 +762,43 @@ public final class WorkspaceManager {
         // the plain `noteFocus` this call replaces.
         noteFocus(id)
         return hidden
+    }
+
+    /// Whether a focus the system reports on `id` could be macOS choosing for itself rather
+    /// than the user choosing at all — the one case `revealWindow` must not follow.
+    ///
+    /// Closing a window does not deactivate its application, so the application picks the
+    /// next key window on its own: the next in its own window order, wherever that is. With a
+    /// browser window on every workspace, that is a window on some other workspace, and the
+    /// focus notification it sends is indistinguishable from the one a Cmd-` or a Window-menu
+    /// pick sends — the application is frontmost in both, which is the whole of the test
+    /// `revealWindow`'s callers make. Nothing at the moment of the notification tells the two
+    /// apart, and the window server is no help: measured on TextEdit, a closing window still
+    /// reads as on screen when the focus change arrives, and its `Destroyed` follows a
+    /// millisecond later (a minimising one reads off screen, with `Miniaturized` three
+    /// milliseconds behind). What decides it is that next notification, which is why this
+    /// answers "could be" and the app layer holds the focus change back until it knows.
+    ///
+    /// Two things have to hold for it to be worth holding: the focus is leaving the focused
+    /// workspace (a next window on the same workspace is macOS agreeing with the layout, and
+    /// costs nothing to accept), and the two windows belong to one application (another
+    /// application's window taking the focus is an activation, which is a person's doing).
+    /// Whether the workspace has anything left on it is deliberately not one of them. The
+    /// last window on a workspace closing leaves the user on an empty workspace with the
+    /// system's focus on a window they cannot see — and that is exactly where `workspace 3`
+    /// to an empty workspace leaves them already, with the next thing they do a launch or a
+    /// switch. Following the focus away instead was the first version of this, and the first
+    /// thing the replay tripped over: SUPER+W on a workspace's only browser window went to the
+    /// workspace with the other one.
+    ///
+    /// - Parameters:
+    ///   - id: the window the system says has the focus.
+    ///   - sameApplication: whether it and `focusedWindow` belong to one application.
+    public func mayBeFallbackFocus(on id: WindowID, sameApplication: Bool) -> Bool {
+        guard let previous = focusedWindow, previous != id,
+              let index = workspaceIndex(of: id), index != focusedWorkspaceIndex
+        else { return false }
+        return sameApplication
     }
 
     public func switchToPreviousWorkspace() {

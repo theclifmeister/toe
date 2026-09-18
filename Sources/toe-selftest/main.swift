@@ -924,6 +924,133 @@ h.test("revealing a window on another monitor's workspace follows it there") { t
     t.equal(wm.focusedWindow, 1, "and w1 has the focus")
 }
 
+// MARK: - Where the focus goes when a window closes
+
+h.test("closing the focused tile hands the focus to the tile that grew into its place") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)   // the usual staircase
+    // History says w1 is the most recent window after w2; Hyprland's `getNextWindowCandidate`
+    // says otherwise — the successor is what is under the closed tile's middle once the tree
+    // has closed over it, and that is w3, which takes the whole right half.
+    wm.noteFocus(1); wm.noteFocus(2)
+    t.equal(wm.focusedWindow, 2, "w2 has the focus")
+
+    wm.removeWindow(2)
+    t.equal(wm.focusedWindow, 3, "w3 grew into w2's place and takes the focus, not the more recent w1")
+    t.equal(wm.render().focus, 3, "which is what the next render asks the app layer to focus")
+    t.equal(wm.focusedWorkspaceIndex, 1, "on the same workspace")
+
+    // A window that did not have the focus takes nothing with it.
+    wm.noteFocus(1)
+    wm.removeWindow(3)
+    t.equal(wm.focusedWindow, 1, "w1 keeps the focus when w3 goes")
+
+    // The last window on the workspace leaves it with no window to focus, and no crash.
+    wm.removeWindow(1)
+    t.equal(wm.focusedWindow, nil, "an empty workspace has no focused window")
+    t.equal(wm.focusedWorkspaceIndex, 1, "and is still the focused workspace")
+}
+
+h.test("a float over the closed tile's middle is what the focus lands on") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)                    // left half / right half
+    wm.addWindow(3, floating: true)
+    wm.floatingFrames[3] = box(900, 300, 400, 300)      // lies across w2's middle (1134, 491)
+    wm.noteFocus(2)
+
+    wm.removeWindow(2)
+    t.equal(wm.focusedWindow, 3, "the float across the vacated middle beats the tile under it")
+}
+
+h.test("closing a focused float goes to the float under it, then to the last tile") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.noteFocus(1)                                     // the tile the user was in last
+    wm.addWindow(3, floating: true)
+    wm.addWindow(4, floating: true)                     // both centred: w4 lies over w3
+    t.equal(wm.focusedWindow, 4, "the newest float has the focus")
+
+    wm.removeWindow(4)
+    t.equal(wm.focusedWindow, 3, "the float underneath comes first")
+    wm.removeWindow(3)
+    t.equal(wm.focusedWindow, 1, "with no float left, the tile the user was in before floating things — not w2")
+
+    // A float off on its own, with no float under it, goes to the last tile as well.
+    wm.addWindow(5, floating: true)
+    wm.floatingFrames[5] = box(10, 10, 200, 200)
+    wm.noteFocus(2); wm.noteFocus(5)
+    wm.removeWindow(5)
+    t.equal(wm.focusedWindow, 2, "the most recently used tile")
+}
+
+h.test("a focus that fell to another workspace as the focused window closed is worth holding") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)                    // Safari and a terminal on workspace 1
+    wm.switchTo(workspace: 2)
+    wm.addWindow(3)                                     // a second Safari window on workspace 2
+    wm.switchTo(workspace: 1)
+    wm.noteFocus(1)
+
+    // Closing w1: macOS hands Safari's focus to w3, on workspace 2, and says so before w1's
+    // Destroyed. Nothing in that notification tells it from a Cmd-` to w3, so the app layer
+    // holds it, and this is the rule for what is worth holding.
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), true,
+            "the same application, leaving the workspace: macOS's choice until the departure says so")
+    t.equal(wm.focusedWindow, 1, "and the model is left as it was, for the departure to settle")
+    t.equal(wm.focusedWorkspaceIndex, 1, "on workspace 1")
+
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: false), false,
+            "another application's window taking the focus is an activation, and a person's doing")
+    t.equal(wm.mayBeFallbackFocus(on: 2, sameApplication: true), false,
+            "a next window on the same workspace is macOS agreeing with the layout")
+    t.equal(wm.mayBeFallbackFocus(on: 1, sameApplication: true), false,
+            "the focused window focusing itself is nothing")
+    t.equal(wm.mayBeFallbackFocus(on: 99, sameApplication: true), false,
+            "a window toe does not manage is not on any workspace to leave for")
+
+    // Then w1's Destroyed arrives: the focus lands on the tile that took its place, on the
+    // workspace it was on, with workspace 2 still parked where it was.
+    wm.removeWindow(1)
+    t.equal(wm.focusedWindow, 2, "w2 fills workspace 1 and takes the focus")
+    t.equal(wm.focusedWorkspaceIndex, 1, "the user is still on workspace 1")
+    t.equal(wm.render().stashed, [3], "and workspace 2 stays hidden")
+
+    // Closing w2 as well empties workspace 1, and the user stays on it, as they would after
+    // switching to an empty workspace: SUPER+W on a workspace's only browser window must not
+    // take them to the workspace with the other one.
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), true,
+            "the last window on the workspace closing is held like any other")
+    wm.removeWindow(2)
+    t.equal(wm.focusedWindow, nil, "nothing is left to focus")
+    t.equal(wm.focusedWorkspaceIndex, 1, "and workspace 1, empty, is still the one showing")
+    t.equal(wm.render().stashed, [3], "with workspace 2 still parked")
+}
+
+h.test("a focus falling to the other display's workspace is leaving the workspace too") { t in
+    let left = box(0, 0, 1512, 982)
+    let right = box(1512, 0, 1920, 1080)
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: left, usable: left),
+                    Monitor(id: 2, frame: right, usable: right)])
+    let leftWS = wm.activeWorkspace[1]!
+    let rightWS = wm.activeWorkspace[2]!
+    wm.switchTo(workspace: rightWS); wm.addWindow(3)
+    wm.switchTo(workspace: leftWS); wm.addWindow(1); wm.addWindow(2)
+    wm.noteFocus(1)
+
+    // Both workspaces are showing, so nothing is stashed — but the focus would still cross to
+    // the other display for no reason the user gave, and Hyprland keeps it on the monitor.
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), true,
+            "a visible workspace on the other display is still not this one")
+    wm.removeWindow(1)
+    t.equal(wm.focusedWindow, 2, "w2 takes the focus")
+    t.equal(wm.focusedWorkspaceIndex, leftWS, "on the left display")
+}
+
 h.test("a floating window keeps its frame across a workspace round trip") { t in
     let wm = WorkspaceManager()
     wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
