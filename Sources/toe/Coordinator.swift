@@ -165,6 +165,27 @@ final class Coordinator: WindowTrackerDelegate {
     /// Space stops moving, and this is how long "stopped" is. Pushed back by every notification,
     /// like `settleLatency`, because it is the quiet after the last one that matters.
     private static let spaceSettleLatency: TimeInterval = 0.3
+    /// A focus change toe has heard and not yet acted on, because the next notification is
+    /// what says what it was. See `windowFocused` and `mayBeFallbackFocus`.
+    private struct HeldFocus {
+        /// The window the system says has the focus.
+        var window: WindowID
+        /// The window the model still has it on — the one whose going would settle this.
+        var previous: WindowID
+        var deadline: DispatchWorkItem
+    }
+    private var heldFocus: HeldFocus?
+    /// How long a focus change is held for the departure that would explain it.
+    ///
+    /// Measured on TextEdit: the focus change a close causes arrives a millisecond before the
+    /// window's `Destroyed`, and the one a minimise causes three milliseconds before its
+    /// `Miniaturized` — the application posts them in sequence, and the gap is how long it
+    /// takes to finish the close. This is set well above that for an application that is
+    /// busy. The cost of the wait falls on the one thing it delays, a Cmd-` or Window-menu
+    /// pick of a window on another workspace, which switches that much later; the cost of a
+    /// wait too short is the departure arriving after the workspace has already followed the
+    /// focus, which is the bug, once, on a slow application.
+    private static let heldFocusLatency: TimeInterval = 0.2
     /// The window the user has hold of. Its frame is theirs until they let go: toe neither
     /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
     /// to a floating window.
@@ -1404,16 +1425,58 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     func windowDisappeared(_ id: WindowID) {
+        // Read before the removal, which is what decides where the focus goes next.
+        let hadFocus = workspaces.focusedWindow == id
         // The front tab of a group closing leaves the tile to the tabs behind it; one of them
         // holds it until AppKit's choice of next tab comes forward and `succeedTab` hands it
-        // on. The tile keeps the frame the group has, so there is nothing new to write.
-        if let heir = workspaces.windowGone(id) {
+        // on. The tile keeps the frame the group has, so there is nothing new to write — and
+        // nothing to focus either: the heir is a window behind a tab, and focusing it would
+        // pull that tab forward over the one AppKit is about to choose.
+        let heir = workspaces.windowGone(id)
+        if let heir {
             Log.info("tab \(id) closed — \(heir) holds its tile until the next tab comes forward")
             desired[heir] = desired[id]
         }
         workspaces.floatingFrames.removeValue(forKey: id)
         dropPendingWrites(for: id)
-        apply(refocus: false)
+        // The focused window going is the one departure toe answers with a focus of its own.
+        // `removeWindow` has already handed the model's focus to the window that took its
+        // place on the workspace, and this write is what puts the screen's there too — macOS
+        // has meanwhile given the focus to the application's next window, which with a browser
+        // window on every workspace is a window on another one, and `windowFocused` has been
+        // holding that focus change for exactly this: the departure that explains it. Dropped
+        // now, unacted on, and the workspace stays. `focusApplied` was the window that has
+        // gone, and `dropPendingWrites` has just cleared it, so the write is not skipped as a
+        // repeat. Any other departure changes nothing about where the focus is.
+        if heldFocus?.previous == id { dropHeldFocus() }
+        apply(refocus: hadFocus && heir == nil)
+    }
+
+    private func dropHeldFocus() {
+        heldFocus?.deadline.cancel()
+        heldFocus = nil
+    }
+
+    /// Hold a focus change that could be macOS's own choice after a close — see
+    /// `mayBeFallbackFocus` — until the departure that would explain it arrives, or does not.
+    private func holdFocus(_ id: WindowID, previous: WindowID) {
+        let deadline = DispatchWorkItem { [weak self] in self?.releaseHeldFocus() }
+        heldFocus = HeldFocus(window: id, previous: previous, deadline: deadline)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.heldFocusLatency, execute: deadline)
+    }
+
+    /// Nothing went: the user switched windows within the application, and the switch is
+    /// followed as it would have been at once. Judged afresh rather than from what was true
+    /// when the hold began — a window that has closed or moved in the meantime is not
+    /// followed anywhere, and a later focus change has already dropped the hold on its way in.
+    private func releaseHeldFocus() {
+        guard let held = heldFocus else { return }
+        heldFocus = nil
+        guard let window = tracker.window(held.window),
+              workspaces.workspaceIndex(of: held.window) != nil,
+              workspaces.focusedWindow == held.previous
+        else { return }
+        followFocus(held.window, activated: window.belongs(to: NSWorkspace.shared.frontmostApplication))
     }
 
     /// Forget everything toe still meant to write to a window that has nothing to be written
@@ -1471,15 +1534,38 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
         guard !isEchoOfOwnRaise(id) else { return }
+        // Whatever a held focus change was, the user has moved on from it.
+        dropHeldFocus()
         // Following the focus onto a workspace that is not showing is right only when the user
         // asked for it. Clicking an application's Dock icon, Cmd-Tab and Spotlight all activate
         // the application as they focus its window; an application raising a window of its own
         // accord does not, and yanking the screen away from the user for that is the behaviour
         // Hyprland keeps behind `focus_on_activate` and leaves off. The same test `isEchoOfOwnRaise`
         // makes, for the same reason: a focus that comes with an activation is a person's doing.
-        let activated = tracker.window(id).map {
-            $0.belongs(to: NSWorkspace.shared.frontmostApplication)
-        } ?? false
+        let window = tracker.window(id)
+        let activated = window?.belongs(to: NSWorkspace.shared.frontmostApplication) ?? false
+        // One activation that is nobody's doing: the focused window closing. Its application
+        // stays frontmost and hands the focus to its next window itself, and when that one is
+        // on another workspace, following it takes the user off the workspace they were
+        // working on for no reason they gave. Nothing in the notification tells that apart
+        // from a Cmd-` to the same window — the notification that follows does, a
+        // `Destroyed` or `Miniaturized` for the window the focus left, a few milliseconds
+        // behind — so the change is held for it. If it comes, `windowDisappeared` drops the
+        // hold and puts the focus on the tile that takes the closed one's place, which is the
+        // answer Hyprland gives a close; if it does not, `releaseHeldFocus` follows the focus
+        // as this would have. `mayBeFallbackFocus` is the rule for what is worth holding.
+        if activated, let window, let previous = workspaces.focusedWindow,
+           workspaces.mayBeFallbackFocus(on: id, sameApplication: tracker.window(previous)?.pid == window.pid) {
+            Log.info("focus moved to \(id), on another workspace, from \(previous) of the same application — holding")
+            holdFocus(id, previous: previous)
+            return
+        }
+        followFocus(id, activated: activated)
+    }
+
+    /// The tail of `windowFocused`: the focus has moved and the model follows it, on to
+    /// another workspace when the user asked for that.
+    private func followFocus(_ id: WindowID, activated: Bool) {
         let revealed: Bool
         if activated {
             revealed = workspaces.revealWindow(id)
