@@ -1441,13 +1441,15 @@ final class Coordinator: WindowTrackerDelegate {
         dropPendingWrites(for: id)
         // The focused window going is the one departure toe answers with a focus of its own.
         // `removeWindow` has already handed the model's focus to the window that took its
-        // place on the workspace, and this write is what puts the screen's there too — macOS
+        // place on the workspace, and this write is what puts the screen's there too. macOS
         // has meanwhile given the focus to the application's next window, which with a browser
         // window on every workspace is a window on another one, and `windowFocused` has been
         // holding that focus change for exactly this: the departure that explains it. Dropped
-        // now, unacted on, and the workspace stays. `focusApplied` was the window that has
-        // gone, and `dropPendingWrites` has just cleared it, so the write is not skipped as a
-        // repeat. Any other departure changes nothing about where the focus is.
+        // now, unacted on, and the workspace stays — empty, when the window was the last one
+        // on it, with the system's focus left where macOS put it, which is where a switch to
+        // an empty workspace leaves it too. `focusApplied` was the window that has gone, and
+        // `dropPendingWrites` has just cleared it, so the write is not skipped as a repeat.
+        // Any other departure changes nothing about where the focus is.
         if heldFocus?.previous == id { dropHeldFocus() }
         apply(refocus: hadFocus && heir == nil)
     }

@@ -999,7 +999,7 @@ h.test("a focus that fell to another workspace as the focused window closed is w
     // Destroyed. Nothing in that notification tells it from a Cmd-` to w3, so the app layer
     // holds it, and this is the rule for what is worth holding.
     t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), true,
-            "the same application, leaving the workspace, with a window left to keep the focus")
+            "the same application, leaving the workspace: macOS's choice until the departure says so")
     t.equal(wm.focusedWindow, 1, "and the model is left as it was, for the departure to settle")
     t.equal(wm.focusedWorkspaceIndex, 1, "on workspace 1")
 
@@ -1019,10 +1019,15 @@ h.test("a focus that fell to another workspace as the focused window closed is w
     t.equal(wm.focusedWorkspaceIndex, 1, "the user is still on workspace 1")
     t.equal(wm.render().stashed, [3], "and workspace 2 stays hidden")
 
-    // With w2 going too there would be nothing to keep the focus for: the workspace is
-    // emptying, and a focus left on an off-screen window is worse than one that is followed.
-    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), false,
-            "the last window on the workspace closing lets the focus go where macOS put it")
+    // Closing w2 as well empties workspace 1, and the user stays on it, as they would after
+    // switching to an empty workspace: SUPER+W on a workspace's only browser window must not
+    // take them to the workspace with the other one.
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), true,
+            "the last window on the workspace closing is held like any other")
+    wm.removeWindow(2)
+    t.equal(wm.focusedWindow, nil, "nothing is left to focus")
+    t.equal(wm.focusedWorkspaceIndex, 1, "and workspace 1, empty, is still the one showing")
+    t.equal(wm.render().stashed, [3], "with workspace 2 still parked")
 }
 
 h.test("a focus falling to the other display's workspace is leaving the workspace too") { t in

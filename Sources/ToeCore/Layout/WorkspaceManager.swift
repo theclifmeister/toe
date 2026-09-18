@@ -779,13 +779,17 @@ public final class WorkspaceManager {
     /// milliseconds behind). What decides it is that next notification, which is why this
     /// answers "could be" and the app layer holds the focus change back until it knows.
     ///
-    /// Three things have to hold for it to be worth holding: the focus is leaving the focused
+    /// Two things have to hold for it to be worth holding: the focus is leaving the focused
     /// workspace (a next window on the same workspace is macOS agreeing with the layout, and
-    /// costs nothing to accept); the two windows belong to one application (another
-    /// application's window taking the focus is an activation, which is a person's doing);
-    /// and the workspace has another window to give the focus to. An emptying workspace fails
-    /// that last test on purpose: declining then would leave the focus on a window nobody can
-    /// see, with keystrokes going into it, which is worse than following it to where it is.
+    /// costs nothing to accept), and the two windows belong to one application (another
+    /// application's window taking the focus is an activation, which is a person's doing).
+    /// Whether the workspace has anything left on it is deliberately not one of them. The
+    /// last window on a workspace closing leaves the user on an empty workspace with the
+    /// system's focus on a window they cannot see — and that is exactly where `workspace 3`
+    /// to an empty workspace leaves them already, with the next thing they do a launch or a
+    /// switch. Following the focus away instead was the first version of this, and the first
+    /// thing the replay tripped over: SUPER+W on a workspace's only browser window went to the
+    /// workspace with the other one.
     ///
     /// - Parameters:
     ///   - id: the window the system says has the focus.
@@ -794,7 +798,7 @@ public final class WorkspaceManager {
         guard let previous = focusedWindow, previous != id,
               let index = workspaceIndex(of: id), index != focusedWorkspaceIndex
         else { return false }
-        return sameApplication && focusedWorkspace.windows.count > 1
+        return sameApplication
     }
 
     public func switchToPreviousWorkspace() {
