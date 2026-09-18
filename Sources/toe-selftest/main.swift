@@ -1003,8 +1003,11 @@ h.test("a focus that fell to another workspace as the focused window closed is w
     t.equal(wm.focusedWindow, 1, "and the model is left as it was, for the departure to settle")
     t.equal(wm.focusedWorkspaceIndex, 1, "on workspace 1")
 
-    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: false), false,
-            "another application's window taking the focus is an activation, and a person's doing")
+    // Quitting Safari instead: macOS activates the next application, whose window is on
+    // workspace 2, 30 ms before it reports Safari terminated. The same hold, for the same
+    // reason, with the terminate as the departure that drops it.
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: false), true,
+            "another application's window on a hidden workspace: a Cmd-Tab or a quit, and only the next 30 ms know")
     t.equal(wm.mayBeFallbackFocus(on: 2, sameApplication: true), false,
             "a next window on the same workspace is macOS agreeing with the layout")
     t.equal(wm.mayBeFallbackFocus(on: 1, sameApplication: true), false,
@@ -1046,6 +1049,10 @@ h.test("a focus falling to the other display's workspace is leaving the workspac
     // the other display for no reason the user gave, and Hyprland keeps it on the monitor.
     t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: true), true,
             "a visible workspace on the other display is still not this one")
+    // Unless the window is another application's: that is every click on the other display,
+    // and a 200 ms border lag on each of them is not worth the quit case on two displays.
+    t.equal(wm.mayBeFallbackFocus(on: 3, sameApplication: false), false,
+            "another application's window on the other display is followed at once")
     wm.removeWindow(1)
     t.equal(wm.focusedWindow, 2, "w2 takes the focus")
     t.equal(wm.focusedWorkspaceIndex, leftWS, "on the left display")

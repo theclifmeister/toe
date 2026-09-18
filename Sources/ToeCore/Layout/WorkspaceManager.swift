@@ -767,23 +767,36 @@ public final class WorkspaceManager {
     /// Whether a focus the system reports on `id` could be macOS choosing for itself rather
     /// than the user choosing at all — the one case `revealWindow` must not follow.
     ///
-    /// Closing a window does not deactivate its application, so the application picks the
-    /// next key window on its own: the next in its own window order, wherever that is. With a
-    /// browser window on every workspace, that is a window on some other workspace, and the
-    /// focus notification it sends is indistinguishable from the one a Cmd-` or a Window-menu
-    /// pick sends — the application is frontmost in both, which is the whole of the test
-    /// `revealWindow`'s callers make. Nothing at the moment of the notification tells the two
-    /// apart, and the window server is no help: measured on TextEdit, a closing window still
-    /// reads as on screen when the focus change arrives, and its `Destroyed` follows a
-    /// millisecond later (a minimising one reads off screen, with `Miniaturized` three
-    /// milliseconds behind). What decides it is that next notification, which is why this
-    /// answers "could be" and the app layer holds the focus change back until it knows.
+    /// macOS chooses twice. Closing a window does not deactivate its application, so the
+    /// application picks the next key window on its own: the next in its own window order,
+    /// wherever that is. With a browser window on every workspace, that is a window on some
+    /// other workspace, and the focus notification it sends is indistinguishable from the one
+    /// a Cmd-` or a Window-menu pick sends — the application is frontmost in both, which is
+    /// the whole of the test `revealWindow`'s callers make. And quitting an application makes
+    /// macOS activate the next one, whose window is wherever it is, and that is
+    /// indistinguishable from a Cmd-Tab to it — measured, the activation arrives 30 ms
+    /// *before* the quitting application is reported terminated. Nothing at the moment of
+    /// either notification tells it from the user's own switch, and the window server is no
+    /// help: measured on TextEdit, a closing window still reads as on screen when the focus
+    /// change arrives, and its `Destroyed` follows a millisecond later (a minimising one
+    /// reads off screen, with `Miniaturized` three milliseconds behind); a quitting
+    /// application's windows leave the screen 20 ms after the activation. What decides it is
+    /// the notification that follows — the departure of the window the focus left — which is
+    /// why this answers "could be" and the app layer holds the focus change back until it
+    /// knows.
     ///
-    /// Two things have to hold for it to be worth holding: the focus is leaving the focused
-    /// workspace (a next window on the same workspace is macOS agreeing with the layout, and
-    /// costs nothing to accept), and the two windows belong to one application (another
-    /// application's window taking the focus is an activation, which is a person's doing).
-    /// Whether the workspace has anything left on it is deliberately not one of them. The
+    /// What is worth holding is a focus that is leaving the focused workspace — a next window
+    /// on the same workspace is macOS agreeing with the layout, and costs nothing to accept —
+    /// for a workspace that is not showing, or for one that is showing on another display
+    /// when the two windows belong to one application. The distinction is what the hold
+    /// costs: a switch to a hidden workspace that turns out to be the user's own is drawn
+    /// 200 ms late, and that is paid on a Cmd-Tab or a Dock click, while a click across
+    /// displays is every click on the other display, and paying it on each of those for the
+    /// sake of a quit on two displays is not a trade worth making. Within one application
+    /// there is no click to pay for — an application does not activate on a click into a
+    /// window it already owns — so the close case keeps its hold on both displays.
+    ///
+    /// Whether the workspace has anything left on it is deliberately not a condition. The
     /// last window on a workspace closing leaves the user on an empty workspace with the
     /// system's focus on a window they cannot see — and that is exactly where `workspace 3`
     /// to an empty workspace leaves them already, with the next thing they do a launch or a
@@ -798,7 +811,7 @@ public final class WorkspaceManager {
         guard let previous = focusedWindow, previous != id,
               let index = workspaceIndex(of: id), index != focusedWorkspaceIndex
         else { return false }
-        return sameApplication
+        return sameApplication || !visibleWorkspaceIndices.contains(index)
     }
 
     public func switchToPreviousWorkspace() {

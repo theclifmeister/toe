@@ -175,16 +175,29 @@ final class Coordinator: WindowTrackerDelegate {
         var deadline: DispatchWorkItem
     }
     private var heldFocus: HeldFocus?
+    /// A focus the system reports that toe has decided not to follow: the window macOS gave
+    /// the focus to when the focused window went, on a workspace the user was not on. The
+    /// system's focus is still there — toe has nowhere else to put it when the workspace has
+    /// emptied — and every notification that says so again is the same fact, not a new one.
+    /// There are several: `NSWorkspace` reports the activation and the application's own
+    /// `AXApplicationActivated` reports it too, and the second arrived 20 ms after the hold
+    /// had been dropped and the workspace emptied, when there was no focused window left to
+    /// hold against, so it was followed (measured on a Safari quit). Cleared by the next focus
+    /// change that is anything else, or by toe focusing a window itself.
+    private var declinedFocus: WindowID?
     /// How long a focus change is held for the departure that would explain it.
     ///
     /// Measured on TextEdit: the focus change a close causes arrives a millisecond before the
     /// window's `Destroyed`, and the one a minimise causes three milliseconds before its
     /// `Miniaturized` — the application posts them in sequence, and the gap is how long it
-    /// takes to finish the close. This is set well above that for an application that is
-    /// busy. The cost of the wait falls on the one thing it delays, a Cmd-` or Window-menu
-    /// pick of a window on another workspace, which switches that much later; the cost of a
-    /// wait too short is the departure arriving after the workspace has already followed the
-    /// focus, which is the bug, once, on a slow application.
+    /// takes to finish the close. Measured on Safari: the activation of the next application
+    /// a quit causes arrives 30 ms before the terminate notification, with the windows leaving
+    /// the screen in between. This is set well above both for an application that is busy.
+    /// The cost of the wait falls on what it delays — a Cmd-` or Window-menu pick, a Cmd-Tab,
+    /// a Dock click, a Spotlight result — landing on a window on a hidden workspace, which
+    /// switches that much later; the cost of a wait too short is the departure arriving
+    /// after the workspace has already followed the focus, which is the bug, once, on a slow
+    /// application.
     private static let heldFocusLatency: TimeInterval = 0.2
     /// The window the user has hold of. Its frame is theirs until they let go: toe neither
     /// re-asserts its tile nor writes it a new one, the same courtesy `apply` already extends
@@ -1442,15 +1455,19 @@ final class Coordinator: WindowTrackerDelegate {
         // The focused window going is the one departure toe answers with a focus of its own.
         // `removeWindow` has already handed the model's focus to the window that took its
         // place on the workspace, and this write is what puts the screen's there too. macOS
-        // has meanwhile given the focus to the application's next window, which with a browser
-        // window on every workspace is a window on another one, and `windowFocused` has been
-        // holding that focus change for exactly this: the departure that explains it. Dropped
+        // has meanwhile given the focus to the application's next window — or, when the
+        // application has quit, to the next application's — which with a browser window on
+        // every workspace is a window on another one, and `windowFocused` has been holding
+        // that focus change for exactly this: the departure that explains it. Dropped
         // now, unacted on, and the workspace stays — empty, when the window was the last one
         // on it, with the system's focus left where macOS put it, which is where a switch to
         // an empty workspace leaves it too. `focusApplied` was the window that has gone, and
         // `dropPendingWrites` has just cleared it, so the write is not skipped as a repeat.
         // Any other departure changes nothing about where the focus is.
-        if heldFocus?.previous == id { dropHeldFocus() }
+        if let held = heldFocus, held.previous == id {
+            declinedFocus = held.window
+            dropHeldFocus()
+        }
         apply(refocus: hadFocus && heir == nil)
     }
 
@@ -1536,6 +1553,11 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
         guard !isEchoOfOwnRaise(id) else { return }
+        // The focus toe declined to follow, reported again; see `declinedFocus`. Not when toe
+        // has since focused that window itself — a `workspace` switch that lands on it, say —
+        // which is the one way the focus can be put there on purpose.
+        if id == declinedFocus, id != focusApplied { return }
+        declinedFocus = nil
         // Whatever a held focus change was, the user has moved on from it.
         dropHeldFocus()
         // Following the focus onto a workspace that is not showing is right only when the user
@@ -1546,19 +1568,21 @@ final class Coordinator: WindowTrackerDelegate {
         // makes, for the same reason: a focus that comes with an activation is a person's doing.
         let window = tracker.window(id)
         let activated = window?.belongs(to: NSWorkspace.shared.frontmostApplication) ?? false
-        // One activation that is nobody's doing: the focused window closing. Its application
-        // stays frontmost and hands the focus to its next window itself, and when that one is
-        // on another workspace, following it takes the user off the workspace they were
-        // working on for no reason they gave. Nothing in the notification tells that apart
-        // from a Cmd-` to the same window — the notification that follows does, a
-        // `Destroyed` or `Miniaturized` for the window the focus left, a few milliseconds
+        // Two activations that are nobody's doing: the focused window closing, and its
+        // application quitting. On a close the application stays frontmost and hands the focus
+        // to its next window itself; on a quit macOS activates the next application, whose
+        // window is wherever it is. When that window is on another workspace, following it
+        // takes the user off the workspace they were working on for no reason they gave.
+        // Nothing in the notification tells either apart from a Cmd-` or a Cmd-Tab to the
+        // same window — the notification that follows does, a `Destroyed` or `Miniaturized`
+        // for the window the focus left, or its application's terminate, a few milliseconds
         // behind — so the change is held for it. If it comes, `windowDisappeared` drops the
         // hold and puts the focus on the tile that takes the closed one's place, which is the
         // answer Hyprland gives a close; if it does not, `releaseHeldFocus` follows the focus
         // as this would have. `mayBeFallbackFocus` is the rule for what is worth holding.
         if activated, let window, let previous = workspaces.focusedWindow,
            workspaces.mayBeFallbackFocus(on: id, sameApplication: tracker.window(previous)?.pid == window.pid) {
-            Log.info("focus moved to \(id), on another workspace, from \(previous) of the same application — holding")
+            Log.info("focus moved to \(id), on another workspace, from \(previous) — holding")
             holdFocus(id, previous: previous)
             return
         }
