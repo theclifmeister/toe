@@ -10,9 +10,11 @@ import ToeCore
 extension StateReporter {
 
     /// `NSRunningApplication.localizedName`, which is what the Dock and Cmd-Tab show. The
-    /// fallbacks for a nameless process are the reporter's, not this lookup's.
-    static func appName(of pid: pid_t) -> String? {
-        NSRunningApplication(processIdentifier: pid)?.localizedName
+    /// fallbacks for a nameless process are the reporter's, not this lookup's. Asked of the
+    /// tracker rather than of the pid directly, so that a helper's window is named for the
+    /// application it belongs to: `Steam`, not `Steam Helper` (#158).
+    static func appName(of pid: pid_t, via tracker: WindowTracker) -> String? {
+        tracker.application(of: pid)?.localizedName
     }
 
     /// Display names keyed by display id, read once per report rather than once per monitor:

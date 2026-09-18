@@ -1417,7 +1417,7 @@ final class Coordinator: WindowTrackerDelegate {
         // Hyprland keeps behind `focus_on_activate` and leaves off. The same test `isEchoOfOwnRaise`
         // makes, for the same reason: a focus that comes with an activation is a person's doing.
         let activated = tracker.window(id).map {
-            NSWorkspace.shared.frontmostApplication?.processIdentifier == $0.pid
+            $0.belongs(to: NSWorkspace.shared.frontmostApplication)
         } ?? false
         let revealed: Bool
         if activated {
@@ -1973,7 +1973,7 @@ final class Coordinator: WindowTrackerDelegate {
         // reports the focus from an application which is not the frontmost one is an echo
         // however long it took to arrive. A click is never that: it activates as it focuses.
         if let window = tracker.window(id),
-           NSWorkspace.shared.frontmostApplication?.processIdentifier != window.pid {
+           !window.belongs(to: NSWorkspace.shared.frontmostApplication) {
             return true
         }
         guard ProcessInfo.processInfo.systemUptime - raisedAt < Self.raiseEchoWindow else {
@@ -2407,7 +2407,7 @@ extension Coordinator {
         return StateReporter.report(workspaces,
                                     tracked: tracker.windows.values.map(\.tracked),
                                     monitorKey: { keys[$0] },
-                                    appName: StateReporter.appName(of:),
+                                    appName: { [tracker] in StateReporter.appName(of: $0, via: tracker) },
                                     screenName: { screens[$0] },
                                     version: AppIdentity.version)
     }

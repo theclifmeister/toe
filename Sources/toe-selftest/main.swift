@@ -1897,6 +1897,52 @@ h.test("killactive quits the application on its last window and only then") { t 
     t.equal(asked, true, "and now it was")
 }
 
+h.test("an accessory is observed when it is a running application's helper") { t in
+    // Steam, as found on the machine that raised #158: the ordinary application owns nothing
+    // the user can see, and the windows belong to an accessory child named under its id.
+    let running: Set<String> = ["com.valvesoftware.steam", "com.apple.Safari", "com.raycast.macos"]
+    func owner(_ id: String?, launchd: Bool = false, regular: Set<String> = running) -> String? {
+        HelperOwnership.owner(of: id, regular: regular, spawnedByLaunchd: launchd)
+    }
+
+    t.equal(owner("com.valvesoftware.steam.helper"), "com.valvesoftware.steam",
+            "Steam Helper is Steam's")
+    t.equal(owner("com.valvesoftware.steam.helper.renderer"), "com.valvesoftware.steam",
+            "however long the suffix")
+
+    // The reasons not to observe every accessory, each in turn.
+    t.equal(owner("com.raycast.macos"), nil,
+            "an accessory that *is* a running application is not its own helper — the suffix is required")
+    t.equal(owner("com.raycast.macos.settings", launchd: true), nil,
+            "a matching name spawned by launchd is an XPC service, not a child")
+    t.equal(owner("com.apple.WebKit.WebContent", launchd: true), nil, "Raycast's WebKit helpers")
+    t.equal(owner("com.apple.WebKit.WebContent"), nil,
+            "and with any parent, a name nothing running owns")
+    t.equal(owner("com.1password.1password-launcher"), nil,
+            "1Password's quick access: no running application is named as a prefix")
+    t.equal(owner("com.valvesoftware.steam.helper", regular: []), nil,
+            "no ordinary application running: nobody's helper")
+    t.equal(owner("com.valvesoftware.steamhelper"), nil,
+            "the prefix is a dotted component, not a run of characters")
+    t.equal(owner("com.valvesoftware.steam."), nil, "a trailing dot is not a suffix")
+    t.equal(owner(nil), nil, "no bundle id is nobody's helper")
+    t.equal(owner("x.helper", regular: [""]), nil, "an empty identifier owns nothing")
+
+    // When both `com.a` and `com.a.b` are running, the helper is the nearer one's.
+    t.equal(owner("com.a.b.helper", regular: ["com.a", "com.a.b"]), "com.a.b", "the longest match wins")
+    t.equal(owner("com.a.b.helper", regular: ["com.a"]), "com.a", "and the shorter one when it is alone")
+
+    // The parent is a sysctl, made only for a name that matched.
+    var asked = false
+    func parent() -> Bool { asked = true; return false }
+    t.equal(HelperOwnership.owner(of: "com.apple.WebKit.WebContent", regular: running,
+                                  spawnedByLaunchd: parent()), nil, "no match")
+    t.equal(asked, false, "and the kernel was never asked")
+    t.equal(HelperOwnership.owner(of: "com.valvesoftware.steam.helper", regular: running,
+                                  spawnedByLaunchd: parent()), "com.valvesoftware.steam", "a match")
+    t.equal(asked, true, "and now it was")
+}
+
 h.test("the slide on a swipe is configurable and off by default") { t in
     let c = Config.makeDefault()
     t.equal(c.animations.slideOnSwipe, false, "off until asked for: it needs Screen Recording")
