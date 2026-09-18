@@ -145,6 +145,11 @@ public enum SkillDocument {
           to have done nothing. The window itself leaves the layout for as long as it is
           fullscreen — its neighbours take its tile, and it is reported `hidden` on the workspace
           it will go back to — and takes a tile again when it returns.
+        - **A tabbed window is one tile.** Terminal, Ghostty, Safari and anything else with native
+          window tabs shows one tab at a time, and every tab is a window with an id of its own.
+          The tab in front holds the tile; the others are reported `hidden` on the same workspace,
+          with no frame. Focusing one of those is a tab switch, not a workspace switch: it takes
+          the tile over in place and nothing else moves.
         - **Closing an application's last window quits the application.** `killactive` on a
           window with no siblings — on any workspace, minimized, or ones toe does not tile —
           sends the application ⌘Q rather than ⌘W, unless `[misc] quit_on_last_window` is off.

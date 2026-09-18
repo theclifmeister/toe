@@ -131,6 +131,31 @@ final class WindowTracker {
         windows.removeValue(forKey: id)
     }
 
+    /// The windows of `front`'s application that have gone behind a native tab: tracked, but
+    /// no longer in the application's `AXWindows` list. A window on another Space stays in
+    /// that list and so does a minimized one; a tab that is not selected is the one thing
+    /// that leaves it (measured on Ghostty, #165). What `WorkspaceManager.tabCameForward`
+    /// decides from.
+    ///
+    /// Free for an application with no other tracked window, which is most of the calls; for
+    /// the rest it is one round trip for the list and one per window listed, on the paths
+    /// that already paid six for `isManageable`. A list that could not be read at all — the
+    /// application is stopped, or slow past `axMessagingTimeout` — is not an empty list: it
+    /// says nothing, and nothing hidden is the answer that changes nothing.
+    func hiddenTabs(of pid: pid_t, excluding front: CGWindowID) -> Set<CGWindowID> {
+        let mine = Set(windows.values.lazy.filter { $0.pid == pid && $0.id != front }.map(\.id))
+        guard !mine.isEmpty,
+              let listed = AX.application(pid).value(kAXWindowsAttribute) as? [AXUIElement]
+        else { return [] }
+        return mine.subtracting(listed.compactMap(\.windowID))
+    }
+
+    /// The float rules' answer for a window, asked again for one that has come out from
+    /// behind a tab and is being placed for the first time.
+    func shouldFloat(_ window: ManagedWindow) -> Bool {
+        floatRules.contains { $0.matches(bundleID: window.bundleID, title: window.title) }
+    }
+
     // MARK: - Lifecycle
 
     func start() {
@@ -250,8 +275,13 @@ final class WindowTracker {
 
         let element = AX.application(pid)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
+        // Main as well as focused: a native tab switch posts `kAXMainWindowChanged` and
+        // nothing else — no focused-window change at all (measured on Ghostty, #165) — so
+        // without it toe never hears that the window in front of a tab group is a different
+        // window. An ordinary focus change posts both, and hearing it twice is harmless.
         for notification in [kAXWindowCreatedNotification,
                              kAXFocusedWindowChangedNotification,
+                             kAXMainWindowChangedNotification,
                              kAXApplicationActivatedNotification] {
             AXObserverAddNotification(observer, element, notification as CFString, refcon)
         }
@@ -342,9 +372,15 @@ final class WindowTracker {
 
     @discardableResult
     func adopt(_ element: AXUIElement, pid: pid_t) -> ManagedWindow? {
+        // The window already known is answered before `isManageable` is asked, not after: that
+        // is six round trips, this path runs on every focus change — twice now, since a click
+        // posts a main-window change as well as a focused one — and for a window toe already
+        // has, the answer would not be used. A known window that has since minimized or gone
+        // fullscreen is heard about through its own notifications and `checkPresence`, not by
+        // re-examining it on every click.
+        if let id = element.windowID, let existing = windows[id] { return existing }
         guard isManageable(element) else { return nil }
         guard let id = element.windowID else { return nil }
-        if let existing = windows[id] { return existing }
 
         let owner = owners[pid]
         let app = owner?.application ?? NSRunningApplication(processIdentifier: pid)
@@ -363,8 +399,7 @@ final class WindowTracker {
             }
         }
 
-        let shouldFloat = floatRules.contains { $0.matches(bundleID: window.bundleID, title: window.title) }
-        delegate?.windowAppeared(window, shouldFloat: shouldFloat)
+        delegate?.windowAppeared(window, shouldFloat: shouldFloat(window))
         return window
     }
 
@@ -399,7 +434,7 @@ final class WindowTracker {
             windows.removeValue(forKey: id)
             delegate?.windowDisappeared(id)
 
-        case kAXFocusedWindowChangedNotification:
+        case kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification:
             let window = adopt(element, pid: element.pid)
             if let id = window?.id ?? element.windowID, windows[id] != nil {
                 delegate?.windowFocused(id)

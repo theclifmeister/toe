@@ -1696,6 +1696,138 @@ h.test("the state report puts a suspended window on the workspace it will return
     t.equal(state.workspaces.first { $0.index == 1 }?.windows, [1], "the workspace lists only the tile that is there")
 }
 
+// MARK: - Native tabs (#165)
+
+h.test("a new tab takes over the tile of the tab it pushed behind, and the tree does not move") { t in
+    let wm = WorkspaceManager(options: { var o = DwindleOptions(); o.forceSplit = 2; return o }(),
+                              gaps: Gaps(inner: 0, outer: 0))
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2); wm.addWindow(3)
+    wm.noteFocus(2)
+    let before = wm.render().frames
+    // Cmd+T in window 2: window 4 is created, and 2 has left the application's window list.
+    t.equal(wm.tabCameForward(4, hidden: [2]), 2, "4 succeeds 2")
+    let after = wm.render().frames
+    t.equalBox(after[4], before[2]!, "4 wears the tile 2 had")
+    t.equalBox(after[1], before[1]!, "1 has not moved")
+    t.equalBox(after[3], before[3]!, "nor has 3")
+    t.equal(after[2], nil, "2 has no tile of its own")
+    t.equal(wm.workspaceIndex(of: 2), nil, "and is on no workspace")
+    t.equal(wm.tabs.front(of: 2), 4, "it is behind 4")
+    t.equal(wm.tabs.hidden, [2], "and is the only window behind a tab")
+    t.equal(wm.focusedWindow, 4, "the new tab has the focus")
+    t.equal(wm.visibleTilesByMonitor(), [1: [1, 3, 4]], "the presence check judges the tile by its new holder")
+}
+
+h.test("switching back and forth between tabs swaps the holder and never the shape") { t in
+    let wm = WorkspaceManager(options: { var o = DwindleOptions(); o.forceSplit = 2; return o }(),
+                              gaps: Gaps(inner: 0, outer: 0))
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.tabCameForward(3, hidden: [2])
+    wm.tabCameForward(4, hidden: [3])
+    t.equal(wm.tabs.behind, [2: 4, 3: 4], "both earlier tabs stand behind the one in front")
+    let shape = wm.render().frames
+    // Show Previous Tab: 3 comes forward, 4 goes behind.
+    t.equal(wm.tabCameForward(3, hidden: [2, 4]), 4, "3 takes over from 4")
+    t.equal(wm.tabs.behind, [2: 3, 4: 3], "and everyone else stands behind 3")
+    t.equalBox(wm.render().frames[3], shape[4]!, "in the same tile")
+    t.equal(wm.render().frames[4], nil, "which 4 no longer holds")
+    // Show Next Tab: 4 comes forward again.
+    t.equal(wm.tabCameForward(4, hidden: [2, 3]), 3, "4 takes it back")
+    t.equalBox(wm.render().frames[4], shape[4]!, "same tile again")
+    t.equal(wm.render().frames.count, 2, "still two tiles for four windows")
+    t.equal(wm.tabCameForward(4, hidden: [2, 3]), nil, "a window already in front takes nothing")
+}
+
+h.test("a tab pulled out of its group comes forward as a window of its own") { t in
+    var tabs = TabGroups()
+    t.equal(tabs.cameForward(3, hidden: [2], placed: { $0 == 2 }), 2, "3 succeeds 2")
+    // 3 is dragged out into its own window: 2 is in front of the old group again, so it is
+    // not hidden — and 3 was behind nobody who is.
+    t.equal(tabs.cameForward(3, hidden: [], placed: { _ in true }), nil, "3 is nobody's successor")
+    t.equal(tabs.behind, [2: 3], "nothing about 2's standing is known until it comes forward")
+    t.equal(tabs.cameForward(2, hidden: [], placed: { $0 == 3 }), nil, "2 comes forward on its own")
+    t.equal(tabs.behind, [:], "and stands behind nobody")
+}
+
+h.test("two groups hiding a tab at once is ambiguous, unless the newcomer was behind one of them") { t in
+    var tabs = TabGroups()
+    let placed: (WindowID) -> Bool = { [1, 2].contains($0) }
+    t.equal(tabs.cameForward(5, hidden: [1, 2], placed: placed), nil, "a new window: no telling which group")
+    t.equal(tabs.behind, [:], "and nothing recorded on a guess")
+    tabs = TabGroups()
+    t.equal(tabs.cameForward(5, hidden: [1], placed: placed), 1, "5 succeeds 1")
+    t.equal(tabs.cameForward(1, hidden: [5, 2], placed: { [5, 2].contains($0) }), 5,
+            "1 succeeds the window it was behind, not the other group's front")
+    t.equal(tabs.cameForward(9, hidden: [1, 2], placed: { _ in false }), nil, "a tab that holds nothing is nothing to succeed")
+}
+
+h.test("closing the front tab leaves the tile to a tab behind it, provisionally") { t in
+    let wm = WorkspaceManager(options: { var o = DwindleOptions(); o.forceSplit = 2; return o }(),
+                              gaps: Gaps(inner: 0, outer: 0))
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.tabCameForward(3, hidden: [2])
+    wm.tabCameForward(4, hidden: [3])
+    let shape = wm.render().frames
+    t.equal(wm.windowGone(4), 2, "the lowest id inherits, so the answer does not depend on dictionary order")
+    t.equal(wm.tabs.behind, [3: 2], "3 stands behind the heir")
+    t.equalBox(wm.render().frames[2], shape[4]!, "the heir holds the tile")
+    t.equal(wm.workspaceIndex(of: 4), nil, "4 is gone")
+    // AppKit selected 3, not 2: it comes forward, finds the heir hidden and placed, and takes over.
+    t.equal(wm.tabCameForward(3, hidden: [2]), 2, "3 takes the tile from the heir")
+    t.equal(wm.tabs.behind, [2: 3], "2 stands behind 3")
+    t.equalBox(wm.render().frames[3], shape[4]!, "same tile throughout")
+    // Closing a tab that is behind removes it and nothing else.
+    t.equal(wm.windowGone(2), nil, "nothing was behind 2")
+    t.equal(wm.tabs.behind, [:], "and 2 is forgotten")
+    t.equalBox(wm.render().frames[3], shape[4]!, "3 keeps the tile")
+    // With nothing behind it, the front closing is an ordinary removal.
+    t.equal(wm.windowGone(3), nil, "3 had no group left")
+    t.equalBox(wm.render().frames[1], AREA, "1 takes the screen")
+}
+
+h.test("replacing a window carries its float, its stage, its frame and its focus across") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2, floating: true)
+    wm.floatingFrames[2] = box(10, 20, 300, 200)
+    wm.noteFocus(2); wm.noteFocus(1); wm.noteFocus(2)
+    wm.replaceWindow(2, with: 5)
+    t.equal(wm.isFloating(5), true, "5 floats as 2 did")
+    t.equal(wm.isFloating(2), false, "2 is nothing now")
+    t.equalBox(wm.floatingFrames[5], box(10, 20, 300, 200), "with 2's frame")
+    t.equal(wm.floatingFrames[2], nil, "which 2 no longer has")
+    t.equal(wm.focusHistory, [5, 1], "5 has 2's place in the history")
+    t.equal(wm.focusedWindow, 5, "and the focus")
+    wm.replaceWindow(1, with: 5)
+    t.equal(wm.workspaceIndex(of: 1), 1, "a window already placed replaces nobody")
+    wm.suspend(1)
+    wm.replaceWindow(1, with: 7)
+    t.equal(wm.suspended[7], WorkspaceManager.Suspension(workspace: 1, anchor: nil), "a suspension moves too")
+    t.equal(wm.suspended[1], nil, "and does not stay behind")
+}
+
+h.test("the state report puts a window behind a tab on its group's workspace, hidden") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    wm.addWindow(1); wm.addWindow(2)
+    wm.switchTo(workspace: 3)
+    wm.addWindow(3)
+    wm.tabCameForward(4, hidden: [3])
+    let state = StateReporter.report(wm, tracked: [tracked(1, pid: 10), tracked(2, pid: 10),
+                                                   tracked(3, pid: 20), tracked(4, pid: 20)],
+                                     monitorKey: { _ in "UUID-1" }, appName: { _ in "App" },
+                                     screenName: { _ in nil }, version: nil)
+    let three = state.windows.first { $0.id == 3 }
+    t.equal(three?.workspace, 3, "reported on the workspace of the tab in front of it")
+    t.equal(three?.hidden, true, "and hidden")
+    t.equal(three?.frame, nil, "with no frame of its own")
+    t.equal(state.windows.first { $0.id == 4 }?.hidden, false, "the tab in front is an ordinary tile")
+    t.equal(state.workspaces.first { $0.index == 3 }?.windows, [4], "the workspace lists the holder")
+}
+
 // MARK: - Config
 
 h.test("the second floating size is configurable, and a bad one warns") { t in

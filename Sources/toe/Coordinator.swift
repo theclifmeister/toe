@@ -1041,7 +1041,12 @@ final class Coordinator: WindowTrackerDelegate {
     private func rescanApps() {
         guard !scanningApps else { return }
         scanningApps = true
-        DispatchQueue.global(qos: .utility).async {
+        // Weak on the outer closure as well as the inner: the inner capture list would otherwise
+        // be built from a `self` the outer one holds strongly for the length of the scan, which
+        // Swift 6.4 flags and which was never the intent — a scan does not keep toe alive. The
+        // inner one still names it, because implicit `self` inside a closure is only allowed by
+        // that closure's own capture list.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let found = Apps.ordered(AppLibrary.installed())
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -1388,28 +1393,84 @@ final class Coordinator: WindowTrackerDelegate {
             // write clobbers it. This is Hyprland's `m_vLastFloatingSize` / `..Position`, and it
             // is what a window returns to the first time you float it.
             workspaces.floatingFrames[window.id] = window.element.frame
-            workspaces.addWindow(window.id, floating: shouldFloat)
+            // A new tab is a new window that has just pushed the old one behind it. It takes
+            // over that window's tile rather than splitting it — see `TabGroups` (#165).
+            if !succeedTab(window) {
+                workspaces.addWindow(window.id, floating: shouldFloat)
+            }
         }
         apply(refocus: false)
         refreshStatus()
     }
 
     func windowDisappeared(_ id: WindowID) {
-        workspaces.removeWindow(id)
+        // The front tab of a group closing leaves the tile to the tabs behind it; one of them
+        // holds it until AppKit's choice of next tab comes forward and `succeedTab` hands it
+        // on. The tile keeps the frame the group has, so there is nothing new to write.
+        if let heir = workspaces.windowGone(id) {
+            Log.info("tab \(id) closed — \(heir) holds its tile until the next tab comes forward")
+            desired[heir] = desired[id]
+        }
         workspaces.floatingFrames.removeValue(forKey: id)
+        dropPendingWrites(for: id)
+        apply(refocus: false)
+    }
+
+    /// Forget everything toe still meant to write to a window that has nothing to be written
+    /// to any more — gone, suspended, or behind a tab.
+    private func dropPendingWrites(for id: WindowID) {
         desired.removeValue(forKey: id)
         corrections.removeValue(forKey: id)
         settleWork.removeValue(forKey: id)?.cancel()
         settleAttempts.removeValue(forKey: id)
         if focusApplied == id { focusApplied = nil }
-        apply(refocus: false)
+    }
+
+    /// Let a window that has just come forward take over the tile of the tab it has pushed
+    /// behind — `WorkspaceManager.tabCameForward`, with the tracker asked which windows of the
+    /// application those are and toe's write bookkeeping moved across.
+    ///
+    /// Moved rather than dropped, because the incoming tab is already wearing the group's
+    /// frame — AppKit resizes it before it posts the notification — and that frame is the one
+    /// `desired` records for the outgoing one. Carrying it over is what keeps `apply` from
+    /// writing a frame the window already has.
+    ///
+    /// - Returns: whether the window took over a tile. When it did not, it is a window of its
+    ///   own and the caller places it as one.
+    private func succeedTab(_ window: ManagedWindow) -> Bool {
+        let hidden = tracker.hiddenTabs(of: window.pid, excluding: window.id)
+        guard let predecessor = workspaces.tabCameForward(window.id, hidden: hidden) else { return false }
+        Log.info("tab \(window.id) came forward — taking over the tile of \(predecessor), now behind it")
+        desired[window.id] = desired[predecessor]
+        dropPendingWrites(for: predecessor)
+        return true
     }
 
     func windowFocused(_ id: WindowID) {
-        // A suspended window has no workspace to focus on. Leaving fullscreen focuses it as it
-        // lands, and that is also a Space change and an activation — `checkPresence` brings it
-        // back from either, and `resume` gives it the focus then.
-        guard workspaces.workspaceIndex(of: id) != nil, !isEchoOfOwnRaise(id) else { return }
+        if workspaces.workspaceIndex(of: id) == nil {
+            // A tab switch: the window in front of the group is a different window now, and it
+            // takes over the group's tile in place. Or a tab pulled out of its group into a
+            // window of its own, which is placed as a new window is — the group it left keeps
+            // the tile. Either way the layout has changed and `apply` writes what differs.
+            guard let window = tracker.window(id) else { return }
+            let wasBehind = workspaces.tabs.hidden.contains(id)
+            if succeedTab(window) {
+                // The system gave it the focus — that is what brought us here — so, as below,
+                // there is nothing for `apply` to assert.
+                focusApplied = id
+                apply(refocus: false)
+            } else if wasBehind {
+                Log.info("tab \(id) came forward as a window of its own")
+                workspaces.addWindow(id, floating: tracker.shouldFloat(window))
+                focusApplied = id
+                apply(refocus: false)
+            }
+            // Else a suspended window, which has no workspace to focus on. Leaving fullscreen
+            // focuses it as it lands, and that is also a Space change and an activation —
+            // `checkPresence` brings it back from either, and `resume` gives it the focus then.
+            return
+        }
+        guard !isEchoOfOwnRaise(id) else { return }
         // Following the focus onto a workspace that is not showing is right only when the user
         // asked for it. Clicking an application's Dock icon, Cmd-Tab and Spotlight all activate
         // the application as they focus its window; an application raising a window of its own
@@ -1667,11 +1728,7 @@ final class Coordinator: WindowTrackerDelegate {
             Log.info("window \(id) is on another Space — its tile goes to its neighbours until it is back")
             // Nothing re-asserts a tile on a window that has none: the next external move of a
             // fullscreen window is it settling on its own display, not an app fighting a tile.
-            desired.removeValue(forKey: id)
-            corrections.removeValue(forKey: id)
-            settleWork.removeValue(forKey: id)?.cancel()
-            settleAttempts.removeValue(forKey: id)
-            if focusApplied == id { focusApplied = nil }
+            dropPendingWrites(for: id)
         }
 
         // A window back from fullscreen is put back on its workspace, and the workspace is
