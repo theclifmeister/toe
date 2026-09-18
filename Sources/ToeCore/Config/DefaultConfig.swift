@@ -391,8 +391,12 @@ font_size  = 18
 # AppleScript's `new window` reuses the running instance, so the window opens on the current
 # workspace without a second app process lingering. `ghostty +new-window` is not supported on
 # macOS, and `open -na Ghostty` leaves a zombie instance behind.
+# Safari's `make new document` is asked for only when Safari is already running: sent to a
+# Safari that is not, it launches it — which opens Safari's own startup window — and then adds
+# the document, so the first press after quitting Safari opened two windows. `activate` alone
+# launches it with the one.
 "super-enter"       = "exec osascript -e 'tell application \"Ghostty\" to new window'"
-"super-shift-enter" = "exec osascript -e 'tell application \"Safari\" to make new document' -e 'tell application \"Safari\" to activate'"
+"super-shift-enter" = "exec osascript -e 'if application \"Safari\" is running then tell application \"Safari\" to make new document' -e 'tell application \"Safari\" to activate'"
 # Chrome instead:
 # "super-shift-enter" = "exec open -na \"Google Chrome\" --args --new-window"
 
