@@ -237,7 +237,8 @@ public struct MenuState: Equatable {
                 let found = flat[match.index]
                 return found.item.foundAt(path: found.path.isEmpty
                                           ? nil
-                                          : found.path.joined(separator: " › "))
+                                          : found.path.joined(separator: " › "),
+                                          fromRoot: isAtRoot)
             }
         }
         if resettingSelection {

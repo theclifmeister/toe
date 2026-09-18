@@ -57,7 +57,8 @@ public struct MenuItem: Equatable {
         /// An application's own icon, by the bundle it is read from. Still symbolic to ToeCore —
         /// a path is not a picture — and it is the UI layer that asks `NSWorkspace` what the
         /// bundle looks like, so the selftest can assert a row carries one without a pixel in
-        /// sight. The one icon that is not a glyph, and the reason `foundAt` treats it apart.
+        /// sight. The one icon that is not a glyph; `foundAt` once kept it on a root hit for
+        /// that reason and no longer does, and says why.
         case application(path: String)
     }
 
@@ -121,26 +122,42 @@ public struct MenuItem: Equatable {
         self.action = action
     }
 
-    /// The same row as a search hit: it gains the path it was found at and loses its glyph.
+    /// The same row as a search hit: it gains the path it was found at, and loses its icon if
+    /// the search began at the root.
     ///
-    /// Losing the glyph is the point. One level of the tree is a handful of rows that mostly
-    /// carry one, so the icons form a column and the titles start after it. A search mixes
-    /// levels, and most of what it turns up — a theme, a wallpaper, a keybinding — never had an
-    /// icon, so that column is a column no longer: a few rows indent while the rest do not, and
-    /// the eye reads the ragged left edge before it reads any of the titles. Dropping the glyph
-    /// costs a hint that the subtitle now gives better, and buys back the straight edge.
+    /// The root is where a search crosses the whole tree, and the whole tree is two kinds of
+    /// level: the ones that put an icon on every row (Learn, Setup, Apps) and the ones that put
+    /// one on none (Theme, Background). `titleOrigin` sets a row's title past its icon only
+    /// when it has one, so a list that mixes the two kinds indents some titles and not others,
+    /// and the eye reads the ragged left edge before it reads a word. A root search is that
+    /// list every time, so every root hit goes bare: the edge comes back, and the path under
+    /// the title now carries the hint the glyph did. That includes an application's picture,
+    /// which #153 had let survive — from then on `saf` at the root put a picture on Safari and
+    /// nothing on `Style` beneath it, the very raggedness the rule was for, and `Apps` under
+    /// the title says which Safari it is as well as the picture did.
     ///
-    /// An application's icon is not a glyph and stays. It is not a hint about the row, it is
-    /// what the row *is* — the thing that tells `Zen` the browser from `Install › Zen` at a
-    /// glance, and what Omarchy's own search keeps on an app row while every other row goes
-    /// bare. Inside the `Apps` level it is also what keeps typing from turning a launcher into a
-    /// list that lost its pictures on the first keystroke; there every row has one, so the edge
-    /// stays straight anyway.
-    public func foundAt(path: String?) -> MenuItem {
-        let kept: Icon?
-        if case .application = icon { kept = icon } else { kept = nil }
-        return MenuItem(title: title, subtitle: path, icon: kept, value: value, progress: progress,
-                        isDisabled: isDisabled, action: action)
+    /// Inside a level the search is a filter of the rows in front of you, and those rows keep
+    /// what they wear: a level is all icons or none by construction, so its filtered self lines
+    /// up the way it did before the first keystroke, and a launcher does not lose its pictures
+    /// for being typed at (#154). A search from a level does still reach the levels below it —
+    /// `t` inside Style turns up `Theme` beside the themes under it — and there the column can
+    /// go mixed; that is two rows of glyph-bearing parent among their bare children, in a
+    /// level with two rows, and it was judged (#162) not worth taking the icons off every
+    /// sublevel search to prevent.
+    ///
+    /// Why this split and not one rule for every search: #162 asked for the root and `Apps` to
+    /// stop doing different things for the same keystrokes, and the two ways to make them
+    /// agree both cost more than the split does. Keeping every icon everywhere brings the
+    /// ragged root search back; dropping every icon everywhere turns the launcher into a text
+    /// list the moment you type, which is what #154 kept it from being. Reserving the icon
+    /// column for a whole list at once — every title indented while any row has an icon — was
+    /// built and set aside: it lines a mixed search up, but by putting an empty gutter on the
+    /// theme rows of a root search, and that was not the fix that was asked for. So the rule
+    /// is the level's: the root strips, a sublevel keeps, and which one you are on is on the
+    /// placeholder line (`Go…` against the level's own name) before you type.
+    public func foundAt(path: String?, fromRoot: Bool) -> MenuItem {
+        MenuItem(title: title, subtitle: path, icon: fromRoot ? nil : icon, value: value,
+                 progress: progress, isDisabled: isDisabled, action: action)
     }
 
     /// walker marks the rows that lead somewhere with a trailing `›`, right-aligned.

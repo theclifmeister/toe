@@ -3018,15 +3018,48 @@ h.test("a branch found by searching is still a branch") { t in
     t.equal(m.activate(), .pushed, "and it descends the way it does unfiltered")
 }
 
-h.test("a searched list carries no icons") { t in
-    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config()), visibleRows: 20)
+h.test("a search from the root carries no icons") { t in
+    let style = StyleMenu(themes: [ThemeRef(slug: "everforest", name: "Everforest")])
+    var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: style),
+                      visibleRows: 20)
     t.expect(m.visible.contains { $0.icon != nil }, "a level draws its glyphs")
     m.type("e")
     t.expect(m.visible.count > 1, "the search turns up rows from several levels")
+    t.expect(m.visible.contains { $0.title == "Everforest" },
+             "some of which — the themes — never had an icon to begin with")
     t.expect(m.visible.allSatisfy { $0.icon == nil },
-             "and none of them indents past a glyph the row beneath it has not got")
+             "so none of them indents past a glyph the row beneath it has not got")
     m.backspace()
     t.expect(m.visible.contains { $0.icon != nil }, "the level gets its glyphs back")
+    m.type("quit")
+    t.equal(m.visible.first?.title, "Quit", "a root row found at the root")
+    t.equal(m.visible.first?.subtitle, nil, "has no path, being where you already are")
+    t.equal(m.visible.first?.icon, nil,
+            "and goes bare like the rest: the list it is in is a root search, whatever it found")
+}
+
+h.test("a search inside a level keeps the level's icons") { t in
+    // #162: typing inside `Apps` kept the pictures and typing at the root did not, and the two
+    // had no rule between them. Now there is one — the root strips, a level keeps — and it is
+    // the level's, not the row's: `Learn` filtered keeps its glyphs the way `Apps` filtered
+    // keeps its pictures, so the launcher is not the one place typing leaves the icons alone.
+    var learn = MenuState(root: MenuModel.root(loginItem: .off, config: Config()),
+                          visibleRows: 20, path: MenuRoute.learn.path)
+    learn.type("key")
+    t.equal(learn.visible.map(\.title), ["Keybindings"], "filtered to the one row")
+    t.equal(learn.visible.first?.icon, .keyboard, "wearing the glyph it wears unfiltered")
+    t.equal(learn.visible.first?.subtitle, nil, "and no path, being at the level already")
+
+    let style = StyleMenu(themes: [ThemeRef(slug: "everforest", name: "Everforest")])
+    var setup = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: style),
+                          visibleRows: 20, path: MenuRoute.style.path)
+    setup.type("e")
+    t.equal(setup.visible.first { $0.title == "Theme" }?.icon, .droplet,
+            "a level's own row keeps its glyph")
+    t.equal(setup.visible.first { $0.title == "Everforest" }?.subtitle, "Theme",
+            "beside a hit from the level below, with its path")
+    t.equal(setup.visible.first { $0.title == "Everforest" }?.icon, nil,
+            "which has none to keep — the one mixed column the rule allows, and `foundAt` says why")
 }
 
 h.test("an empty query is one level at a time, with no paths") { t in
@@ -4654,22 +4687,22 @@ h.test("Apps is a provider level: the machine's applications, each wearing its o
     t.equal(root.showsPaths, true, "found from the root, the same rows have a path to show")
 }
 
-h.test("an application found from the root keeps its icon where a glyph would go") { t in
-    // `foundAt` drops glyphs so a mixed-level search does not indent a few rows past the rest.
-    // An app's icon is not a glyph: it is what the row is, and it is the thing that tells the
-    // browser from `Install › Zen` at a glance, so it survives the search the way Omarchy's does.
+h.test("an application found from the root goes bare like every other root hit") { t in
+    // #153 let the bundle's picture survive a root search while every glyph went, and that
+    // put an icon on Safari and nothing on Style beneath it — the ragged edge the stripping
+    // was for. Since #162 the rule is the level's: a root search strips everything, and the
+    // `Apps` under the title is what tells the browser from `Install › Zen`.
     let style = StyleMenu(apps: [AppRef(name: "Zed", path: "/Applications/Zed.app")])
     var m = MenuState(root: MenuModel.root(loginItem: .off, config: Config(), style: style),
                       visibleRows: 10)
     m.type("zed")
     t.equal(m.visible.map(\.title), ["Zed"], "found from the root")
     t.equal(m.visible.first?.subtitle, "Apps", "with the path it was found at")
-    t.equal(m.visible.first?.icon, .application(path: "/Applications/Zed.app"),
-            "and the bundle's icon still on it")
+    t.equal(m.visible.first?.icon, nil, "and no picture, as no root hit has one")
     m.backspace(); m.backspace(); m.backspace()
     m.type("le")
     t.equal(m.visible.first?.title, "Learn", "a menu row found the same way")
-    t.equal(m.visible.first?.icon, nil, "still loses its glyph — that rule has not changed")
+    t.equal(m.visible.first?.icon, nil, "loses its glyph the same way")
 }
 
 h.test("Learn is the keybindings and the three manuals that are about this machine") { t in
