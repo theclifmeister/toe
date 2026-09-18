@@ -136,6 +136,18 @@ tile the window server does not list is reaped; one it lists on another Space is
 to), and `Presence.Watch` will not believe "away" or "back" until the same answer has held for
 `presenceRecheckLatency`, because a fullscreen transition reads as both on the way through.
 
+**Native window tabs are one tile.** Every tab of a Terminal, Ghostty or Safari window is a real
+`NSWindow` that `isManageable` would accept, and the tabs share one frame — so a tile per tab is
+one window dragged between two places (#165). `TabGroups` keeps the group to one tile and the
+window in front of it as the holder; on a switch the incoming tab takes the tile over *in place*
+(`DwindleLayout.rename`, `WorkspaceManager.replaceWindow`), never a remove and an insert. The
+signal is `WindowTracker.hiddenTabs`: a tracked window that has dropped out of its application's
+`AXWindows` while the window server still lists it. Minimized windows and windows on other Spaces
+stay in that list; only a tab that has gone behind leaves it. Two consequences: a tab switch posts
+`kAXMainWindowChanged` and *no* focused-window change, which is why the tracker observes both; and
+a window behind a tab is on **no** workspace, like a suspended one, and is not `Presence`'s to
+judge — it is not in the tree.
+
 **Native-fullscreen windows** are never managed (`isManageable` rejects them) but do affect the
 border: the border panel is `.canJoinAllSpaces` + `.fullScreenAuxiliary`, so it will happily paint
 across a fullscreen Space unless something stops it. With *Displays have separate Spaces* on (the

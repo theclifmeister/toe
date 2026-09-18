@@ -241,6 +241,18 @@ public final class DwindleLayout {
         lb.recalculate()
     }
 
+    /// Hand a leaf to another window without touching the tree: the node keeps its box, its
+    /// parent and its place in the creation order, and only the window it carries changes.
+    /// What a native tab switch is to the layout (#165) — the tile is the tab group's, and the
+    /// window in front of the group is whichever tab was selected last. Removing and
+    /// re-inserting would reflow every neighbour for a change nothing on the screen wants.
+    public func rename(_ old: WindowID, to new: WindowID) {
+        guard old != new, nodes[new] == nil, let node = nodes.removeValue(forKey: old) else { return }
+        node.window = new
+        nodes[new] = node
+        if let index = order.firstIndex(of: old) { order[index] = new }
+    }
+
     private func swapOrder(_ a: WindowID, _ b: WindowID) {
         guard let ia = order.firstIndex(of: a), let ib = order.firstIndex(of: b) else { return }
         order.swapAt(ia, ib)

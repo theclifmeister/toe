@@ -220,6 +220,68 @@ public final class WorkspaceManager {
         suspended.removeValue(forKey: id)
     }
 
+    // MARK: - Native tabs
+
+    /// Which windows are behind a native tab, and whose tile each group shares. See
+    /// `TabGroups` for the rule and #165 for the bug.
+    public private(set) var tabs = TabGroups()
+
+    /// Hand everything `old` holds to `new`, in place: its leaf in the tree or its slot among
+    /// the floats, its floating frame and stage, its place in the focus history, and its
+    /// suspension if it has one. The tree's shape is untouched — see `DwindleLayout.rename`.
+    /// `new` must not already be placed.
+    public func replaceWindow(_ old: WindowID, with new: WindowID) {
+        guard old != new, workspaceIndex(of: new) == nil else { return }
+        for ws in workspaces.values {
+            ws.layout.rename(old, to: new)
+            if ws.floating.remove(old) != nil { ws.floating.insert(new) }
+        }
+        if let frame = floatingFrames.removeValue(forKey: old) { floatingFrames[new] = frame }
+        if let stage = floatingStage.removeValue(forKey: old) { floatingStage[new] = stage }
+        if let record = suspended.removeValue(forKey: old) { suspended[new] = record }
+        // Placed now, so not suspended — a tab that went fullscreen, was switched away from
+        // in fullscreen, and has just come forward on the desktop would otherwise wait for a
+        // `returned` that `resume` could only answer by finding it already placed.
+        if workspaceIndex(of: new) != nil { suspended.removeValue(forKey: new) }
+        // The new window may already be in the history from an earlier turn in front; one
+        // entry, at the old window's place, is what "most recent first" wants.
+        focusHistory.removeAll { $0 == new }
+        if let index = focusHistory.firstIndex(of: old) {
+            focusHistory[index] = new
+        }
+    }
+
+    /// `front` has come forward — created, focused, or newly main — and holds nothing yet,
+    /// with `hidden` the windows of its application that have just gone behind a tab. When
+    /// one of those holds the group's tile, `front` takes it over; otherwise `front` is a
+    /// window of its own and the caller places it as one.
+    ///
+    /// - Returns: the window `front` succeeded, or nil.
+    @discardableResult
+    public func tabCameForward(_ front: WindowID, hidden: Set<WindowID>) -> WindowID? {
+        guard workspaceIndex(of: front) == nil,
+              let predecessor = tabs.cameForward(front, hidden: hidden, placed: { self.workspaceIndex(of: $0) != nil })
+        else { return nil }
+        replaceWindow(predecessor, with: front)
+        noteFocus(front)
+        return predecessor
+    }
+
+    /// `id` is gone. When it was in front of a tab group, one of the windows behind it takes
+    /// its place until the tab AppKit selects comes forward and claims it; otherwise the
+    /// window is simply removed.
+    ///
+    /// - Returns: the heir, when there was one.
+    @discardableResult
+    public func windowGone(_ id: WindowID) -> WindowID? {
+        if let heir = tabs.windowGone(id) {
+            replaceWindow(id, with: heir)
+            return heir
+        }
+        removeWindow(id)
+        return nil
+    }
+
     // MARK: - Suspension
 
     /// Where a suspended window will go back: its workspace, and the tile it split from.
