@@ -28,7 +28,8 @@ final class Coordinator: WindowTrackerDelegate {
     private let power = PowerProvider()
     private let audio = AudioProvider()
     private let network = NetworkProvider()
-    private var providers: [BarProvider] { [network, audio, power] }
+    private let keyboard = KeyboardLayoutProvider()
+    private var providers: [BarProvider] { [keyboard, network, audio, power] }
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and `usable` reaches the top again, until `bar show` or a relaunch.
     private var barHidden = false
@@ -1163,6 +1164,9 @@ final class Coordinator: WindowTrackerDelegate {
             items.append(BarItems.accessibility())
         }
         items.append(BarItems.clock(ClockFormat.render(config.bar.clockFormat, at: Date())))
+        if let layout = keyboard.state {
+            items.append(BarItems.keyboardLayout(layout.label, full: layout.name))
+        }
 
         // The right section, in Omarchy's order: tray and agents are not portable and are left
         // out; bluetooth, network, audio, monitor, power follow.
@@ -1213,6 +1217,8 @@ final class Coordinator: WindowTrackerDelegate {
             dispatch(.workspace(.index(index)))
         case (.accessibility, _):
             Self.openAccessibilitySettings()
+        case (.keyboardLayout, .left):
+            keyboard.selectNext()
         case (.network, .left):
             SettingsPane.wifi.open()
         case (.audio, .left):
