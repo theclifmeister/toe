@@ -1102,6 +1102,10 @@ final class Coordinator: WindowTrackerDelegate {
             if status == nil { status = makeStatusItem() }
         }
         bar.enabled = wanted
+        // Told the panels now, not left to `refreshBar`: that returns before it reaches them
+        // while the bar is off, which is exactly the moment they have to come down — the
+        // first cut left every panel drawn under the menu bar it had just handed back.
+        bar.refresh(redraw: false)
         // The strip the tiles get changes with the bar and with its height, on the display's own
         // frame rather than on `visibleFrame` — see `refreshMonitors`. Every reload, because a
         // reload is what carries a new `[bar] height`, and `loadConfig` re-writes every frame
