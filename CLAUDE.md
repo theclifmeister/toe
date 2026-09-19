@@ -10,7 +10,8 @@ Omarchy's defaults (`preserve_split = true`, `force_split = 2`). It runs as a ba
 Omarchy's bar across the top of every display, key bindings and a gradient border around the
 focused window. Accessibility is the only
 permission it asks for by default; the opt-in `[animations] slide_on_swipe` is the one feature
-behind a second one (Screen Recording — see `ScreenSnapshot`).
+behind a second one (Screen Recording — see `ScreenSnapshot`), and the bar's Bluetooth panel
+the one behind a third, asked the first time that panel is opened (see "The bar").
 
 ## Commands
 
@@ -220,9 +221,43 @@ Four things to keep straight:
   hides. Read where `updateBorder` already reads it, and on its own at the start of a Space
   change and the end of the settle.
 
-Two widgets wait on a permission toe does not ask for: Bluetooth needs the Bluetooth TCC grant
-through IOBluetooth, and the Focus state (Dnd) lives in a Full-Disk-Access-protected database.
-The glyph rule for the first is in `BarWidgets`; neither has a provider.
+**The panels.** A left click on a right-section widget — and on the clock — opens a panel of
+toe's own under it: Omarchy's `plugins/panels/*/Panel.qml`, cut to what a Mac exposes
+publicly, in the quick menu's chrome at the bar's type size. The split is the bar's again:
+`ToeCore/Bar/Panels/` holds `PanelRow` (one row: hero, header, slider, list row, the Settings
+door), `PanelState` (the cursor — hidden until the first arrow, clamped, stepping over what
+cannot be chosen, following a device by identity when the list is rebuilt under it),
+`PanelLayout` (the rows' frames at Omarchy's `Style` tokens, the card anchored under its
+widget inside the display) and one model per panel (`PowerPanel`, `MonitorPanel`,
+`ClockPanel`, `AudioPanel`, `NetworkPanel`, `BluetoothPanel`) — a pure function from what the
+provider read to rows, all in the selftest. `toe/UI/BarPanelWindow.swift` is the one popover
+for all six (`PanelView` draws), `Coordinator.openPanel` fills it, and `refreshBar` pushes new
+rows into it on every provider change so a slider you are holding shows the volume the device
+confirmed. Four rules:
+
+- **Every panel ends on its Settings pane** — the click that used to open the pane is the
+  panel's last row, so nothing is lost. `PanelState` is not `MenuState`, though #177 asked for
+  that where it fits: a panel is one flat list with sliders and a hero, not a tree with a
+  search, and what carries across is the rules, not the type.
+- **Panels ask for one permission, and only Bluetooth's, and only from the Bluetooth panel.**
+  `BluetoothProvider` starts with the rest but reads nothing until `CBCentralManager.authorization`
+  says it may; the widget draws the generic "on" glyph until then; the panel's first open makes
+  the `CBCentralManager` whose creation puts the sheet up (`NSBluetoothAlwaysUsageDescription`).
+  The network panel does **not** ask for Location — measured for #177: without it every SSID
+  is nil and a scan blocks for seven seconds, so the panel is the connection's numbers and a
+  note saying why there is no name. Brightness has no public route on Apple silicon (no
+  `IODisplayConnect` service), so the monitor panel has no slider. Both measurements are
+  comments on #177.
+- **A click on the bar is not a click outside.** `BarPanelWindow`'s click monitor lets the
+  bar's clicks through so that `barClicked` can answer them: the open panel's own widget
+  toggles it closed, another widget's swaps the rows in place under the other slot. Anything
+  else — Escape, a click elsewhere, losing key to another application, a screen change, `bar
+  hide`, fullscreen on that display — closes it.
+- **Bold is a stroke.** The bundled face is Regular only; the panels' headers and titles are
+  drawn with a negative `strokeWidth` rather than 2.6 MB of Bold in the bundle.
+
+The Focus state (Dnd) still waits on a permission toe does not ask for — it lives in a
+Full-Disk-Access-protected database — and has no provider.
 
 ## The control socket
 

@@ -32,6 +32,9 @@ final class BarWindowSet {
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
     /// The wheel, in whole notches — see `BarView.scrollWheel`.
     var onScroll: ((BarItem.Kind?, Int) -> Void)?
+    /// A display's bar stepping aside for the menu bar, or back — `BarPanel.isPeeking` changed.
+    /// The Coordinator closes a panel hanging from a bar that has just gone.
+    var onPeek: ((CGDirectDisplayID, Bool) -> Void)?
 
     /// How tall the strip is on `screen`: the configured height, or the menu bar's strip where
     /// that is taller.
@@ -105,13 +108,28 @@ final class BarWindowSet {
         }
     }
 
+    /// Where a panel for `kind` hangs on `display`: the widget's slot, the bar's height there
+    /// and the display's frame — nil when the bar is not up on that display or the widget is
+    /// not on it. `slotMidX` is in the display's coordinates, as the bar laid it out; the
+    /// screen's frame is what the bar spans, so the two share an origin.
+    func anchor(for kind: BarItem.Kind, on display: CGDirectDisplayID) -> PanelAnchor? {
+        guard let panel = panels[display], panel.panel.isVisible, let snapshot,
+              let screen = NSScreen.screens.first(where: { $0.displayID == display }),
+              let midX = panel.slotMidX(of: kind) else { return nil }
+        return PanelAnchor(slotMidX: midX, barHeight: height(on: screen, metrics: snapshot.metrics),
+                           display: Coordinates.toAX(screen.frame), displayID: display)
+    }
+
     private func make(for screen: NSScreen) -> BarPanel {
         let panel = BarPanel(screen: screen)
         let id = screen.displayID
         panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
         panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
         panel.peekEnabled = peekEnabled
-        panel.onPeekChanged = { [weak self] in self?.refresh(redraw: false) }
+        panel.onPeekChanged = { [weak self, weak panel] in
+            self?.refresh(redraw: false)
+            if let panel { self?.onPeek?(id, panel.isPeeking) }
+        }
         panels[id] = panel
         return panel
     }

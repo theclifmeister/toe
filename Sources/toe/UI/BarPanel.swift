@@ -153,6 +153,11 @@ final class BarPanel {
         let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
         return list.contains { ($0[kCGWindowLayer as String] as? Int) == menuLevel }
     }
+
+    /// Where a widget's slot is, for the panel that hangs under it — see `BarView.slotMidX`.
+    func slotMidX(of kind: BarItem.Kind) -> Double? {
+        view.slotMidX(of: kind)
+    }
 }
 
 /// A panel allowed into the top strip of a notched display.
@@ -163,7 +168,7 @@ final class BarPanel {
 /// job is that strip: measured for #171, a plain `NSPanel` asked for the top 26 points of the
 /// built-in display was put at 32 to 58 instead, over the tiles. The constraint is AppKit's, not
 /// the window server's — the menu bar itself lives there — so overriding it is enough.
-private final class TopStripPanel: NSPanel {
+final class TopStripPanel: NSPanel {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect
     }
@@ -227,6 +232,12 @@ final class BarView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         onPointerEntered?()
+    }
+
+    /// Where a widget's slot is centred, in the view's coordinates, from the last draw — nil
+    /// for a widget the bar is not showing. What a panel is anchored under.
+    func slotMidX(of kind: BarItem.Kind) -> Double? {
+        placed.first { $0.item.kind == kind && $0.width > 0 }?.midX
     }
 
     /// `NSViewToolTipOwner`: the tooltip for whatever slot the pointer rests on.

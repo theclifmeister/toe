@@ -3413,7 +3413,8 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
     t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
             "the old waybar pulseaudio set")
-    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1, "the coverage list has them all")
+    t.equal(Glyphs.all.count, 48, "the coverage list has them all: 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 6")
+    t.equal(Glyphs.calendar.unicodeScalars.first!.value, 0xF00ED, "nf-md-calendar, the clock panel's hero")
     for glyph in Glyphs.all {
         t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
     }
@@ -3511,6 +3512,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     foreground = "#ffffff"
     active = "#ff000080"
     clock_format = "HH:mm"
+    week_start = "sunday"
     battery_percentage = true
     menu_bar_peek = false
     persistent_workspaces = 3
@@ -3522,6 +3524,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(set.bar.foreground, "#ffffff", "foreground")
     t.equal(set.bar.active, "#ff000080", "active, with an alpha")
     t.equal(set.bar.clockFormat, "HH:mm", "clock_format")
+    t.equal(set.bar.weekStart, 0, "week_start = \"sunday\"")
     t.equal(set.bar.batteryPercentage, true, "battery_percentage")
     t.equal(set.bar.menuBarPeek, false, "menu_bar_peek")
     t.equal(set.bar.persistentWorkspaces, 3, "persistent_workspaces")
@@ -3535,6 +3538,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     font_size = 100
     background = "black"
     clock_format = 1405
+    week_start = "someday"
     battery_percentage = 1
     menu_bar_peek = "no"
     """)
@@ -3545,9 +3549,10 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(bad.bar.clockFormat, "dddd HH:mm", "a number is not a format")
     t.equal(bad.bar.batteryPercentage, false, "1 is not true")
     t.equal(bad.bar.menuBarPeek, true, "and a word is not false")
+    t.equal(bad.bar.weekStart, 1, "a day that is not one keeps Monday")
     t.equal(Set(bad.warnings.map { $0.split(separator: ":").first.map(String.init) ?? "" }),
             ["bar.enabled", "bar.height", "bar.font_size", "bar.background", "bar.clock_format",
-             "bar.battery_percentage", "bar.menu_bar_peek"],
+             "bar.week_start", "bar.battery_percentage", "bar.menu_bar_peek"],
             "each named")
     t.expect(bad.warnings.contains("bar.enabled: must be true or false, using false"), "in the usual words")
     t.expect(bad.warnings.contains("bar.height: must be a number from 16 to 100, using 26"), "with the range")
@@ -3706,6 +3711,608 @@ h.test("the state report says whether the bar is on screen") { t in
     t.expect(json.contains("\"bar\":\"hidden\""), "encoded as the word: \(json.prefix(80))")
     t.expect(SkillDocument.text(binary: "/x/toe").contains("bar: visible"),
              "and the skill says what the words mean")
+}
+
+// MARK: - The bar's panels
+
+h.test("a panel row takes the cursor only when there is something to do on it") { t in
+    t.expect(PanelRow.settings(.sound).isSelectable, "the settings row")
+    t.expect(PanelRow.slider(.outputVolume, value: 0.5, action: .toggleOutputMute).isSelectable, "a slider")
+    t.expect(PanelRow.hero(glyph: "x", title: "Audio", status: "", trailing: .toggle(on: true),
+                           action: .toggleOutputMute).isSelectable, "a hero with a switch")
+    t.expect(!PanelRow.hero(glyph: "x", title: "Battery", status: "", trailing: .text("70%")).isSelectable,
+             "but not one with a number")
+    for row in [PanelRow.header("OUTPUT"), .separator, .progress(0.5), .note("no"),
+                .info([PanelRow.Info("a", "b")])] {
+        t.expect(!row.isSelectable, "\(row.kind) is display only")
+    }
+    t.equal(PanelRow.settings(.wifi).action, .openSettings(.wifi), "the settings row opens its pane")
+    if case .action(let label) = PanelRow.settings(.bluetooth).kind {
+        t.equal(label, "Open Bluetooth settings…", "named the way System Settings names it")
+    } else { t.expect(false, "a settings row is an action row") }
+    t.equal(PanelRow.slider(.inputVolume, value: 1.7, action: .toggleInputMute).sliderValue, 1,
+            "a slider is clamped on the way in")
+
+    // Which widget opens which panel, and which open none.
+    t.equal(PanelKind(widget: .audio), .audio, "audio")
+    t.equal(PanelKind(widget: .clock), .clock, "the clock's calendar")
+    t.equal(PanelKind(widget: .keyboardLayout), nil, "the layout switches, it does not open")
+    t.equal(PanelKind(widget: .menu), nil, "the mark is the quick menu's")
+    t.equal(PanelKind(widget: .workspace(3)), nil, "a workspace is a jump")
+}
+
+h.test("the panel cursor starts hidden, reveals at the near end, and steps over display rows") { t in
+    var s = PanelState(rows: [
+        .hero(glyph: "x", title: "Audio", status: "", trailing: .toggle(on: true), action: .toggleOutputMute),
+        .separator,
+        .header("OUTPUT", trailing: "50%"),
+        .slider(.outputVolume, value: 0.5, action: .toggleOutputMute),
+        .pick(glyph: "s", label: "Speakers", current: true, action: .pickOutput(1)),
+        .pick(glyph: "h", label: "AirPods", action: .pickOutput(2)),
+        .separator,
+        .settings(.sound),
+    ])
+    t.equal(s.selection, nil, "nothing lit on open")
+    t.equal(s.activate(), .none, "and Return does nothing until something is")
+    s.move(by: 1)
+    t.equal(s.selection, 0, "the first ↓ reveals the cursor on the first row that takes it")
+    s.move(by: 1)
+    t.equal(s.selection, 3, "the next steps over the separator and the header to the slider")
+    s.move(by: 1); s.move(by: 1)
+    t.equal(s.selection, 5, "then down the devices")
+    s.move(by: 1)
+    t.equal(s.selection, 7, "over the separator to the settings row")
+    s.move(by: 1)
+    t.equal(s.selection, 7, "and clamps rather than wraps")
+    s.move(by: -10)
+    t.equal(s.selection, 0, "a big move up clamps to the top and looks forward for a row")
+    s.moveToEnd()
+    t.equal(s.selection, 7, "End")
+    s.moveToTop()
+    t.equal(s.selection, 0, "Home")
+
+    var up = PanelState(rows: s.rows)
+    up.move(by: -1)
+    t.equal(up.selection, 7, "the first ↑ reveals the cursor at the bottom")
+
+    // The pointer and a click land only where the cursor could.
+    s.select(row: 2)
+    t.equal(s.selection, 0, "hovering a header moves nothing")
+    s.select(row: 4)
+    t.equal(s.selection, 4, "hovering a device row does")
+    t.equal(s.activate(), .perform(.pickOutput(1)), "Return picks it")
+    s.select(row: 0)
+    t.equal(s.activate(), .perform(.toggleOutputMute), "the hero's switch is the header cursor's action")
+
+    // A list with nothing to choose stays dark.
+    var dark = PanelState(rows: [.header("x"), .note("Bluetooth was denied"), .separator])
+    dark.move(by: 1)
+    t.equal(dark.selection, nil, "no row can be lit")
+}
+
+h.test("←/→ and the wheel move a slider by 5% and write it through") { t in
+    var s = PanelState(rows: [
+        .header("OUTPUT"),
+        .slider(.outputVolume, value: 0.5, action: .toggleOutputMute),
+        .pick(glyph: "s", label: "Speakers", action: .pickOutput(1)),
+    ])
+    t.equal(s.adjust(by: 1), .none, "no cursor, no slider")
+    s.move(by: 1)
+    t.equal(s.selection, 1, "on the slider")
+    t.equal(s.adjust(by: 1), .slide(.outputVolume, 0.55), "→ is a step up")
+    t.equal(s.rows[1].sliderValue, 0.55, "and the row already says so")
+    t.equal(s.adjust(by: -3), .slide(.outputVolume, 0.4), "← three times from where it was left")
+    t.equal(s.activate(), .perform(.toggleOutputMute), "Return on the slider mutes")
+    s.move(by: 1)
+    t.equal(s.adjust(by: 1), .none, "on a device row the arrows are not a volume")
+    t.equal(s.adjust(row: 1, by: 20), .slide(.outputVolume, 1), "the wheel over the slider, clamped at full")
+    t.equal(s.adjust(row: 1, by: 1), .none, "and a step that changes nothing says nothing")
+    t.equal(s.set(row: 1, to: 0.3), .slide(.outputVolume, 0.3), "a drag sets it outright")
+    t.equal(s.set(row: 0, to: 0.3), .none, "a header is not a slider")
+}
+
+h.test("new rows keep the cursor on the row it was on, by identity") { t in
+    func rows(connected: [String], paired: [String]) -> [PanelRow] {
+        var out: [PanelRow] = [.hero(glyph: "b", title: "Audio", status: "", trailing: .toggle(on: true),
+                                     action: .toggleOutputMute)]
+        if !connected.isEmpty {
+            out.append(.header("CONNECTED"))
+            out += connected.map { .pick(glyph: "c", label: $0, detail: "", current: true,
+                                         action: .disconnectBluetooth($0)) }
+        }
+        if !paired.isEmpty {
+            out.append(.header("PAIRED"))
+            out += paired.map { .pick(glyph: "p", label: $0, detail: nil, action: .connectBluetooth($0)) }
+        }
+        out += [.separator, .settings(.bluetooth)]
+        return out
+    }
+    var s = PanelState(rows: rows(connected: [], paired: ["Keys", "Pods"]))
+    s.move(by: 1); s.move(by: 1); s.move(by: 1)
+    t.equal(s.selectedRow?.action, .connectBluetooth("Pods"), "on Pods")
+    // Pods connects and moves up into a new section above the one it was in.
+    s.replace(rows: rows(connected: ["Pods"], paired: ["Keys"]))
+    t.equal(s.selectedRow?.action, .disconnectBluetooth("Pods"), "the cursor followed the device up")
+    // Pods is unpaired: the row is gone, and the cursor stays put by index, on something.
+    s.replace(rows: rows(connected: [], paired: ["Keys"]))
+    t.expect(s.selectedRow?.isSelectable == true, "on a row it can rest on: \(String(describing: s.selectedRow?.kind))")
+    // Sliders and heroes are one of a kind and follow themselves.
+    var a = PanelState(rows: [.slider(.outputVolume, value: 0.2, action: .toggleOutputMute),
+                              .pick(glyph: "s", label: "Speakers", action: .pickOutput(1))])
+    a.move(by: 1)
+    a.replace(rows: [.hero(glyph: "x", title: "Audio", status: "", trailing: .toggle(on: true), action: .toggleOutputMute),
+                     .slider(.outputVolume, value: 0.9, action: .toggleOutputMute)])
+    t.equal(a.selection, 1, "the slider is still the slider, one row down")
+    t.equal(a.rows[1].sliderValue, 0.9, "with the provider's value")
+    // No cursor stays no cursor.
+    var dark = PanelState(rows: [.settings(.sound)])
+    dark.replace(rows: [.settings(.sound), .settings(.wifi)])
+    t.equal(dark.selection, nil, "a hidden cursor is not revealed by a refresh")
+}
+
+h.test("panel metrics are Omarchy's Style tokens at the bar's font size") { t in
+    let m = PanelMetrics()
+    t.equal(m.pointSize(.caption), 10, "fontPx(0.833)")
+    t.equal(m.pointSize(.bodySmall), 11, "fontPx(0.917)")
+    t.equal(m.pointSize(.body), 12, "the base")
+    t.equal(m.pointSize(.title), 14, "fontPx(1.167)")
+    t.equal(m.pointSize(.display), 24, "fontPx(2)")
+    t.equal(m.pointSize(.displayLarge), 28, "fontPx(2.333)")
+    t.equal(m.lineHeight(.body), 16, "12 × 1.32, rounded up")
+    t.equal(m.padding, 14, "popupPadding")
+    t.equal(m.borderWidth, 2, "the card's border")
+    t.equal(m.gap, 5, "gapsOut")
+    t.equal(m.width, 380, "contentWidth")
+    t.equal(m.calendarWidth, 560, "and the calendar's")
+    t.equal(m.trackHeight, 4, "max(4, 28 × 0.11)")
+    t.equal(m.knobSize, 14, "max(14, 28 × 0.38)")
+    t.equal(m.toggleHeight, 22, "max(22, 28 × 0.55)")
+    t.equal(m.toggleWidth, 42, "1.9 as wide, rounded")
+    let big = PanelMetrics(fontSize: 18)
+    t.equal(big.pointSize(.body), 18, "the base follows the font")
+    t.equal(big.padding, 21, "and so does every space token: 14 × 1.5")
+    t.equal(big.width, 570, "380 × 1.5")
+    t.equal(big.knobSize, 16, "max(14, round(42 × 0.38))")
+}
+
+h.test("a panel's rows stack the way the column upstream does") { t in
+    let m = PanelMetrics()
+    let rows = PowerPanel.rows(PowerPanel.Battery(fraction: 0.77, onMains: false, charging: false, charged: false,
+                                                  minutesToEmpty: 134, health: "Good", cycleCount: 312,
+                                                  maximumCapacity: 89))
+    let (frames, height) = PanelLayout.frames(rows, width: m.width, m)
+    t.equal(frames.count, rows.count, "a frame per row")
+    // Border 2 + padding 14 = 16 in from every edge.
+    t.equal(frames[0].x, 16, "content inset")
+    t.equal(frames[0].y, 16, "from the top too")
+    t.equal(frames[0].w, 348, "the content width")
+    // The hero is as tall as its display-large percentage: 28 × 1.32 = 37.
+    t.equal(frames[0].h, 37, "the hero's height is the tallest thing in it")
+    t.equal(frames[1].y, 67, "the battery bar a block gap below: 16 + 37 + 14")
+    t.equal(frames[1].h, 8, "space(8) tall")
+    t.equal(frames[2].y, frames[1].maxY + 4, "the stats hang off the bar at labelGap")
+    t.equal(frames[2].h, 15, "a bodySmall line: 11 × 1.32 rounded up")
+    t.equal(frames[3].y, frames[2].maxY + 4, "stat lines at labelGap")
+    t.equal(frames[5].y, frames[4].maxY + 14, "the separator is a block")
+    t.equal(frames[5].h, 1, "a hairline")
+    t.equal(frames[6].y, frames[5].maxY + 14, "and the settings row a block below it")
+    t.equal(frames[6].h, 26, "a body line plus rowPadding")
+    t.equal(height, frames[6].maxY + 16, "the card ends an inset below the last row")
+
+    // A section: header, 6 to its slider, 6 to each device; a two-line device row is taller.
+    let audio: [PanelRow] = [
+        .header("OUTPUT", trailing: "50%"),
+        .slider(.outputVolume, value: 0.5, action: .toggleOutputMute),
+        .pick(glyph: "s", label: "Speakers", current: true, action: .pickOutput(1)),
+        .pick(glyph: "p", label: "Pods", detail: "Connected", action: .pickOutput(2)),
+    ]
+    let f = PanelLayout.frames(audio, width: 380, m).frames
+    t.equal(f[0].h, 16, "a caption line plus the Nerd Font overshoot")
+    t.equal(f[1].y, f[0].maxY + 6, "the slider hangs off its header")
+    t.equal(f[1].h, 30, "PanelSlider's 22 plus controlGap")
+    t.equal(f[2].y, f[1].maxY + 6, "list rows at the list gap")
+    t.equal(f[2].h, 29, "one title line plus xl")
+    t.equal(f[3].h, 43, "two lines plus rowPaddingX: 16 + 1 + 14 + 12")
+
+    // Hit testing: rows, and the gaps between them are nobody's.
+    t.equal(PanelLayout.row(at: Point(x: 100, y: f[1].y + 5), frames: f), 1, "on the slider")
+    t.equal(PanelLayout.row(at: Point(x: 100, y: f[1].maxY + 2), frames: f), nil, "in the gap")
+    t.equal(PanelLayout.row(at: Point(x: 3, y: f[2].y + 5), frames: f), nil, "over the border")
+
+    // The slider's track and its value from a pointer.
+    let track = PanelLayout.sliderTrack(inRow: f[1], m)
+    t.equal(track.x, f[1].x + 6, "inset 6")
+    t.equal(track.w, f[1].w - 12, "both sides")
+    t.equal(track.h, 4, "and 4 tall")
+    t.near(PanelLayout.sliderValue(x: track.x + track.w / 2, inRow: f[1], m), 0.5, "the middle is half")
+    t.equal(PanelLayout.sliderValue(x: -50, inRow: f[1], m), 0, "left of the track is nothing")
+    t.equal(PanelLayout.sliderValue(x: 10_000, inRow: f[1], m), 1, "right of it is full")
+    let knob = PanelLayout.knobFrame(value: 1, inRow: f[1], m)
+    t.equal(knob.maxX, track.maxX, "the knob stays inside the track at full")
+    t.equal(PanelLayout.knobFrame(value: 0, inRow: f[1], m).x, track.x, "and at nothing")
+}
+
+h.test("a panel hangs under its widget, inside the display, and never taller than the screen") { t in
+    let m = PanelMetrics()
+    let display = Box(x: 0, y: 0, w: 1728, h: 1117)
+    let size = Point(x: 380, y: 300)
+    // Under a widget in the middle: centred on the slot, 5 below a 33-tall bar.
+    let mid = PanelLayout.anchor(size: size, underSlotAt: 800, barHeight: 33, display: display, m)
+    t.equalBox(mid, box(610, 38, 380, 300), "centred under the slot, gap below the bar")
+    // Under the rightmost widget: slid in to keep the gap from the edge.
+    let right = PanelLayout.anchor(size: size, underSlotAt: 1710, barHeight: 33, display: display, m)
+    t.equalBox(right, box(1343, 38, 380, 300), "hangs inward from the right edge: 1728 − 380 − 5")
+    // On a second display to the right, in Accessibility coordinates.
+    let second = Box(x: 1728, y: -200, w: 2560, h: 1440)
+    let far = PanelLayout.anchor(size: size, underSlotAt: 100, barHeight: 26, display: second, m)
+    t.equalBox(far, box(1733, -169, 380, 300), "left edge of the second display: x 1728 + 5, y −200 + 26 + 5")
+    // Too tall for the screen: cut to what fits under the bar.
+    let tall = PanelLayout.anchor(size: Point(x: 380, y: 5000), underSlotAt: 800, barHeight: 33,
+                                  display: display, m)
+    t.equal(tall.h, 1074, "the screen less the bar and two gaps: 1117 − 33 − 10")
+    t.equal(PanelLayout.maxHeight(display: Box(x: 0, y: 0, w: 800, h: 100), barHeight: 26, m), 120,
+            "never under 120, upstream's floor")
+    // Too wide for a narrow display: cut to the display less two gaps.
+    let narrow = PanelLayout.anchor(size: size, underSlotAt: 100, barHeight: 26,
+                                    display: Box(x: 0, y: 0, w: 300, h: 600), m)
+    t.equal(narrow.w, 290, "narrowed")
+    t.equal(narrow.x, 5, "and at the gap")
+}
+
+h.test("a card shorter than its rows scrolls to keep the cursor's row in view") { t in
+    let m = PanelMetrics()
+    t.equal(PanelLayout.scroll(offset: 50, cursor: nil, viewport: 400, content: 300, m), 0,
+            "nothing to scroll when it all fits")
+    t.equal(PanelLayout.scroll(offset: 900, cursor: nil, viewport: 400, content: 1000, m), 600,
+            "clamped to the end of the content")
+    t.equal(PanelLayout.scroll(offset: 0, cursor: box(16, 700, 300, 30), viewport: 400, content: 1000, m),
+            336, "a row below the viewport brings it up to the margin: 700 + 30 + 6 − 400")
+    t.equal(PanelLayout.scroll(offset: 600, cursor: box(16, 100, 300, 30), viewport: 400, content: 1000, m),
+            94, "a row above brings it down to the margin")
+    t.equal(PanelLayout.scroll(offset: 100, cursor: box(16, 200, 300, 30), viewport: 400, content: 1000, m),
+            100, "a row in view moves nothing")
+}
+
+h.test("the power panel says what the battery menu says") { t in
+    let b = PowerPanel.Battery(fraction: 0.77, onMains: false, charging: false, charged: false,
+                               minutesToEmpty: 134, health: "Good", cycleCount: 312, maximumCapacity: 89)
+    let rows = PowerPanel.rows(b)
+    if case .hero(let glyph, let title, let status, let trailing) = rows[0].kind {
+        t.equal(glyph, Glyphs.battery[7], "the widget's glyph, from the same rule")
+        t.equal(title, "Battery", "title")
+        t.equal(status, "On battery", "modeLabel")
+        t.equal(trailing, .text("77%"), "the big number")
+    } else { t.expect(false, "a hero first") }
+    t.equal(rows[1].kind, .progress(0.77), "the bar")
+    t.equal(rows[2].kind, .info([PanelRow.Info("Time left", "2:14"), PanelRow.Info("Maximum capacity", "89%")]),
+            "time and capacity")
+    t.equal(rows[3].kind, .info([PanelRow.Info("Charge cycles", "312"), PanelRow.Info("Source", "Battery")]),
+            "cycles and source")
+    t.equal(rows[4].kind, .info([PanelRow.Info("Low Power Mode", "Off"), PanelRow.Info("Condition", "Normal")]),
+            "low power, and the condition on a Mac that reports one")
+    t.equal(rows[5].kind, .separator, "then the door")
+    t.equal(rows[6].action, .openSettings(.battery), "to the Battery pane")
+    t.expect(rows.filter(\.isSelectable).count == 1, "only the settings row takes the cursor")
+
+    var charging = b
+    charging.onMains = true; charging.charging = true; charging.minutesToFull = 45
+    t.equal(PowerPanel.status(charging), "Charging", "on power and flowing")
+    t.equal(PowerPanel.rows(charging)[2].kind,
+            .info([PanelRow.Info("Full in", "0:45"), PanelRow.Info("Maximum capacity", "89%")]),
+            "time to full on power")
+    var held = charging
+    held.charging = false; held.fraction = 0.8
+    t.equal(PowerPanel.status(held), "Charging on hold", "Optimized Battery Charging, in the Mac's words")
+    t.equal(PowerPanel.rows(held)[2].kind,
+            .info([PanelRow.Info("Full in", "—"), PanelRow.Info("Maximum capacity", "89%")]),
+            "and no time while nothing flows")
+    var full = held
+    full.charged = true; full.fraction = 1
+    t.equal(PowerPanel.status(full), "Fully charged", "charged")
+    t.equal(PowerPanel.timeLabel(minutes: nil), "Calculating…", "no estimate yet")
+    t.equal(PowerPanel.timeLabel(minutes: 5), "0:05", "padded minutes")
+    t.equal(PowerPanel.timeLabel(minutes: 600), "10:00", "hours")
+    t.equal(PowerPanel.conditionLabel("Fair"), "Service recommended", "anything but Good")
+    var lpm = b
+    lpm.lowPowerMode = true; lpm.cycleCount = nil; lpm.maximumCapacity = nil; lpm.health = nil
+    t.equal(PowerPanel.rows(lpm)[4].kind, .info([PanelRow.Info("Low Power Mode", "On")]),
+            "on, and alone on its line on a Mac with no condition to report")
+    t.equal(PowerPanel.rows(lpm)[2].kind,
+            .info([PanelRow.Info("Time left", "2:14"), PanelRow.Info("Maximum capacity", "—")]),
+            "dashes for what the Mac would not say")
+    t.equal(PowerPanel.rows(lpm)[3].kind,
+            .info([PanelRow.Info("Charge cycles", "—"), PanelRow.Info("Source", "Battery")]), "cycles too")
+}
+
+h.test("the monitor panel lists the displays and leads to the Displays pane") { t in
+    let one = MonitorPanel.Display(id: 1, name: "Built-in Retina Display", width: 1728, height: 1117,
+                                   scale: 2, refreshRate: 120, builtin: true, focused: true)
+    let two = MonitorPanel.Display(id: 2, name: "LG UltraFine", width: 2560, height: 1440, scale: 1,
+                                   refreshRate: 59.94)
+    let rows = MonitorPanel.rows([one, two])
+    if case .hero(let glyph, let title, let status, let trailing) = rows[0].kind {
+        t.equal(glyph, Glyphs.monitors, "the widget's two-display glyph")
+        t.equal(title, "Display", "title")
+        t.equal(status, "2 displays", "how many")
+        t.equal(trailing, nil, "nothing to switch — brightness has no public route")
+    } else { t.expect(false, "a hero first") }
+    t.equal(rows[2].kind, .header("Displays", trailing: nil), "then the list")
+    t.equal(rows[3].kind, .pick(glyph: Glyphs.monitor, label: "Built-in Retina Display · focused",
+                                detail: "1728 × 1117 at 2×, 120 Hz", current: true), "the focused one, marked")
+    t.equal(rows[4].kind, .pick(glyph: Glyphs.monitor, label: "LG UltraFine",
+                                detail: "2560 × 1440, 59.94 Hz", current: false), "a 1× external, its rate as given")
+    t.expect(!rows[3].isSelectable, "a display row is told, not pressed: nothing here can switch one off")
+    t.equal(rows.last?.action, .openSettings(.displays), "the door")
+    t.equal(rows.filter(\.isSelectable).count, 1, "and it is the one row the cursor lands on")
+
+    t.equal(MonitorPanel.rows([one])[0].kind,
+            .hero(glyph: Glyphs.monitor, title: "Display", status: "1 display", trailing: nil), "one display")
+    t.equal(MonitorPanel.detail(MonitorPanel.Display(id: 3, name: "x", width: 1920, height: 1080)),
+            "1920 × 1080", "no scale clause at 1×, no rate clause at 0")
+    t.equal(MonitorPanel.detail(MonitorPanel.Display(id: 3, name: "x", width: 1920, height: 1080, scale: 1.5)),
+            "1920 × 1080 at 1.5×", "a fractional scale keeps its fraction")
+}
+
+h.test("the calendar's month grid is Omarchy's: six weeks, ISO-numbered by their Thursday") { t in
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
+    let september = ClockPanel.View(year: 2026, month: 9)
+    let today = DateComponents(year: 2026, month: 9, day: 19)
+
+    let monday = ClockPanel.monthGrid(september, weekStart: 1, today: today, calendar: cal)
+    t.equal(monday.count, 6, "always six weeks")
+    t.equal(monday.map(\.number), [36, 37, 38, 39, 40, 41], "ISO weeks down the side")
+    t.equal(monday[0].days.map(\.day), [31, 1, 2, 3, 4, 5, 6], "the first row starts on the Monday before the 1st")
+    t.equal(monday[4].days.map(\.day), [28, 29, 30, 1, 2, 3, 4], "and runs into October")
+    t.equal(monday[0].days[0].inMonth, false, "August 31 is not September")
+    t.equal(monday[0].days[1].inMonth, true, "September 1 is")
+    t.equal(monday[2].days[5].today, true, "Saturday the 19th is today")
+    t.equal(monday[2].days[5].weekend, true, "and a weekend")
+    t.equal(monday[2].days[4].weekend, false, "Friday is not")
+    t.equal(monday[0].days.filter(\.today).count, 0, "only one day is today")
+
+    // Sunday start: the rows shift a day, and every row is still numbered by its Thursday.
+    let sunday = ClockPanel.monthGrid(september, weekStart: 0, today: today, calendar: cal)
+    t.equal(sunday[0].days.map(\.day), [30, 31, 1, 2, 3, 4, 5], "from the Sunday before")
+    t.equal(sunday.map(\.number), [36, 37, 38, 39, 40, 41], "the same week numbers")
+
+    // Week 53, and a year boundary in the grid.
+    let january = ClockPanel.monthGrid(ClockPanel.View(year: 2027, month: 1), weekStart: 1,
+                                       today: today, calendar: cal)
+    t.equal(january[0].number, 53, "2026 has a week 53")
+    t.equal(january[0].days.map(\.day), [28, 29, 30, 31, 1, 2, 3], "December's tail")
+    t.equal(january[0].days[4].year, 2027, "the year turns in the row")
+    t.equal(ClockPanel.isoWeek(year: 2024, month: 12, day: 30, calendar: cal), 1, "Dec 30 2024 is week 1 of 2025")
+
+    // Stepping carries the year both ways.
+    t.equal(ClockPanel.step(september, months: 1), ClockPanel.View(year: 2026, month: 10), "one on")
+    t.equal(ClockPanel.step(september, months: 4), ClockPanel.View(year: 2027, month: 1), "into next year")
+    t.equal(ClockPanel.step(september, months: -9), ClockPanel.View(year: 2025, month: 12), "back a year")
+    t.equal(ClockPanel.step(september, months: -12), ClockPanel.View(year: 2025, month: 9), "a year back")
+
+    // The week start, in every spelling Omarchy's coerceWeekStart takes.
+    t.equal(ClockPanel.weekStart("monday"), 1, "a name")
+    t.equal(ClockPanel.weekStart("Sun"), 0, "three letters, any case")
+    t.equal(ClockPanel.weekStart("6"), 6, "a number")
+    t.equal(ClockPanel.weekStart("8"), 1, "wrapped")
+    t.equal(ClockPanel.weekStart("someday"), nil, "nonsense is nil")
+    t.equal(ClockPanel.toggledWeekStart(1), 0, "Monday toggles to Sunday")
+    t.equal(ClockPanel.toggledWeekStart(0), 1, "and back")
+    t.equal(ClockPanel.toggledWeekStart(6), 1, "anything else lands on Monday")
+    t.equal(ClockPanel.weekdayOrder(start: 1), [1, 2, 3, 4, 5, 6, 0], "the week from Monday")
+
+    let en = Locale(identifier: "en_US")
+    t.equal(ClockPanel.weekdayLabels(start: 1, locale: en, calendar: cal), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+            "two-letter headings in the week's order")
+    t.equal(ClockPanel.monthLabel(september, locale: en, calendar: cal), "SEPTEMBER 2026", "the month line")
+    let date = cal.date(from: DateComponents(year: 2026, month: 9, day: 19))!
+    t.equal(ClockPanel.todayLabel(date, locale: en, calendar: cal), "September 19", "the hero, MMMM d")
+
+    // The rows: hero, grid, month line, the door — and the hero is the way home once you leave.
+    let rows = ClockPanel.rows(view: september, weekStart: 1, today: date, locale: en, calendar: cal)
+    t.equal(rows.count, 5, "five rows")
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.calendar, title: "September 19", status: "Today", trailing: nil), "today")
+    t.equal(rows[0].action, .none, "nothing to go back to")
+    t.expect(!rows[0].isSelectable, "so the hero is not a cursor target this month")
+    if case .calendar(let grid) = rows[1].kind {
+        t.equal(grid.weeks, monday, "the grid")
+        t.equal(grid.weekdays.first, "MO", "headed from Monday")
+    } else { t.expect(false, "the grid second") }
+    t.expect(!rows[1].isSelectable, "the grid is looked at, not landed on")
+    t.equal(rows[2].kind, .monthNav("SEPTEMBER 2026"), "the month line")
+    t.equal(rows[2].action, .today, "Return on it is today")
+    t.equal(rows[4].action, .openCalendar, "and the Mac's Calendar is the door")
+
+    let away = ClockPanel.rows(view: ClockPanel.View(year: 2027, month: 3), weekStart: 1, today: date,
+                               locale: en, calendar: cal)
+    t.equal(away[0].action, .today, "stepped away, the hero is the way back")
+    if case .hero(_, _, let status, _) = away[0].kind { t.equal(status, "Back to today", "and says so") }
+}
+
+h.test("the calendar's grid is laid out at Omarchy's cell sizes, with its two click targets") { t in
+    let m = PanelMetrics()
+    let row = Box(x: 16, y: 100, w: 560 - 32, h: 0)
+    let grid = PanelLayout.calendarGrid(inRow: row, m)
+    // 32 + 2 + 14 + 2 + 7 × 52 + 6 × 2 = 426, centred in 528.
+    t.equal(grid.w, 426, "the grid's width")
+    t.equal(grid.x, 67, "centred in the row: 16 + 51")
+    let calendar = PanelRow(.calendar(ClockPanel.Grid(weekdays: [], weeks: [])))
+    // 16 + 3 + 6 × 34 + 5 × 2. The sums here are written out: a chain of literals inside a
+    // generic call is what the CI runner's toolchain gives up type-checking.
+    t.equal(PanelLayout.rowHeight(calendar, m), 233, "heading, gap, six rows")
+    let w = PanelLayout.weekStartCell(inRow: row, m)
+    t.equalBox(w, box(67, 100, 32, 16), "the W over the week column")
+    t.equalBox(PanelLayout.weekdayHeading(0, inRow: row, m), box(117, 100, 52, 16), "Monday's heading, 67 + 32 + 2 + 14 + 2")
+    t.equalBox(PanelLayout.weekNumberCell(1, inRow: row, m), box(67, 155, 32, 34), "the second week's number, 100 + 19 + 36")
+    t.equalBox(PanelLayout.dayCell(week: 1, column: 2, inRow: row, m), box(225, 155, 52, 34), "a day cell, 117 + 54 × 2")
+    t.expect(PanelLayout.calendarHitsWeekStart(at: Point(x: 80, y: 108), inRow: row, m), "a press on the W")
+    t.expect(!PanelLayout.calendarHitsWeekStart(at: Point(x: 200, y: 108), inRow: row, m), "not on a heading")
+    t.expect(!PanelLayout.calendarHitsWeekStart(at: Point(x: 80, y: 150), inRow: row, m), "not on a week number")
+    let line = PanelLayout.calendarGutterLine(inRow: row, m)
+    t.equal(line.y, 119, "the hairline starts under the headings")
+    t.equal(line.w, 1, "and is a hairline")
+
+    let nav = Box(x: 16, y: 400, w: 528, h: 26)
+    t.equal(PanelLayout.monthNavStep(x: 20, inRow: nav, m), -1, "the left chevron")
+    t.equal(PanelLayout.monthNavStep(x: 540, inRow: nav, m), 1, "the right")
+    t.equal(PanelLayout.monthNavStep(x: 280, inRow: nav, m), 0, "the label is today")
+}
+
+h.test("the audio panel is the hero's switch, two sliders and the devices") { t in
+    let speakers = AudioPanel.Device(id: 41, name: "MacBook Pro Speakers", transport: .builtIn)
+    let pods = AudioPanel.Device(id: 57, name: "Clifford's AirPods Pro", transport: .bluetooth)
+    let screen = AudioPanel.Device(id: 63, name: "LG UltraFine", transport: .display)
+    let mic = AudioPanel.Device(id: 42, name: "MacBook Pro Microphone", transport: .builtIn)
+    let cam = AudioPanel.Device(id: 90, name: "FaceTime HD Camera", transport: .usb)
+    let s = AudioPanel.State(volume: 0.55, muted: false, outputs: [speakers, pods, screen], defaultOutput: 41,
+                             inputVolume: 0.8, inputMuted: true, inputs: [mic, cam, pods], defaultInput: 42)
+    let rows = AudioPanel.rows(s)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.volume[1], title: "Audio", status: "Steady groove",
+                                trailing: .toggle(on: true)), "the hero: the widget's glyph, upstream's word for 55%")
+    t.equal(rows[0].action, .toggleOutputMute, "its switch is the output's mute")
+    t.expect(rows[0].isSelectable, "and a cursor target")
+    t.equal(rows[2].kind, .header("Output", trailing: "55%"), "OUTPUT with the percentage")
+    t.equal(rows[3].kind, .slider(.outputVolume, value: 0.55, dimmed: false), "the output slider")
+    t.equal(rows[3].action, .toggleOutputMute, "Return on it mutes")
+    t.equal(rows[4].kind, .pick(glyph: Glyphs.speaker, label: "MacBook Pro Speakers", detail: nil, current: true),
+            "the default output, marked")
+    t.equal(rows[4].action, .pickOutput(41), "pressed, it is picked")
+    t.equal(rows[5].kind, .pick(glyph: Glyphs.headphones, label: "Clifford's AirPods Pro", detail: nil, current: false),
+            "AirPods are headphones")
+    t.equal(rows[6].kind, .pick(glyph: Glyphs.monitor, label: "LG UltraFine", detail: nil, current: false),
+            "a display's speakers")
+    t.equal(rows[7].kind, .separator, "then the input")
+    t.equal(rows[8].kind, .header("Input", trailing: "80%"), "INPUT")
+    t.equal(rows[9].kind, .slider(.inputVolume, value: 0.8, dimmed: true), "the input slider, muted")
+    t.equal(rows[9].action, .toggleInputMute, "with its own mute")
+    t.equal(rows[10].kind, .pick(glyph: Glyphs.microphone, label: "MacBook Pro Microphone", detail: nil, current: true),
+            "the default input")
+    t.equal(rows[10].action, .pickInput(42), "picked as an input")
+    t.equal(rows[11].kind, .pick(glyph: Glyphs.camera, label: "FaceTime HD Camera", detail: nil, current: false),
+            "a camera's microphone")
+    t.equal(rows[12].kind, .pick(glyph: Glyphs.bluetoothOn, label: "Clifford's AirPods Pro", detail: nil, current: false),
+            "the AirPods as an input are Bluetooth, not a headset")
+    t.equal(rows.last?.action, .openSettings(.sound), "the door")
+
+    // No input device at all: the section is left out, as upstream leaves it out with no source.
+    let deaf = AudioPanel.State(volume: 0.2, muted: true, outputs: [speakers], defaultOutput: 41)
+    let quiet = AudioPanel.rows(deaf)
+    t.equal(quiet.count, 7, "hero, separator, header, slider, one device, separator, door")
+    t.equal(quiet[0].kind, .hero(glyph: Glyphs.muted, title: "Audio", status: "Muted", trailing: .toggle(on: false)),
+            "muted: the switch off, the glyph muted")
+    t.equal(quiet[3].kind, .slider(.outputVolume, value: 0.2, dimmed: true), "and the slider dimmed")
+
+    // The widget's headphone rule, now from the device rather than a name read twice.
+    t.expect(s.headphones == false, "speakers are not headphones")
+    var onPods = s; onPods.defaultOutput = 57
+    t.expect(onPods.headphones, "AirPods are")
+    t.equal(AudioPanel.heroGlyph(onPods), Glyphs.headphones, "and the hero says so whatever the volume")
+    let jack = AudioPanel.Device(id: 41, name: "MacBook Pro Speakers", transport: .builtIn, jack: true)
+    t.expect(AudioPanel.isHeadphones(jack), "the headphone jack is, whatever the name")
+    let btSpeaker = AudioPanel.Device(id: 3, name: "Bose SoundLink Speaker", transport: .bluetooth)
+    t.expect(!AudioPanel.isHeadphones(btSpeaker), "a Bluetooth speaker says speaker and is one")
+    t.equal(AudioPanel.outputGlyph(btSpeaker), Glyphs.bluetoothOn, "drawn as Bluetooth")
+    t.equal(AudioPanel.outputGlyph(AudioPanel.Device(id: 4, name: "USB Audio", transport: .usb)), Glyphs.speaker,
+            "anything else is a speaker")
+
+    // `outputVolumeName`, at upstream's thresholds.
+    for (v, word) in [(0.0, "Silenced"), (0.1, "Whisper"), (0.15, "Murmur"), (0.3, "Easy listening"),
+                      (0.5, "Steady groove"), (0.7, "Cranked up"), (0.85, "Party mode"), (1.0, "Concert hall")] {
+        t.equal(AudioPanel.volumeName(v, muted: false), word, "\(v)")
+    }
+    t.equal(AudioPanel.volumeName(0.9, muted: true), "Muted", "muted trumps the number")
+}
+
+h.test("the network panel is the connection's switch and numbers, and never a name") { t in
+    let wifi = NetworkPanel.Link(connection: .wifi(strength: 92, restricted: false), wifiPower: true,
+                                 interfaceName: "en0", rssi: -54, noise: -96, band: .ghz5, channel: 48,
+                                 security: "WPA2 Personal", transmitRate: 516, address: "192.168.1.5")
+    let rows = NetworkPanel.rows(wifi)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.wifi[4], title: "Wi-Fi", status: "Connected",
+                                trailing: .toggle(on: true)), "the widget's glyph, the kind of link for a title")
+    t.equal(rows[0].action, .toggleWifi, "the switch is Wi-Fi power")
+    t.equal(rows[2].kind, .info([PanelRow.Info("Signal", "−54 dBm, 92%"), PanelRow.Info("Noise", "−96 dBm")]),
+            "signal and noise")
+    t.equal(rows[3].kind, .info([PanelRow.Info("Channel", "48, 5 GHz"), PanelRow.Info("Rate", "516 Mbit/s")]),
+            "channel with its band, the rate")
+    t.equal(rows[4].kind, .info([PanelRow.Info("Security", "WPA2 Personal"), PanelRow.Info("IP address", "192.168.1.5")]),
+            "security and the address")
+    t.equal(rows[6].kind, .note("Names need Location, which toe does not ask for."),
+            "why there is no name, said once")
+    t.equal(rows.last?.action, .openSettings(.wifi), "the door")
+    t.expect(!rows.contains { if case .pick = $0.kind { return true } else { return false } },
+             "no network list: a scan without Location has no names in it")
+
+    let off = NetworkPanel.Link(connection: .none, wifiPower: false)
+    t.equal(NetworkPanel.rows(off)[0].kind,
+            .hero(glyph: Glyphs.disconnected, title: "Wi-Fi off", status: "Turned off", trailing: .toggle(on: false)),
+            "off: the switch off")
+    t.equal(NetworkPanel.rows(off).count, 3, "hero, separator, door")
+    let searching = NetworkPanel.Link(connection: .none, wifiPower: true)
+    t.equal(NetworkPanel.title(searching), "Not connected", "on and unassociated")
+    let wired = NetworkPanel.Link(connection: .ethernet(restricted: false), wifiPower: true,
+                                  interfaceName: "en5", address: "10.0.0.7")
+    let wiredRows = NetworkPanel.rows(wired)
+    t.equal(wiredRows[0].kind, .hero(glyph: Glyphs.ethernet, title: "Ethernet", status: "Connected",
+                                     trailing: .toggle(on: true)), "wired")
+    t.equal(wiredRows[2].kind, .info([PanelRow.Info("Interface", "en5"), PanelRow.Info("IP address", "10.0.0.7")]),
+            "the interface and its address")
+    t.equal(NetworkPanel.status(NetworkPanel.Link(connection: .wifi(strength: 50, restricted: true), wifiPower: true)),
+            "Limited internet access", "restricted, in the words upstream uses")
+
+    t.equal(NetworkPanel.rateLabel(516), "516 Mbit/s", "megabits")
+    t.equal(NetworkPanel.rateLabel(1000), "1 Gbit/s", "a round gigabit")
+    t.equal(NetworkPanel.rateLabel(2500), "2.5 Gbit/s", "and a half")
+    t.equal(NetworkPanel.rateLabel(0), "—", "nothing")
+    t.equal(NetworkPanel.signalLabel(rssi: -75), "−75 dBm, 50%", "the RSSI and the widget's percentage")
+}
+
+h.test("the Bluetooth panel says where the grant stands, then lists the devices") { t in
+    let asking = BluetoothPanel.rows(BluetoothPanel.State(access: .undetermined))
+    t.equal(asking[0].kind, .hero(glyph: Glyphs.bluetoothOn, title: "Bluetooth", status: "Asking for access", trailing: nil),
+            "the generic glyph while nothing is known, and no switch — power is a private call")
+    t.equal(asking[2].kind, .note("macOS is asking whether toe may use Bluetooth."), "says the sheet is up")
+    t.equal(asking.last?.action, .openSettings(.bluetooth), "the door")
+    t.equal(asking.filter(\.isSelectable).count, 1, "only the door takes the cursor")
+
+    let denied = BluetoothPanel.rows(BluetoothPanel.State(access: .denied))
+    t.equal(BluetoothPanel.status(BluetoothPanel.State(access: .denied)), "Access denied", "denied")
+    t.equal(denied[2].kind, .note("Allow toe under Privacy & Security › Bluetooth."), "and where to change that")
+    t.equal(BluetoothPanel.rows(BluetoothPanel.State(access: .unavailable))[2].kind,
+            .note("This Mac has no Bluetooth adapter."), "no adapter")
+
+    let pods = BluetoothPanel.Device(address: "aa-bb", name: "AirPods Pro", connected: true)
+    let keys = BluetoothPanel.Device(address: "cc-dd", name: "Magic Keyboard", connected: false)
+    let mouse = BluetoothPanel.Device(address: "ee-ff", name: "Magic Mouse", connected: true)
+    let ghost = BluetoothPanel.Device(address: "00-11", name: "", connected: false)
+    let on = BluetoothPanel.State(access: .granted, powered: true, devices: [keys, pods, mouse, ghost])
+    t.equal(on.connected, 2, "two connected, for the widget")
+    t.equal(BluetoothPanel.status(on), "2 connected", "and the status")
+    let rows = BluetoothPanel.rows(on)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.bluetoothConnected, title: "Bluetooth", status: "2 connected", trailing: nil),
+            "the widget's connected glyph")
+    t.equal(rows[2].kind, .header("Connected", trailing: nil), "CONNECTED first")
+    t.equal(rows[3].kind, .pick(glyph: Glyphs.bluetoothConnected, label: "AirPods Pro", detail: "Connected", current: true),
+            "sorted by name, two lines, the selected fill")
+    t.equal(rows[3].action, .disconnectBluetooth("aa-bb"), "Return disconnects")
+    t.equal(rows[4].action, .disconnectBluetooth("ee-ff"), "the mouse next")
+    t.equal(rows[6].kind, .header("Paired", trailing: nil), "then PAIRED")
+    t.equal(rows[7].kind, .pick(glyph: Glyphs.bluetoothOn, label: "Magic Keyboard", detail: nil, current: false),
+            "one line for a device that is only paired")
+    t.equal(rows[7].action, .connectBluetooth("cc-dd"), "Return connects")
+    t.expect(!rows.contains { if case .pick(_, let label, _, _) = $0.kind { return label.isEmpty } else { return false } },
+             "a device with no human name is not listed")
+    t.equal(rows.last?.action, .openSettings(.bluetooth), "and the door")
+
+    var off = on; off.powered = false
+    t.equal(BluetoothPanel.status(off), "Turned off", "off")
+    t.equal(BluetoothPanel.rows(off)[0].kind,
+            .hero(glyph: Glyphs.bluetoothOff, title: "Bluetooth", status: "Turned off", trailing: nil), "the off glyph")
+    t.expect(BluetoothPanel.rows(off)[7].dimmed, "paired rows dim while the radio is off")
+    t.equal(BluetoothPanel.status(BluetoothPanel.State(access: .granted, powered: true, devices: [keys])), "On",
+            "on with nothing connected")
+    t.equal(BluetoothPanel.rows(BluetoothPanel.State(access: .granted, powered: true, devices: [pods])).count, 6,
+            "hero, separator, header, one device, separator, door — no empty PAIRED section")
 }
 
 // MARK: - The quick menu

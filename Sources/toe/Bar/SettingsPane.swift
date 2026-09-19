@@ -1,4 +1,5 @@
 import AppKit
+import ToeCore
 
 /// The System Settings panes the bar's widgets open — Omarchy's panels, with the Mac's own
 /// window standing in for each. `NSWorkspace.open`, not `exec`: opening a pane is not a
@@ -16,6 +17,17 @@ enum SettingsPane: String {
     case keyboard = "com.apple.Keyboard-Settings.extension"
 
     var url: URL { URL(string: "x-apple.systempreferences:" + rawValue)! }
+
+    /// The pane a panel's last row names — `PanelSettings` is ToeCore's symbol for it.
+    init(_ pane: PanelSettings) {
+        switch pane {
+        case .battery:   self = .battery
+        case .displays:  self = .displays
+        case .sound:     self = .sound
+        case .wifi:      self = .wifi
+        case .bluetooth: self = .bluetooth
+        }
+    }
 
     func open() {
         NSWorkspace.shared.open(url)

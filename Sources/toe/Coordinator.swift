@@ -29,7 +29,16 @@ final class Coordinator: WindowTrackerDelegate {
     private let audio = AudioProvider()
     private let network = NetworkProvider()
     private let keyboard = KeyboardLayoutProvider()
-    private var providers: [BarProvider] { [keyboard, network, audio, power] }
+    /// Starts with the rest but reads nothing until the Bluetooth grant exists — see
+    /// `BluetoothProvider`; the panel's first open is what asks.
+    private let bluetooth = BluetoothProvider()
+    private var providers: [BarProvider] { [keyboard, bluetooth, network, audio, power] }
+    /// The panel under a widget — one window for all six, see `BarPanelWindow`.
+    private let barPanel = BarPanelWindow()
+    /// The month the calendar is showing. Reset to today's every time the clock's panel
+    /// opens: a calendar that opened on the month you left it in last week would read as the
+    /// wrong month.
+    private var calendarView = ClockPanel.View(year: 2000, month: 1)
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and the menu bar under them is what shows, until `bar show` or a relaunch.
     private var barHidden = false
@@ -294,8 +303,18 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
         bar.onClick = { [weak self] display, kind, button in self?.barClicked(kind, button, on: display) }
         bar.onScroll = { [weak self] kind, steps in self?.barScrolled(kind, steps: steps) }
+        // A panel hangs from its bar: the bar stepping aside for the menu bar takes it too, as
+        // `bar hide` does — a card floating under a menu bar it was never anchored to reads as
+        // a window left behind.
+        bar.onPeek = { [weak self] display, peeking in
+            guard let self, peeking, barPanel.displayID == display else { return }
+            barPanel.close()
+        }
         clock.onTick = { [weak self] in self?.refreshStatus() }
         for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
+        barPanel.onAction = { [weak self] action in self?.panelAction(action) }
+        barPanel.onSlide = { [weak self] slider, value in self?.panelSlide(slider, to: value) }
+        barPanel.onSwitch = { [weak self] delta in self?.switchPanel(by: delta) }
 
         installSignalHandlers()
         // Before the four repairs below, because the copy this replaces writes those journals on
@@ -1099,6 +1118,7 @@ final class Coordinator: WindowTrackerDelegate {
             clock.stop()
             for provider in providers { provider.stop() }
             if status == nil { status = makeStatusItem() }
+            barPanel.close()
         }
         bar.enabled = wanted
         bar.peekEnabled = config.bar.menuBarPeek
@@ -1155,7 +1175,12 @@ final class Coordinator: WindowTrackerDelegate {
         }
 
         // The right section, in Omarchy's order: tray and agents are not portable and are left
-        // out; bluetooth, network, audio, monitor, power follow.
+        // out; bluetooth, network, audio, monitor, power follow. Bluetooth draws the generic
+        // "on" glyph until the grant exists: toe cannot know better, and "off" would be a claim.
+        let bt = bluetooth.state
+        items.append(BarWidgets.bluetooth(on: bt.access != .granted || bt.powered,
+                                          connected: bt.access == .granted ? bt.connected : 0,
+                                          metrics: metrics))
         items.append(BarWidgets.network(network.connection, metrics: metrics))
         if let output = audio.state {
             items.append(BarWidgets.audio(volume: output.volume, muted: output.muted,
@@ -1178,6 +1203,159 @@ final class Coordinator: WindowTrackerDelegate {
             foreground: Colors.rgba(config.bar.foreground, or: Hex.rgba(fallback.foreground)!),
             active: Colors.rgba(config.bar.active, or: Hex.rgba(fallback.active)!),
             markWidth: markWidth, markHeight: markHeight))
+        refreshPanel()
+    }
+
+    // MARK: - The panels
+
+    /// The quick menu's colours at the bar's size — what #177 settled a panel is drawn in.
+    private var panelStyle: PanelStyle {
+        let menu = config.menu
+        var metrics = PanelMetrics(fontSize: config.bar.fontSize)
+        // The one seam: how tall a line of the bundled face is, at any size, as a ratio.
+        let font = MenuFont.text(size: 12)
+        metrics.lineRatio = Double(font.ascender - font.descender + font.leading) / 12
+        return PanelStyle(
+            metrics: metrics,
+            background: Colors.rgba(menu.background, or: RGBA(r: 0.10, g: 0.11, b: 0.15, a: 1)),
+            foreground: Colors.rgba(menu.foreground, or: RGBA(r: 0.66, g: 0.69, b: 0.84, a: 1)),
+            accent: Colors.rgba(menu.accent, or: RGBA(r: 0.48, g: 0.64, b: 0.97, a: 1)),
+            border: Colors.rgba(menu.borderColor, or: RGBA(r: 0.66, g: 0.69, b: 0.84, a: 1)),
+            opacity: menu.opacity)
+    }
+
+    /// What `kind`'s panel shows right now, from what its provider last said — or nil for a
+    /// panel whose widget is not on the bar, which is a panel that cannot open.
+    private func panelRows(_ kind: PanelKind) -> [PanelRow]? {
+        switch kind {
+        case .power:
+            guard let battery = power.state else { return nil }
+            return PowerPanel.rows(battery)
+        case .monitor:
+            return MonitorPanel.rows(displays())
+        case .clock:
+            return ClockPanel.rows(view: calendarView, weekStart: config.bar.weekStart, today: Date())
+        case .audio:
+            guard let state = audio.state else { return nil }
+            return AudioPanel.rows(state)
+        case .network:
+            return NetworkPanel.rows(network.link)
+        case .bluetooth:
+            return BluetoothPanel.rows(bluetooth.state)
+        }
+    }
+
+    /// Every display as the monitor panel lists it. `NSScreen` for the name and the points,
+    /// `CGDisplayCopyDisplayMode` for the refresh rate, which AppkKit does not expose.
+    private func displays() -> [MonitorPanel.Display] {
+        NSScreen.screens.map { screen in
+            let id = screen.displayID
+            return MonitorPanel.Display(
+                id: id, name: screen.localizedName,
+                width: Double(screen.frame.width), height: Double(screen.frame.height),
+                scale: Double(screen.backingScaleFactor),
+                refreshRate: CGDisplayCopyDisplayMode(id)?.refreshRate ?? 0,
+                builtin: CGDisplayIsBuiltin(id) != 0,
+                focused: id == workspaces.focusedMonitorID)
+        }
+    }
+
+    /// A left click on a widget: its panel, under it, on the display it was clicked on. The
+    /// same widget again closes — a second press on a thing that opened something is the
+    /// press that shuts it — and another widget's swaps the rows in place.
+    private func openPanel(_ kind: PanelKind, on display: CGDirectDisplayID) {
+        if barPanel.isVisible, barPanel.kind == kind, barPanel.displayID == display {
+            barPanel.close()
+            return
+        }
+        // The one permission a panel asks for, and only this one: the first open of the
+        // Bluetooth panel puts macOS's sheet up, and the panel says so until it is answered.
+        if kind == .bluetooth, bluetooth.needsRequest { bluetooth.request() }
+        if kind == .clock, barPanel.kind != .clock {
+            let now = ClockPanel.gregorian.dateComponents([.year, .month], from: Date())
+            calendarView = ClockPanel.View(year: now.year ?? 2000, month: now.month ?? 1)
+        }
+        guard let rows = panelRows(kind), let anchor = bar.anchor(for: kind.widget, on: display) else {
+            barPanel.close()
+            return
+        }
+        barPanel.open(kind, rows: rows, style: panelStyle, anchor: anchor)
+    }
+
+    /// Tab: the panel one widget over, in the bar's order, skipping widgets that have none
+    /// on this machine — a desktop has no battery — and wrapping at the ends.
+    private func switchPanel(by delta: Int) {
+        guard let current = barPanel.kind, let display = barPanel.displayID else { return }
+        let order = PanelKind.allCases
+        guard var index = order.firstIndex(of: current) else { return }
+        for _ in 0..<order.count {
+            index = (index + delta + order.count) % order.count
+            let next = order[index]
+            if next != current, panelRows(next) != nil, bar.anchor(for: next.widget, on: display) != nil {
+                openPanel(next, on: display)
+                return
+            }
+        }
+    }
+
+    /// The provider behind the open panel said something changed: the rows are rebuilt and
+    /// handed over with the cursor kept — the slider you are holding shows the volume the
+    /// device confirmed, the device you connected moves up the list under your hand.
+    private func refreshPanel() {
+        guard barPanel.isVisible, let kind = barPanel.kind else { return }
+        guard let rows = panelRows(kind) else {
+            barPanel.close()
+            return
+        }
+        barPanel.update(rows: rows, style: panelStyle)
+    }
+
+    /// A row pressed on a panel, handed to whatever can do it.
+    private func panelAction(_ action: PanelAction) {
+        switch action {
+        case .none:
+            break
+        case .openSettings(let pane):
+            SettingsPane(pane).open()
+        case .toggleOutputMute:
+            audio.toggleMute()
+        case .toggleInputMute:
+            audio.toggleInputMute()
+        case .pickOutput(let id):
+            audio.setDefaultOutput(id)
+        case .pickInput(let id):
+            audio.setDefaultInput(id)
+        case .stepMonth(let delta):
+            calendarView = ClockPanel.step(calendarView, months: delta)
+            refreshPanel()
+        case .today:
+            let now = ClockPanel.gregorian.dateComponents([.year, .month], from: Date())
+            calendarView = ClockPanel.View(year: now.year ?? calendarView.year, month: now.month ?? calendarView.month)
+            refreshPanel()
+        case .toggleWeekStart:
+            // Through the file, as the clock's format and the battery's percentage go: the
+            // week the calendar starts on is the week it starts on from then on. The panel
+            // is rebuilt by the reload's `refreshBar`.
+            let next = ClockPanel.weekdayNames[ClockPanel.toggledWeekStart(config.bar.weekStart)]
+            rewriteConfig("week_start", edit: {
+                ConfigWriter.setting("week_start", to: "\"\(next)\"", inTable: "bar", of: $0)
+            }, verify: { ClockPanel.weekdayNames[$0.bar.weekStart] == next })
+        case .openCalendar:
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+        case .toggleWifi:
+            network.toggleWifiPower()
+        case .connectBluetooth(let address):
+            bluetooth.connect(address)
+        case .disconnectBluetooth(let address):
+            bluetooth.disconnect(address)
+        }
+    }
+
+    private func panelSlide(_ slider: PanelSlider, to value: Double) {
+        switch slider {
+        case .outputVolume: audio.setVolume(value)
+        case .inputVolume: audio.setInputVolume(value)
+        }
     }
 
     /// The wheel over a widget. Audio is the one this pass answers for: upstream's monitor
@@ -1189,6 +1367,13 @@ final class Coordinator: WindowTrackerDelegate {
     /// A press on the bar. The table is Omarchy's — `manual/05-the-top-bar.md`, "Clicking
     /// around" — with the Mac's answer in each cell.
     private func barClicked(_ kind: BarItem.Kind?, _ button: BarView.Button, on display: CGDirectDisplayID) {
+        // A press on the bar while a panel is up: the panel's own widget toggles it in
+        // `openPanel`; any other press is a press elsewhere, and the panel goes first — it
+        // would have gone for a click anywhere else on the screen, and the bar is not exempt
+        // only because `BarPanelWindow`'s monitor leaves the bar's clicks to be answered here.
+        if barPanel.isVisible, !(button == .left && kind.flatMap(PanelKind.init(widget:)) == barPanel.kind) {
+            barPanel.close()
+        }
         switch (kind, button) {
         case (.menu, .left):
             dispatch(.menu(.root))
@@ -1205,16 +1390,20 @@ final class Coordinator: WindowTrackerDelegate {
             Self.openAccessibilitySettings()
         case (.keyboardLayout, .left):
             keyboard.selectNext()
+        case (.power, .left):
+            // A panel of toe's own, under the widget — Omarchy's, cut to what a Mac exposes.
+            // The Settings pane each widget used to open is the panel's last row.
+            openPanel(.power, on: display)
+        case (.bluetooth, .left):
+            openPanel(.bluetooth, on: display)
         case (.network, .left):
-            SettingsPane.wifi.open()
+            openPanel(.network, on: display)
         case (.audio, .left):
-            SettingsPane.sound.open()
+            openPanel(.audio, on: display)
         case (.audio, .right):
             audio.toggleMute()
         case (.monitor, .left):
-            SettingsPane.displays.open()
-        case (.power, .left):
-            SettingsPane.battery.open()
+            openPanel(.monitor, on: display)
         case (.power, .right):
             // Persisted, as upstream's `togglePercentage` writes it to shell.json: the
             // percentage you asked for is the percentage from then on.
@@ -1224,9 +1413,9 @@ final class Coordinator: WindowTrackerDelegate {
                                      inTable: "bar", of: $0)
             }, verify: { $0.bar.batteryPercentage == wanted })
         case (.clock, .left):
-            // "What is the date?" is what a click on a clock means; Omarchy opens its calendar
-            // panel, and the Mac has one.
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+            // "What is the date?" is what a click on a clock means, and Omarchy's calendar
+            // panel is the answer; the Mac's Calendar is its last row.
+            openPanel(.clock, on: display)
         case (.clock, .right):
             // Applied through the file rather than in memory, as `toggle` applies a switch: the
             // format the bar shows is the format the config stores, so a cycled format is the
@@ -1958,7 +2147,8 @@ final class Coordinator: WindowTrackerDelegate {
         cancelSlide()
         refreshMonitors()
         // The panels are framed against the screens, so they are re-framed against the new ones
-        // — before the layout, since the tiles are about to be put under them.
+        // — before the layout, since the tiles are about to be put under them. A popover under
+        // one of them closes on its own: see `BarPanelWindow.observe`.
         bar.screensChanged()
         // Both cached pictures are of a screen that no longer has that shape — and the rects the
         // wallpapers were keyed on have just changed, so they would miss anyway. Warmed again on
@@ -2117,6 +2307,13 @@ final class Coordinator: WindowTrackerDelegate {
         guard bar.fullscreen != fullscreen else { return }
         bar.fullscreen = fullscreen
         bar.refresh(redraw: false)
+        // The panel goes with its display's bar, and only that one: a fullscreen window on the
+        // other display is no reason to close a panel on this one.
+        if let fullscreen, let display = barPanel.displayID,
+           let screen = NSScreen.screens.first(where: { $0.displayID == display }),
+           BorderGeometry.isBehindFullscreen(window: Coordinates.toAX(screen.frame), fullscreen: fullscreen) {
+            barPanel.close()
+        }
     }
 
     /// Opens — or extends — the quiet period the border sits out. See `spaceSettleLatency`.
@@ -2721,6 +2918,8 @@ final class Coordinator: WindowTrackerDelegate {
             barHidden = hide
             bar.hidden = hide
             bar.refresh()
+            // A panel hangs from the bar; no bar, no panel.
+            if hide { barPanel.close() }
             // The menu bar under the bar is what shows now, and keeps its own strip; what the
             // bar reserved beyond it goes back to the tiles, or is taken from them. The zone
             // is `usable`, so this is a monitor change and a relayout. A window in the user's

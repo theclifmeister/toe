@@ -32,5 +32,9 @@
          browser through AppleScript. toe itself needs nothing but Accessibility. -->
     <key>NSAppleEventsUsageDescription</key>
     <string>toe opens new terminal and browser windows for your SUPER+ENTER bindings.</string>
+    <!-- Asked the first time the bar's Bluetooth panel is opened, never at launch — see
+         BluetoothProvider. Without the key CoreBluetooth aborts the process instead of asking. -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>toe shows your Bluetooth devices on its bar and lets you connect them from there.</string>
 </dict>
 </plist>

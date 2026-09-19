@@ -18,19 +18,21 @@ public enum BarWidgets {
     public static func power(fraction: Double, onMains: Bool, charging: Bool, charged: Bool,
                              showPercentage: Bool, metrics: BarMetrics) -> BarItem {
         let clamped = max(0, min(1, fraction))
-        let index = max(0, min(9, Int((clamped * 10).rounded(.down))))
-        let glyph: String
-        if charged {
-            glyph = Glyphs.batteryFull
-        } else if onMains && charging {
-            glyph = Glyphs.charging[index]
-        } else {
-            glyph = Glyphs.battery[index]
-        }
+        let glyph = batteryGlyph(fraction: clamped, onMains: onMains, charging: charging, charged: charged)
         let percent = Int((clamped * 100).rounded())
         let tooltip = onMains ? "\(percent)%, on power" : "\(percent)%, on battery"
         return BarItems.icon(.power, glyph: showPercentage ? "\(percent)% \(glyph)" : glyph,
                              tooltip: tooltip, slots: showPercentage ? 2 : 1, metrics: metrics)
+    }
+
+    /// The glyph alone — the bar's widget and the power panel's hero draw the same one, so
+    /// the rule is in one place.
+    public static func batteryGlyph(fraction: Double, onMains: Bool, charging: Bool, charged: Bool) -> String {
+        let clamped = max(0, min(1, fraction))
+        let index = max(0, min(9, Int((clamped * 10).rounded(.down))))
+        if charged { return Glyphs.batteryFull }
+        if onMains && charging { return Glyphs.charging[index] }
+        return Glyphs.battery[index]
     }
 
     /// `panels/audio/Panel.qml`, `outputIcon`: headphones before anything, then muted, then
@@ -68,20 +70,30 @@ public enum BarWidgets {
     /// the restricted glyphs in `active`, the wired glyph, and the crossed-out one for no
     /// connection at all.
     public static func network(_ connection: Connection, metrics: BarMetrics) -> BarItem {
+        let glyph = networkGlyph(connection)
         switch connection {
         case .wifi(let strength, let restricted):
-            let index = max(0, min(4, Int((Double(strength) / 20).rounded(.up)) - 1))
-            return BarItems.icon(.network, glyph: restricted ? Glyphs.wifiRestricted : Glyphs.wifi[index],
-                                 active: restricted,
+            return BarItems.icon(.network, glyph: glyph, active: restricted,
                                  tooltip: restricted ? "Wi-Fi, limited" : "Wi-Fi, \(strength)%",
                                  metrics: metrics)
         case .ethernet(let restricted):
-            return BarItems.icon(.network, glyph: restricted ? Glyphs.ethernetRestricted : Glyphs.ethernet,
-                                 active: restricted, tooltip: restricted ? "Wired, limited" : "Wired",
-                                 metrics: metrics)
+            return BarItems.icon(.network, glyph: glyph, active: restricted,
+                                 tooltip: restricted ? "Wired, limited" : "Wired", metrics: metrics)
         case .none:
-            return BarItems.icon(.network, glyph: Glyphs.disconnected, tooltip: "No network",
-                                 metrics: metrics)
+            return BarItems.icon(.network, glyph: glyph, tooltip: "No network", metrics: metrics)
+        }
+    }
+
+    /// The glyph alone, for the network panel's hero as well as the widget.
+    public static func networkGlyph(_ connection: Connection) -> String {
+        switch connection {
+        case .wifi(let strength, let restricted):
+            let index = max(0, min(4, Int((Double(strength) / 20).rounded(.up)) - 1))
+            return restricted ? Glyphs.wifiRestricted : Glyphs.wifi[index]
+        case .ethernet(let restricted):
+            return restricted ? Glyphs.ethernetRestricted : Glyphs.ethernet
+        case .none:
+            return Glyphs.disconnected
         }
     }
 
