@@ -18,19 +18,21 @@ public enum BarWidgets {
     public static func power(fraction: Double, onMains: Bool, charging: Bool, charged: Bool,
                              showPercentage: Bool, metrics: BarMetrics) -> BarItem {
         let clamped = max(0, min(1, fraction))
-        let index = max(0, min(9, Int((clamped * 10).rounded(.down))))
-        let glyph: String
-        if charged {
-            glyph = Glyphs.batteryFull
-        } else if onMains && charging {
-            glyph = Glyphs.charging[index]
-        } else {
-            glyph = Glyphs.battery[index]
-        }
+        let glyph = batteryGlyph(fraction: clamped, onMains: onMains, charging: charging, charged: charged)
         let percent = Int((clamped * 100).rounded())
         let tooltip = onMains ? "\(percent)%, on power" : "\(percent)%, on battery"
         return BarItems.icon(.power, glyph: showPercentage ? "\(percent)% \(glyph)" : glyph,
                              tooltip: tooltip, slots: showPercentage ? 2 : 1, metrics: metrics)
+    }
+
+    /// The glyph alone — the bar's widget and the power panel's hero draw the same one, so
+    /// the rule is in one place.
+    public static func batteryGlyph(fraction: Double, onMains: Bool, charging: Bool, charged: Bool) -> String {
+        let clamped = max(0, min(1, fraction))
+        let index = max(0, min(9, Int((clamped * 10).rounded(.down))))
+        if charged { return Glyphs.batteryFull }
+        if onMains && charging { return Glyphs.charging[index] }
+        return Glyphs.battery[index]
     }
 
     /// `panels/audio/Panel.qml`, `outputIcon`: headphones before anything, then muted, then

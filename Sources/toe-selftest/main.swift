@@ -3708,6 +3708,318 @@ h.test("the state report says whether the bar is on screen") { t in
              "and the skill says what the words mean")
 }
 
+// MARK: - The bar's panels
+
+h.test("a panel row takes the cursor only when there is something to do on it") { t in
+    t.expect(PanelRow.settings(.sound).isSelectable, "the settings row")
+    t.expect(PanelRow.slider(.outputVolume, value: 0.5, action: .toggleOutputMute).isSelectable, "a slider")
+    t.expect(PanelRow.hero(glyph: "x", title: "Audio", status: "", trailing: .toggle(on: true),
+                           action: .toggleOutputMute).isSelectable, "a hero with a switch")
+    t.expect(!PanelRow.hero(glyph: "x", title: "Battery", status: "", trailing: .text("70%")).isSelectable,
+             "but not one with a number")
+    for row in [PanelRow.header("OUTPUT"), .separator, .progress(0.5), .note("no"),
+                .info([PanelRow.Info("a", "b")])] {
+        t.expect(!row.isSelectable, "\(row.kind) is display only")
+    }
+    t.equal(PanelRow.settings(.wifi).action, .openSettings(.wifi), "the settings row opens its pane")
+    if case .action(let label) = PanelRow.settings(.bluetooth).kind {
+        t.equal(label, "Open Bluetooth settings…", "named the way System Settings names it")
+    } else { t.expect(false, "a settings row is an action row") }
+    t.equal(PanelRow.slider(.inputVolume, value: 1.7, action: .toggleInputMute).sliderValue, 1,
+            "a slider is clamped on the way in")
+
+    // Which widget opens which panel, and which open none.
+    t.equal(PanelKind(widget: .audio), .audio, "audio")
+    t.equal(PanelKind(widget: .clock), .clock, "the clock's calendar")
+    t.equal(PanelKind(widget: .keyboardLayout), nil, "the layout switches, it does not open")
+    t.equal(PanelKind(widget: .menu), nil, "the mark is the quick menu's")
+    t.equal(PanelKind(widget: .workspace(3)), nil, "a workspace is a jump")
+}
+
+h.test("the panel cursor starts hidden, reveals at the near end, and steps over display rows") { t in
+    var s = PanelState(rows: [
+        .hero(glyph: "x", title: "Audio", status: "", trailing: .toggle(on: true), action: .toggleOutputMute),
+        .separator,
+        .header("OUTPUT", trailing: "50%"),
+        .slider(.outputVolume, value: 0.5, action: .toggleOutputMute),
+        .pick(glyph: "s", label: "Speakers", current: true, action: .pickOutput(1)),
+        .pick(glyph: "h", label: "AirPods", action: .pickOutput(2)),
+        .separator,
+        .settings(.sound),
+    ])
+    t.equal(s.selection, nil, "nothing lit on open")
+    t.equal(s.activate(), .none, "and Return does nothing until something is")
+    s.move(by: 1)
+    t.equal(s.selection, 0, "the first ↓ reveals the cursor on the first row that takes it")
+    s.move(by: 1)
+    t.equal(s.selection, 3, "the next steps over the separator and the header to the slider")
+    s.move(by: 1); s.move(by: 1)
+    t.equal(s.selection, 5, "then down the devices")
+    s.move(by: 1)
+    t.equal(s.selection, 7, "over the separator to the settings row")
+    s.move(by: 1)
+    t.equal(s.selection, 7, "and clamps rather than wraps")
+    s.move(by: -10)
+    t.equal(s.selection, 0, "a big move up clamps to the top and looks forward for a row")
+    s.moveToEnd()
+    t.equal(s.selection, 7, "End")
+    s.moveToTop()
+    t.equal(s.selection, 0, "Home")
+
+    var up = PanelState(rows: s.rows)
+    up.move(by: -1)
+    t.equal(up.selection, 7, "the first ↑ reveals the cursor at the bottom")
+
+    // The pointer and a click land only where the cursor could.
+    s.select(row: 2)
+    t.equal(s.selection, 0, "hovering a header moves nothing")
+    s.select(row: 4)
+    t.equal(s.selection, 4, "hovering a device row does")
+    t.equal(s.activate(), .perform(.pickOutput(1)), "Return picks it")
+    s.select(row: 0)
+    t.equal(s.activate(), .perform(.toggleOutputMute), "the hero's switch is the header cursor's action")
+
+    // A list with nothing to choose stays dark.
+    var dark = PanelState(rows: [.header("x"), .note("Bluetooth was denied"), .separator])
+    dark.move(by: 1)
+    t.equal(dark.selection, nil, "no row can be lit")
+}
+
+h.test("←/→ and the wheel move a slider by 5% and write it through") { t in
+    var s = PanelState(rows: [
+        .header("OUTPUT"),
+        .slider(.outputVolume, value: 0.5, action: .toggleOutputMute),
+        .pick(glyph: "s", label: "Speakers", action: .pickOutput(1)),
+    ])
+    t.equal(s.adjust(by: 1), .none, "no cursor, no slider")
+    s.move(by: 1)
+    t.equal(s.selection, 1, "on the slider")
+    t.equal(s.adjust(by: 1), .slide(.outputVolume, 0.55), "→ is a step up")
+    t.equal(s.rows[1].sliderValue, 0.55, "and the row already says so")
+    t.equal(s.adjust(by: -3), .slide(.outputVolume, 0.4), "← three times from where it was left")
+    t.equal(s.activate(), .perform(.toggleOutputMute), "Return on the slider mutes")
+    s.move(by: 1)
+    t.equal(s.adjust(by: 1), .none, "on a device row the arrows are not a volume")
+    t.equal(s.adjust(row: 1, by: 20), .slide(.outputVolume, 1), "the wheel over the slider, clamped at full")
+    t.equal(s.adjust(row: 1, by: 1), .none, "and a step that changes nothing says nothing")
+    t.equal(s.set(row: 1, to: 0.3), .slide(.outputVolume, 0.3), "a drag sets it outright")
+    t.equal(s.set(row: 0, to: 0.3), .none, "a header is not a slider")
+}
+
+h.test("new rows keep the cursor on the row it was on, by identity") { t in
+    func rows(connected: [String], paired: [String]) -> [PanelRow] {
+        var out: [PanelRow] = [.hero(glyph: "b", title: "Bluetooth", status: "", trailing: .toggle(on: true),
+                                     action: .toggleBluetooth)]
+        if !connected.isEmpty {
+            out.append(.header("CONNECTED"))
+            out += connected.map { .pick(glyph: "c", label: $0, detail: "", current: true,
+                                         action: .disconnectBluetooth($0)) }
+        }
+        if !paired.isEmpty {
+            out.append(.header("PAIRED"))
+            out += paired.map { .pick(glyph: "p", label: $0, detail: nil, action: .connectBluetooth($0)) }
+        }
+        out += [.separator, .settings(.bluetooth)]
+        return out
+    }
+    var s = PanelState(rows: rows(connected: [], paired: ["Keys", "Pods"]))
+    s.move(by: 1); s.move(by: 1); s.move(by: 1)
+    t.equal(s.selectedRow?.action, .connectBluetooth("Pods"), "on Pods")
+    // Pods connects and moves up into a new section above the one it was in.
+    s.replace(rows: rows(connected: ["Pods"], paired: ["Keys"]))
+    t.equal(s.selectedRow?.action, .disconnectBluetooth("Pods"), "the cursor followed the device up")
+    // Pods is unpaired: the row is gone, and the cursor stays put by index, on something.
+    s.replace(rows: rows(connected: [], paired: ["Keys"]))
+    t.expect(s.selectedRow?.isSelectable == true, "on a row it can rest on: \(String(describing: s.selectedRow?.kind))")
+    // Sliders and heroes are one of a kind and follow themselves.
+    var a = PanelState(rows: [.slider(.outputVolume, value: 0.2, action: .toggleOutputMute),
+                              .pick(glyph: "s", label: "Speakers", action: .pickOutput(1))])
+    a.move(by: 1)
+    a.replace(rows: [.hero(glyph: "x", title: "Audio", status: "", trailing: .toggle(on: true), action: .toggleOutputMute),
+                     .slider(.outputVolume, value: 0.9, action: .toggleOutputMute)])
+    t.equal(a.selection, 1, "the slider is still the slider, one row down")
+    t.equal(a.rows[1].sliderValue, 0.9, "with the provider's value")
+    // No cursor stays no cursor.
+    var dark = PanelState(rows: [.settings(.sound)])
+    dark.replace(rows: [.settings(.sound), .settings(.wifi)])
+    t.equal(dark.selection, nil, "a hidden cursor is not revealed by a refresh")
+}
+
+h.test("panel metrics are Omarchy's Style tokens at the bar's font size") { t in
+    let m = PanelMetrics()
+    t.equal(m.pointSize(.caption), 10, "fontPx(0.833)")
+    t.equal(m.pointSize(.bodySmall), 11, "fontPx(0.917)")
+    t.equal(m.pointSize(.body), 12, "the base")
+    t.equal(m.pointSize(.title), 14, "fontPx(1.167)")
+    t.equal(m.pointSize(.display), 24, "fontPx(2)")
+    t.equal(m.pointSize(.displayLarge), 28, "fontPx(2.333)")
+    t.equal(m.lineHeight(.body), 16, "12 × 1.32, rounded up")
+    t.equal(m.padding, 14, "popupPadding")
+    t.equal(m.borderWidth, 2, "the card's border")
+    t.equal(m.gap, 5, "gapsOut")
+    t.equal(m.width, 380, "contentWidth")
+    t.equal(m.calendarWidth, 560, "and the calendar's")
+    t.equal(m.trackHeight, 4, "max(4, 28 × 0.11)")
+    t.equal(m.knobSize, 14, "max(14, 28 × 0.38)")
+    t.equal(m.toggleHeight, 22, "max(22, 28 × 0.55)")
+    t.equal(m.toggleWidth, 42, "1.9 as wide, rounded")
+    let big = PanelMetrics(fontSize: 18)
+    t.equal(big.pointSize(.body), 18, "the base follows the font")
+    t.equal(big.padding, 21, "and so does every space token: 14 × 1.5")
+    t.equal(big.width, 570, "380 × 1.5")
+    t.equal(big.knobSize, 16, "max(14, round(42 × 0.38))")
+}
+
+h.test("a panel's rows stack the way the column upstream does") { t in
+    let m = PanelMetrics()
+    let rows = PowerPanel.rows(PowerPanel.Battery(fraction: 0.77, onMains: false, charging: false, charged: false,
+                                                  minutesToEmpty: 134, health: "Good", cycleCount: 312,
+                                                  maximumCapacity: 89))
+    let (frames, height) = PanelLayout.frames(rows, width: m.width, m)
+    t.equal(frames.count, rows.count, "a frame per row")
+    // Border 2 + padding 14 = 16 in from every edge.
+    t.equal(frames[0].x, 16, "content inset")
+    t.equal(frames[0].y, 16, "from the top too")
+    t.equal(frames[0].w, 380 - 32, "the content width")
+    // The hero is as tall as its display-large percentage: 28 × 1.32 = 37.
+    t.equal(frames[0].h, 37, "the hero's height is the tallest thing in it")
+    t.equal(frames[1].y, 16 + 37 + 14, "the battery bar a block gap below")
+    t.equal(frames[1].h, 8, "space(8) tall")
+    t.equal(frames[2].y, frames[1].maxY + 4, "the stats hang off the bar at labelGap")
+    t.equal(frames[2].h, 15, "a bodySmall line: 11 × 1.32 rounded up")
+    t.equal(frames[3].y, frames[2].maxY + 4, "stat lines at labelGap")
+    t.equal(frames[5].y, frames[4].maxY + 14, "the separator is a block")
+    t.equal(frames[5].h, 1, "a hairline")
+    t.equal(frames[6].y, frames[5].maxY + 14, "and the settings row a block below it")
+    t.equal(frames[6].h, 16 + 10, "a body line plus rowPadding")
+    t.equal(height, frames[6].maxY + 16, "the card ends an inset below the last row")
+
+    // A section: header, 6 to its slider, 6 to each device; a two-line device row is taller.
+    let audio: [PanelRow] = [
+        .header("OUTPUT", trailing: "50%"),
+        .slider(.outputVolume, value: 0.5, action: .toggleOutputMute),
+        .pick(glyph: "s", label: "Speakers", current: true, action: .pickOutput(1)),
+        .pick(glyph: "p", label: "Pods", detail: "Connected", action: .pickOutput(2)),
+    ]
+    let f = PanelLayout.frames(audio, width: 380, m).frames
+    t.equal(f[0].h, 14 + 2, "a caption line plus the Nerd Font overshoot")
+    t.equal(f[1].y, f[0].maxY + 6, "the slider hangs off its header")
+    t.equal(f[1].h, 30, "PanelSlider's 22 plus controlGap")
+    t.equal(f[2].y, f[1].maxY + 6, "list rows at the list gap")
+    t.equal(f[2].h, 19 + 10, "one title line plus xl")
+    t.equal(f[3].h, 16 + 1 + 14 + 12, "two lines plus rowPaddingX")
+
+    // Hit testing: rows, and the gaps between them are nobody's.
+    t.equal(PanelLayout.row(at: Point(x: 100, y: f[1].y + 5), frames: f), 1, "on the slider")
+    t.equal(PanelLayout.row(at: Point(x: 100, y: f[1].maxY + 2), frames: f), nil, "in the gap")
+    t.equal(PanelLayout.row(at: Point(x: 3, y: f[2].y + 5), frames: f), nil, "over the border")
+
+    // The slider's track and its value from a pointer.
+    let track = PanelLayout.sliderTrack(inRow: f[1], m)
+    t.equal(track.x, f[1].x + 6, "inset 6")
+    t.equal(track.w, f[1].w - 12, "both sides")
+    t.equal(track.h, 4, "and 4 tall")
+    t.near(PanelLayout.sliderValue(x: track.x + track.w / 2, inRow: f[1], m), 0.5, "the middle is half")
+    t.equal(PanelLayout.sliderValue(x: -50, inRow: f[1], m), 0, "left of the track is nothing")
+    t.equal(PanelLayout.sliderValue(x: 10_000, inRow: f[1], m), 1, "right of it is full")
+    let knob = PanelLayout.knobFrame(value: 1, inRow: f[1], m)
+    t.equal(knob.maxX, track.maxX, "the knob stays inside the track at full")
+    t.equal(PanelLayout.knobFrame(value: 0, inRow: f[1], m).x, track.x, "and at nothing")
+}
+
+h.test("a panel hangs under its widget, inside the display, and never taller than the screen") { t in
+    let m = PanelMetrics()
+    let display = Box(x: 0, y: 0, w: 1728, h: 1117)
+    let size = Point(x: 380, y: 300)
+    // Under a widget in the middle: centred on the slot, 5 below a 33-tall bar.
+    let mid = PanelLayout.anchor(size: size, underSlotAt: 800, barHeight: 33, display: display, m)
+    t.equalBox(mid, box(610, 38, 380, 300), "centred under the slot, gap below the bar")
+    // Under the rightmost widget: slid in to keep the gap from the edge.
+    let right = PanelLayout.anchor(size: size, underSlotAt: 1710, barHeight: 33, display: display, m)
+    t.equalBox(right, box(1728 - 380 - 5, 38, 380, 300), "hangs inward from the right edge")
+    // On a second display to the right, in Accessibility coordinates.
+    let second = Box(x: 1728, y: -200, w: 2560, h: 1440)
+    let far = PanelLayout.anchor(size: size, underSlotAt: 100, barHeight: 26, display: second, m)
+    t.equalBox(far, box(1728 + 5, -200 + 26 + 5, 380, 300), "left edge of the second display")
+    // Too tall for the screen: cut to what fits under the bar.
+    let tall = PanelLayout.anchor(size: Point(x: 380, y: 5000), underSlotAt: 800, barHeight: 33,
+                                  display: display, m)
+    t.equal(tall.h, 1117 - 33 - 10, "the screen less the bar and two gaps")
+    t.equal(PanelLayout.maxHeight(display: Box(x: 0, y: 0, w: 800, h: 100), barHeight: 26, m), 120,
+            "never under 120, upstream's floor")
+    // Too wide for a narrow display: cut to the display less two gaps.
+    let narrow = PanelLayout.anchor(size: size, underSlotAt: 100, barHeight: 26,
+                                    display: Box(x: 0, y: 0, w: 300, h: 600), m)
+    t.equal(narrow.w, 290, "narrowed")
+    t.equal(narrow.x, 5, "and at the gap")
+}
+
+h.test("a card shorter than its rows scrolls to keep the cursor's row in view") { t in
+    let m = PanelMetrics()
+    t.equal(PanelLayout.scroll(offset: 50, cursor: nil, viewport: 400, content: 300, m), 0,
+            "nothing to scroll when it all fits")
+    t.equal(PanelLayout.scroll(offset: 900, cursor: nil, viewport: 400, content: 1000, m), 600,
+            "clamped to the end of the content")
+    t.equal(PanelLayout.scroll(offset: 0, cursor: box(16, 700, 300, 30), viewport: 400, content: 1000, m),
+            700 + 30 + 6 - 400, "a row below the viewport brings it up to the margin")
+    t.equal(PanelLayout.scroll(offset: 600, cursor: box(16, 100, 300, 30), viewport: 400, content: 1000, m),
+            94, "a row above brings it down to the margin")
+    t.equal(PanelLayout.scroll(offset: 100, cursor: box(16, 200, 300, 30), viewport: 400, content: 1000, m),
+            100, "a row in view moves nothing")
+}
+
+h.test("the power panel says what the battery menu says") { t in
+    let m = PanelMetrics()
+    let b = PowerPanel.Battery(fraction: 0.77, onMains: false, charging: false, charged: false,
+                               minutesToEmpty: 134, health: "Good", cycleCount: 312, maximumCapacity: 89)
+    let rows = PowerPanel.rows(b)
+    if case .hero(let glyph, let title, let status, let trailing) = rows[0].kind {
+        t.equal(glyph, Glyphs.battery[7], "the widget's glyph, from the same rule")
+        t.equal(title, "Battery", "title")
+        t.equal(status, "On battery", "modeLabel")
+        t.equal(trailing, .text("77%"), "the big number")
+    } else { t.expect(false, "a hero first") }
+    t.equal(rows[1].kind, .progress(0.77), "the bar")
+    t.equal(rows[2].kind, .info([PanelRow.Info("Time left", "2:14"), PanelRow.Info("Condition", "Normal")]),
+            "time and condition")
+    t.equal(rows[3].kind, .info([PanelRow.Info("Charge cycles", "312"), PanelRow.Info("Maximum capacity", "89%")]),
+            "cycles and capacity")
+    t.equal(rows[4].kind, .info([PanelRow.Info("Power source", "Battery"), PanelRow.Info("Low Power Mode", "Off")]),
+            "source and low power")
+    t.equal(rows[5].kind, .separator, "then the door")
+    t.equal(rows[6].action, .openSettings(.battery), "to the Battery pane")
+    t.expect(rows.filter(\.isSelectable).count == 1, "only the settings row takes the cursor")
+
+    var charging = b
+    charging.onMains = true; charging.charging = true; charging.minutesToFull = 45
+    t.equal(PowerPanel.status(charging), "Charging", "on power and flowing")
+    t.equal(PowerPanel.rows(charging)[2].kind,
+            .info([PanelRow.Info("Time to full", "0:45"), PanelRow.Info("Condition", "Normal")]),
+            "time to full on power")
+    var held = charging
+    held.charging = false; held.fraction = 0.8
+    t.equal(PowerPanel.status(held), "Charging on hold", "Optimized Battery Charging, in the Mac's words")
+    t.equal(PowerPanel.rows(held)[2].kind,
+            .info([PanelRow.Info("Time to full", "—"), PanelRow.Info("Condition", "Normal")]),
+            "and no time while nothing flows")
+    var full = held
+    full.charged = true; full.fraction = 1
+    t.equal(PowerPanel.status(full), "Fully charged", "charged")
+    t.equal(PowerPanel.timeLabel(minutes: nil), "Calculating…", "no estimate yet")
+    t.equal(PowerPanel.timeLabel(minutes: 5), "0:05", "padded minutes")
+    t.equal(PowerPanel.timeLabel(minutes: 600), "10:00", "hours")
+    t.equal(PowerPanel.conditionLabel("Fair"), "Service recommended", "anything but Good")
+    t.equal(PowerPanel.conditionLabel(nil), "—", "or nothing")
+    var lpm = b
+    lpm.lowPowerMode = true; lpm.cycleCount = nil; lpm.maximumCapacity = nil
+    t.equal(PowerPanel.rows(lpm)[4].kind,
+            .info([PanelRow.Info("Power source", "Battery"), PanelRow.Info("Low Power Mode", "On")]), "on")
+    t.equal(PowerPanel.rows(lpm)[3].kind,
+            .info([PanelRow.Info("Charge cycles", "—"), PanelRow.Info("Maximum capacity", "—")]),
+            "dashes for what the Mac would not say")
+    _ = m
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in
