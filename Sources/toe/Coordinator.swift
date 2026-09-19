@@ -303,6 +303,13 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
         bar.onClick = { [weak self] display, kind, button in self?.barClicked(kind, button, on: display) }
         bar.onScroll = { [weak self] kind, steps in self?.barScrolled(kind, steps: steps) }
+        // A panel hangs from its bar: the bar stepping aside for the menu bar takes it too, as
+        // `bar hide` does — a card floating under a menu bar it was never anchored to reads as
+        // a window left behind.
+        bar.onPeek = { [weak self] display, peeking in
+            guard let self, peeking, barPanel.displayID == display else { return }
+            barPanel.close()
+        }
         clock.onTick = { [weak self] in self?.refreshStatus() }
         for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
         barPanel.onAction = { [weak self] action in self?.panelAction(action) }

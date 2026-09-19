@@ -32,6 +32,9 @@ final class BarWindowSet {
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
     /// The wheel, in whole notches — see `BarView.scrollWheel`.
     var onScroll: ((BarItem.Kind?, Int) -> Void)?
+    /// A display's bar stepping aside for the menu bar, or back — `BarPanel.isPeeking` changed.
+    /// The Coordinator closes a panel hanging from a bar that has just gone.
+    var onPeek: ((CGDirectDisplayID, Bool) -> Void)?
 
     /// How tall the strip is on `screen`: the configured height, or the menu bar's strip where
     /// that is taller.
@@ -123,7 +126,10 @@ final class BarWindowSet {
         panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
         panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
         panel.peekEnabled = peekEnabled
-        panel.onPeekChanged = { [weak self] in self?.refresh(redraw: false) }
+        panel.onPeekChanged = { [weak self, weak panel] in
+            self?.refresh(redraw: false)
+            if let panel { self?.onPeek?(id, panel.isPeeking) }
+        }
         panels[id] = panel
         return panel
     }
