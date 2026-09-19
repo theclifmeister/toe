@@ -68,10 +68,16 @@ public enum Glyphs {
     public static let batteryFull = "\u{F0085}"
 
     /// Every glyph above, flat, for a coverage check to walk — the font is asked once for the
-    /// whole set at launch rather than per glyph at draw time.
-    public static let all: [String] = [workspace, stayAwake, doNotDisturb,
-                                       bluetoothOff, bluetoothOn, bluetoothConnected]
-        + wifi + [wifiRestricted, ethernet, ethernetRestricted, disconnected]
-        + volume + [muted, headphones, monitor, monitors]
-        + battery + charging + [batteryFull]
+    /// whole set at launch rather than per glyph at draw time. Spelled as one `joined()` over
+    /// typed rows rather than a chain of `+`: the chain is fine on a current toolchain and
+    /// "unable to type-check this expression in reasonable time" on the CI runner's.
+    public static let all: [String] = {
+        let rows: [[String]] = [
+            [workspace, stayAwake, doNotDisturb, bluetoothOff, bluetoothOn, bluetoothConnected],
+            wifi, [wifiRestricted, ethernet, ethernetRestricted, disconnected],
+            volume, [muted, headphones, monitor, monitors],
+            battery, charging, [batteryFull],
+        ]
+        return Array(rows.joined())
+    }()
 }
