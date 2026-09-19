@@ -3172,6 +3172,395 @@ h.test("the mark leads the strip and is its own target") { t in
             "and the padding beside it is still nothing")
 }
 
+// MARK: - The bar
+
+// A measurer that stands in for the font: every character is 7.2 wide, which is what the
+// bundled JetBrainsMono Nerd Font actually advances at 12px — so the numbers below are the ones
+// a real bar draws, and a glyph, being one character, is one advance like a digit.
+let barMeasure: BarLayout.Measure = { text, size in Double(text.count) * 7.2 * size / 12 }
+
+h.test("the bar's slots and margins are Omarchy's, and scale with the height") { t in
+    let m = BarMetrics()
+    t.equal(m.height, 26, "Style.bar.sizeHorizontal")
+    t.equal(m.iconSlot, 27, "Style.bar.iconSlot")
+    t.equal(m.statusSlot, 21, "Style.bar.statusSlot")
+    t.equal(m.workspaceSlot, 20, "a workspace's fixedWidth")
+    t.equal(m.workspaceGap, 1, "Style.space(1) between workspaces")
+    t.equal(m.workspaceTrailingGap, 1.5, "and spaceReal(1.5) after the last")
+    t.equal(m.edgeMargin, 8, "Style.space(8) in from the screen edge")
+    t.equal(m.pointSize(.body), 12, "the body is the base size")
+    t.equal(m.pointSize(.caption), 10, "the caption is fontPx(0.833)")
+    t.equal(m.pointSize(.icon), 13, "and the icon font Style.bar.iconFont")
+
+    // Style.barToken and Style.space both multiply by the font scale upstream; here the height
+    // is the scale, so a bar half as tall again has slots half as wide again, rounded.
+    let tall = BarMetrics(height: 39, fontSize: 12)
+    t.equal(tall.iconSlot, 41, "27 × 1.5, rounded")
+    t.equal(tall.statusSlot, 32, "21 × 1.5, rounded up")
+    t.equal(tall.workspaceSlot, 30, "20 × 1.5")
+    t.equal(tall.edgeMargin, 12, "8 × 1.5")
+    t.equal(tall.workspaceTrailingGap, 2.25, "spaceReal is not rounded")
+    t.equal(tall.pointSize(.body), 12, "and the type does not follow the height")
+
+    // The font sets the type alone.
+    let big = BarMetrics(height: 26, fontSize: 18)
+    t.equal(big.pointSize(.body), 18, "body")
+    t.equal(big.pointSize(.caption), 15, "caption, 18 × 0.833 rounded")
+    t.equal(big.pointSize(.icon), 20, "icon, 18 × 13/12 rounded")
+    t.equal(big.iconSlot, 27, "and the slots do not follow the font")
+
+    // WidgetButton: label + 2 × margin, never under 12.
+    t.equal(m.slotWidth(.padded(margin: 8.5), labelWidth: 72), 89, "a padded slot")
+    t.equal(m.slotWidth(.padded(margin: 8.5), labelWidth: 0), 17, "an empty label still has its margins")
+    t.equal(m.slotWidth(.padded(margin: 1), labelWidth: 2), 12, "and never less than 12")
+    t.equal(m.slotWidth(.fixed(27), labelWidth: 200), 27, "a fixed slot ignores the label")
+}
+
+h.test("the bar lays its three sections out the way Bar.qml does") { t in
+    let m = BarMetrics()
+    let items: [BarItem] = [
+        BarItems.menu(mark: "T"),
+    ] + BarItems.workspaces(WorkspaceStrip.items(for: [
+        WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
+        WorkspaceStrip.State(index: 2, isFocused: false, isVisible: false, isEmpty: true),
+    ], persistent: 2), metrics: m) + [
+        BarItems.clock("Friday 14:05"),
+        BarItems.icon(.bluetooth, glyph: Glyphs.bluetoothOn, metrics: m),
+        BarItems.icon(.audio, glyph: Glyphs.volume[2], metrics: m),
+    ]
+    let placed = BarLayout.place(items, width: 1000, metrics: m, measure: barMeasure)
+    func at(_ kind: BarItem.Kind) -> BarLayout.Placed? { placed.first { $0.item.kind == kind } }
+
+    // Left: 8 in, then the mark's slot (7.2 + 2 × 7.5 = 22.2), then 20-wide workspaces 1 apart.
+    t.equal(at(.menu)?.x, 8, "the left row starts at the edge margin")
+    t.equal(at(.menu)?.width, 22.2, "the mark at a 7.5 margin")
+    t.equal(at(.workspace(1))?.x, 30.2, "the strip follows the mark with no spacing")
+    t.equal(at(.workspace(1))?.width, 20, "in 20 slots")
+    t.equal(at(.workspace(2))?.x, 51.2, "one apart")
+    t.equal(at(.workspace(1))?.item.text, Glyphs.workspace, "the focused one is the square")
+    t.equal(at(.workspace(2))?.item.text, "2", "the other its digit")
+    t.equal(at(.workspace(2))?.item.opacity, 0.5, "dimmed while empty")
+
+    // Centre: the clock's slot is centred on the bar's midpoint. 12 characters at 7.2 is 86.4,
+    // plus 2 × 8.75 is 103.9, so it starts at 500 - 51.95.
+    t.near(at(.clock)?.width, 103.9, "the clock at an 8.75 margin")
+    t.equal(at(.clock)?.midX, 500, "and dead centre")
+
+    // Right: two 27 slots ending 8 from the right edge.
+    t.equal(at(.audio)?.maxX, 992, "the right row ends at the edge margin")
+    t.equal(at(.audio)?.width, 27, "an icon slot")
+    t.equal(at(.bluetooth)?.x, 938, "and the one before it abuts")
+    t.equal(at(.bluetooth)?.item.font, .icon, "drawn in the icon font")
+
+    // Every slot is the full height: the view fills the bar and centres each label in its slot,
+    // which is what `labelWidth` is for.
+    t.near(at(.clock)?.labelWidth, 86.4, "the label's measure comes back with the slot")
+}
+
+h.test("the centre section is built around the clock, so it never moves") { t in
+    let m = BarMetrics()
+    let hidden = BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: false, revealed: false,
+                                    tooltip: "Stay Awake", metrics: m)
+    let shown = BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: false, revealed: true,
+                                   tooltip: "Stay Awake", metrics: m)
+    let on = BarItems.indicator(.doNotDisturb, glyph: Glyphs.doNotDisturb, on: true, revealed: false,
+                                tooltip: "Allow Notifications", metrics: m)
+    let clock = BarItems.clock("14:05")
+    let layout = BarItems.keyboardLayout("us", full: "English (US)")
+    func find(_ placed: [BarLayout.Placed], _ kind: BarItem.Kind) -> BarLayout.Placed? {
+        placed.first { $0.item.kind == kind }
+    }
+
+    // Not hovered: the inactive indicator takes no room and the active one sits against the
+    // clock; the keyboard layout hangs off the clock's right.
+    let quiet = BarLayout.place([hidden, on, clock, layout], width: 600, metrics: m, measure: barMeasure)
+    t.equal(find(quiet, .clock)?.midX, 300, "the clock is centred")
+    t.equal(find(quiet, .clock)?.width, 53.5, "5 × 7.2 + 2 × 8.75")
+    t.equal(find(quiet, .doNotDisturb)?.maxX, find(quiet, .clock)?.x, "the active indicator ends where the clock begins")
+    t.equal(find(quiet, .doNotDisturb)?.width, 21, "in the status slot")
+    t.equal(find(quiet, .stayAwake)?.width, 0, "the concealed one has no width")
+    t.equal(find(quiet, .stayAwake)?.item.isHidden, true, "and is hidden")
+    t.equal(find(quiet, .keyboardLayout)?.x, find(quiet, .clock)?.maxX, "the layout starts where the clock ends")
+    t.equal(find(quiet, .keyboardLayout)?.width, 24, "2 × 6 caption + 2 × 6 margin, at 10pt")
+
+    // Hovered: the inactive indicator appears at 0.45 and pushes the active one left. The clock
+    // does not move — that is the whole point of the anchor.
+    let hovered = BarLayout.place([shown, on, clock, layout], width: 600, metrics: m, measure: barMeasure)
+    t.equal(find(hovered, .clock)?.x, find(quiet, .clock)?.x, "the clock has not moved")
+    t.equal(find(hovered, .stayAwake)?.width, 21, "the revealed indicator has its slot")
+    t.equal(find(hovered, .stayAwake)?.item.opacity, 0.45, "at Omarchy's dimmed opacity")
+    t.equal(find(hovered, .stayAwake)?.maxX, find(hovered, .doNotDisturb)?.x, "to the left of the active one")
+
+    // A notched display centres on a point of the caller's choosing.
+    let beside = BarLayout.place([clock], width: 600, metrics: m, centre: 200, measure: barMeasure)
+    t.equal(find(beside, .clock)?.midX, 200, "the anchor is centred where asked")
+
+    // No anchor at all: the section is centred as a group, upstream's other arrangement.
+    let grouped = BarLayout.place([on, clock, layout], width: 600, metrics: m, anchor: nil, measure: barMeasure)
+    let first = find(grouped, .doNotDisturb)!, last = find(grouped, .keyboardLayout)!
+    t.equal((first.x + last.maxX) / 2, 300, "the group is centred")
+    t.expect(find(grouped, .clock)!.midX != 300, "and the clock is not")
+
+    // An anchor that is not among the items is the same as none.
+    let noClock = BarLayout.place([on, layout], width: 600, metrics: m, measure: barMeasure)
+    t.equal((find(noClock, .doNotDisturb)!.x + find(noClock, .keyboardLayout)!.maxX) / 2, 300,
+            "without a clock the rest is centred as a group")
+}
+
+h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
+    let m = BarMetrics()
+    let items = [BarItems.menu(mark: "T")]
+        + BarItems.workspaces(WorkspaceStrip.items(for: [
+            WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
+            WorkspaceStrip.State(index: 2, isFocused: false, isVisible: false, isEmpty: true),
+        ], persistent: 2), metrics: m)
+        + [BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: false, revealed: false,
+                              tooltip: "", metrics: m),
+           BarItems.clock("14:05"),
+           BarItems.icon(.power, glyph: Glyphs.battery[9], metrics: m)]
+    let placed = BarLayout.place(items, width: 400, metrics: m, measure: barMeasure)
+    func hit(_ x: Double) -> BarItem.Kind? { BarLayout.hit(x: x, in: placed)?.item.kind }
+
+    t.equal(hit(4), nil, "the edge margin is bare bar")
+    t.equal(hit(8), .menu, "the mark, from its first point")
+    t.equal(hit(30.1), .menu, "to its last")
+    t.equal(hit(30.2), .workspace(1), "then the first workspace")
+    t.equal(hit(50.5), nil, "the one-point gap between workspaces is dead, as upstream's is")
+    t.equal(hit(60), .workspace(2), "the second")
+    t.equal(hit(200), .clock, "the clock in the middle")
+    t.equal(hit(380), .power, "the power icon at the right")
+    t.equal(hit(395), nil, "and bare bar after it")
+    // The concealed indicator sits against the clock's left edge at zero width, and a click
+    // there is the clock's — there is nothing to hit.
+    let clock = placed.first { $0.item.kind == .clock }!
+    t.equal(hit(clock.x), .clock, "a concealed item is never hit")
+}
+
+h.test("the workspace strip dresses WorkspaceStrip's items the way Workspaces.qml does") { t in
+    let m = BarMetrics()
+    let items = BarItems.workspaces(WorkspaceStrip.items(for: [
+        WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: true),
+        WorkspaceStrip.State(index: 2, isFocused: false, isVisible: true, isEmpty: false),
+        WorkspaceStrip.State(index: 3, isFocused: false, isVisible: false, isEmpty: false),
+        WorkspaceStrip.State(index: 10, isFocused: false, isVisible: false, isEmpty: true),
+    ], persistent: 4), metrics: m)
+    t.equal(items.map(\.text), [Glyphs.workspace, "2", "3", "0"],
+            "the square where you are, digits elsewhere, 0 for ten")
+    // `opacity: occupied || focused ? 1 : 0.5` — the focused workspace is full even when empty,
+    // which is upstream's rule and not the menu bar item's.
+    t.equal(items.map(\.opacity), [1, 1, 1, 0.5], "only an empty workspace you are not on is dimmed")
+    t.equal(items.map(\.gapAfter), [1, 1, 1, 1.5], "space(1) between, spaceReal(1.5) after the last")
+    t.equal(items.map(\.slot), Array(repeating: BarItem.Slot.fixed(20), count: 4), "20 each")
+    t.equal(items.map(\.section), Array(repeating: BarItem.Section.left, count: 4), "on the left")
+    t.equal(BarItems.workspaces([], metrics: m).isEmpty, true, "no slots, no items")
+}
+
+h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
+    // Read back from the upstream sources as codepoints — see `Glyphs` on why they are spelled
+    // that way. The one worth restating: the square is U+F14FB, the decoded surrogate pair in
+    // Workspaces.qml, and not U+F0FB.
+    t.equal(Glyphs.workspace.unicodeScalars.first?.value, 0xF14FB, "nf-md-square_rounded")
+    t.equal(Glyphs.stayAwake.unicodeScalars.first?.value, 0xF0176, "StayAwake")
+    t.equal(Glyphs.doNotDisturb.unicodeScalars.first?.value, 0xF009B, "Dnd")
+    t.equal(Glyphs.wifi.map { $0.unicodeScalars.first!.value },
+            [0xF092F, 0xF091F, 0xF0922, 0xF0925, 0xF0928], "the five signal strengths")
+    t.equal(Glyphs.battery.count, 10, "ten battery steps")
+    t.equal(Glyphs.charging.count, 10, "and ten charging")
+    t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
+    t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
+            "the old waybar pulseaudio set")
+    t.equal(Glyphs.all.count, 6 + 5 + 4 + 3 + 4 + 10 + 10 + 1, "the coverage list has them all")
+    for glyph in Glyphs.all {
+        t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
+    }
+}
+
+h.test("the clock's format is Qt's, translated for DateFormatter") { t in
+    // The visible difference: Qt's day name is `dddd`, ICU's is `EEEE`.
+    t.equal(ClockFormat.pattern("dddd HH:mm"), "EEEE HH:mm", "the default")
+    t.equal(ClockFormat.pattern("ddd d MMM HH:mm"), "EEE d MMM HH:mm", "short names, day of month")
+    t.equal(ClockFormat.pattern("d MMMM 'W'ww yyyy"), "d MMMM 'W'ww yyyy", "quotes and the week pass through")
+    t.equal(ClockFormat.pattern("yyyy-MM-dd HH:mm"), "yyyy-MM-dd HH:mm", "ISO is the same in both")
+    // The invisible one: Qt's `h` is 24-hour until an AP appears; ICU's never is.
+    t.equal(ClockFormat.pattern("h:mm"), "H:mm", "h without AP is a 24-hour clock in Qt")
+    t.equal(ClockFormat.pattern("h:mm AP"), "h:mm a", "and 12-hour with one")
+    t.equal(ClockFormat.pattern("dddd h:mm:ss ap"), "EEEE h:mm:ss a", "ap too, and seconds")
+    t.equal(ClockFormat.pattern("hh:mm A"), "hh:mm a", "Qt 6's lone A")
+    // A letter that is nothing to Qt is a literal, and ICU must be told so.
+    t.equal(ClockFormat.pattern("d MMMM Wyy"), "d MMMM 'W'yy", "an unquoted W stays a W")
+    t.equal(ClockFormat.pattern("HH'h'mm"), "HH'h'mm", "a quoted h stays text")
+    t.equal(ClockFormat.pattern("h o''clock"), "H 'o''clock'", "'' is a quote, and the run round it is one literal")
+    t.equal(ClockFormat.pattern("HH:mm 'unterminated"), "HH:mm 'unterminated'", "an open quote runs to the end")
+    t.equal(ClockFormat.pattern("zzz t"), "SSS z", "milliseconds and the zone")
+
+    // Rendered on a fixed locale and zone, on an ISO calendar: Saturday 19 September 2026 is in
+    // ISO week 38, and Thursday 1 January 2026 in week 1 of a year that started on a Thursday.
+    let utc = TimeZone(identifier: "UTC")!, en = Locale(identifier: "en_US_POSIX")
+    var gregorian = Calendar(identifier: .gregorian)
+    gregorian.timeZone = utc
+    func date(_ y: Int, _ mo: Int, _ d: Int, _ hh: Int = 14, _ mm: Int = 5, _ ss: Int = 9) -> Date {
+        gregorian.date(from: DateComponents(year: y, month: mo, day: d, hour: hh, minute: mm, second: ss))!
+    }
+    func render(_ f: String, _ d: Date = date(2026, 9, 19)) -> String {
+        ClockFormat.render(f, at: d, locale: en, timeZone: utc)
+    }
+    t.equal(render("dddd HH:mm"), "Saturday 14:05", "the default label")
+    t.equal(render("d MMMM 'W'ww yyyy"), "19 September W38 2026", "the ISO week")
+    t.equal(render("dddd h:mm AP"), "Saturday 2:05 PM", "twelve-hour")
+    t.equal(render("dddd HH:mm:ss"), "Saturday 14:05:09", "seconds")
+    t.equal(render("ddd d MMM h:mm AP"), "Sat 19 Sep 2:05 PM", "short names")
+    t.equal(render("yyyy-MM-dd HH:mm"), "2026-09-19 14:05", "ISO")
+    t.equal(render("'W'ww yyyy", date(2026, 1, 1)), "W01 2026", "week one, zero-padded, on the ISO calendar")
+    // 1 January 2027 is a Friday, so it belongs to the last ISO week of 2026 — and `yyyy` still
+    // says 2027, because it is the calendar year and not the week year.
+    t.equal(render("'W'ww yyyy", date(2027, 1, 1)), "W53 2027", "a January day in the old year's last week")
+    t.equal(render("h o''clock", date(2026, 9, 19, 9, 0)), "9 o'clock", "and the literal comes out whole")
+}
+
+h.test("right-clicking the clock walks Omarchy's presets and writes the one it lands on") { t in
+    t.equal(ClockFormat.presets.count, 10, "CLOCK_FORMATS, all ten")
+    t.equal(ClockFormat.presets.first, ClockFormat.defaultFormat, "starting at the default")
+    t.equal(ClockFormat.next(after: "dddd HH:mm"), "dddd h:mm AP", "a 24-hour label to its 12-hour twin in one click")
+    t.equal(ClockFormat.next(after: "d MMMM 'W'ww yyyy"), "yyyy-MM-dd HH:mm", "the date to ISO")
+    t.equal(ClockFormat.next(after: "yyyy-MM-dd HH:mm"), "dddd HH:mm", "and round again")
+    // A hand-written format is on the ring, at the end, so the click after it is the top and
+    // the click before it is the ISO preset — and it is never lost.
+    t.equal(ClockFormat.ring(current: "HH.mm").last, "HH.mm", "yours is appended")
+    t.equal(ClockFormat.ring(current: "HH.mm").count, 11, "not inserted")
+    t.equal(ClockFormat.next(after: "HH.mm"), "dddd HH:mm", "and the walk carries on from the top")
+    t.equal(ClockFormat.ring(current: "dddd HH:mm"), ClockFormat.presets, "a preset adds nothing")
+    t.equal(ClockFormat.ring(current: "  "), ClockFormat.presets, "nor does blank")
+    t.equal(ClockFormat.next(after: ""), "dddd HH:mm", "and blank starts at the top")
+
+    // The one-second tick is only for formats that print seconds; a quoted s is text.
+    t.equal(ClockFormat.needsSeconds("dddd HH:mm:ss"), true, "ss ticks")
+    t.equal(ClockFormat.needsSeconds("dddd HH:mm"), false, "mm does not")
+    t.equal(ClockFormat.needsSeconds("'Sat' HH:mm"), false, "the s in a quoted Sat is text")
+    t.equal(ClockFormat.needsSeconds("'seconds HH:mm"), false, "an open quote runs to the end")
+}
+
+h.test("[bar] is parsed, range-checked, and on by default") { t in
+    let fresh = try Config.parse("")
+    t.equal(fresh.bar.enabled, true, "absent is on")
+    t.equal(fresh.bar.height, 26, "Omarchy's height")
+    t.equal(fresh.bar.fontSize, 12, "and font")
+    t.equal(fresh.bar.background, "#1a1b26", "Tokyo Night's background")
+    t.equal(fresh.bar.foreground, "#a9b1d6", "foreground")
+    t.equal(fresh.bar.active, "#f7768e", "and red")
+    t.equal(fresh.bar.clockFormat, "dddd HH:mm", "Omarchy's clock format")
+    t.equal(fresh.bar.batteryPercentage, false, "no percentage until asked")
+    t.equal(fresh.bar.persistentWorkspaces, 5, "and the strip's floor is still five")
+
+    let shipped = try Config.parse(Config.defaultTOML)
+    t.equal(shipped.bar, fresh.bar, "the shipped file says what the defaults say")
+    t.equal(shipped.warnings, [], "and warns about nothing")
+    t.equal(shipped.bindings.first { $0.command == .bar(.toggle) }?.source, "super-shift-space",
+            "Omarchy's key hides it")
+
+    let set = try Config.parse("""
+    [bar]
+    enabled = false
+    height = 32
+    font_size = 14
+    background = "#000000"
+    foreground = "#ffffff"
+    active = "#ff000080"
+    clock_format = "HH:mm"
+    battery_percentage = true
+    persistent_workspaces = 3
+    """)
+    t.equal(set.bar.enabled, false, "enabled")
+    t.equal(set.bar.height, 32, "height")
+    t.equal(set.bar.fontSize, 14, "font_size")
+    t.equal(set.bar.background, "#000000", "background")
+    t.equal(set.bar.foreground, "#ffffff", "foreground")
+    t.equal(set.bar.active, "#ff000080", "active, with an alpha")
+    t.equal(set.bar.clockFormat, "HH:mm", "clock_format")
+    t.equal(set.bar.batteryPercentage, true, "battery_percentage")
+    t.equal(set.bar.persistentWorkspaces, 3, "persistent_workspaces")
+    t.equal(set.warnings, [], "all of it clean")
+
+    // Every wrong value is named and the default kept, as the rest of the file does it.
+    let bad = try Config.parse("""
+    [bar]
+    enabled = "false"
+    height = 8
+    font_size = 100
+    background = "black"
+    clock_format = 1405
+    battery_percentage = 1
+    """)
+    t.equal(bad.bar.enabled, true, "enabled in quotes is not off")
+    t.equal(bad.bar.height, 26, "a height with no room for the type keeps the default")
+    t.equal(bad.bar.fontSize, 12, "and so does an absurd font")
+    t.equal(bad.bar.background, "#1a1b26", "a colour by name is not a colour")
+    t.equal(bad.bar.clockFormat, "dddd HH:mm", "a number is not a format")
+    t.equal(bad.bar.batteryPercentage, false, "1 is not true")
+    t.equal(Set(bad.warnings.map { $0.split(separator: ":").first.map(String.init) ?? "" }),
+            ["bar.enabled", "bar.height", "bar.font_size", "bar.background", "bar.clock_format",
+             "bar.battery_percentage"],
+            "each named")
+    t.expect(bad.warnings.contains("bar.enabled: must be true or false, using true"), "in the usual words")
+    t.expect(bad.warnings.contains("bar.height: must be a number from 16 to 100, using 26"), "with the range")
+}
+
+h.test("the bar has one verb, and the Setup level a switch") { t in
+    t.equal(try CommandParser.parse("bar toggle"), .bar(.toggle), "toggle")
+    t.equal(try CommandParser.parse("bar show"), .bar(.show), "show")
+    t.equal(try CommandParser.parse("bar hide"), .bar(.hide), "hide")
+    t.equal(try CommandParser.parse("bar"), .bar(.toggle), "bare `bar` toggles, as bare `menu` opens")
+    t.equal(try CommandParser.parse("bar, toggle"), .bar(.toggle), "Hyprland's comma")
+    t.expect((try? CommandParser.parse("bar sideways")) == nil, "and anything else is refused")
+    t.equal(CommandLabel.describe(.bar(.toggle)), "Toggle the bar", "the keybindings row")
+    t.equal(CommandLabel.describe(.bar(.hide)), "Hide the bar", "one way")
+    t.equal(CommandLabel.describe(.bar(.show)), "Show the bar", "and the other")
+    t.equal(Command.bar(.toggle).suspendedByFullscreen, false, "a fullscreen window does not stop it")
+    t.equal(Command.bar(.toggle).acceptsTarget, false, "and it takes no window")
+    t.equal(Command.bar(.toggle).keepsMenuOpen, false, "the menu closes on it")
+    t.equal(CommandCatalogue.gate(.bar(.toggle)), nil, "and the socket lets it through")
+    t.expect(CommandCatalogue.entries.contains { $0.verb == "bar" }, "it is catalogued")
+
+    // The switch: `[bar] enabled`, titled for what it replaces.
+    t.equal(ConfigSwitch.bar.title, "Menu bar", "the row")
+    t.equal(ConfigSwitch.bar.table, "bar", "in [bar]")
+    t.equal(ConfigSwitch.bar.key, "enabled", "on the enabled line")
+    let off = try Config.parse("[bar]\nenabled = false\n")
+    t.equal(ConfigSwitch.bar.value(in: off), false, "read back")
+    var on = off
+    ConfigSwitch.bar.set(true, in: &on)
+    t.equal(on.bar.enabled, true, "and set")
+    let rows = MenuModel.setup(loginItem: .off, config: off)
+    t.equal(rows.first { $0.title == "Menu bar" }?.value, "off", "the row says off when the file does")
+    t.equal(rows.first { $0.title == "Menu bar" }?.action, .toggleSetting(.bar), "and throws this switch")
+}
+
+h.test("a monitor reserves the bar's strip from the top of its frame") { t in
+    // A display whose visibleFrame reaches the top: the menu bar is hidden, and the bar takes
+    // the first 26 points.
+    let full = Monitor(id: 1, frame: box(0, 0, 1512, 982), usable: box(0, 0, 1512, 982))
+    t.equalBox(full.reserving(top: 26).usable, box(0, 26, 1512, 956), "26 off the top")
+    t.equal(full.reserving(top: 26).frame, full.frame, "the frame is the display's, untouched")
+    t.equal(full.reserving(top: 26).id, 1, "same display")
+
+    // The menu bar is still showing — the bar switched off, or the hide not yet through — so
+    // `usable` already starts 25 below the top, and a 26 bar takes one point more, not 26.
+    let menuBar = Monitor(id: 1, frame: box(0, 0, 1512, 982), usable: box(0, 25, 1512, 957))
+    t.equalBox(menuBar.reserving(top: 26).usable, box(0, 26, 1512, 956), "measured from the frame, not from usable")
+    t.equalBox(menuBar.reserving(top: 20).usable, box(0, 25, 1512, 957), "and a bar behind the menu bar takes nothing")
+
+    // A Dock at the bottom is somebody else's reservation and stays.
+    let dock = Monitor(id: 1, frame: box(0, 0, 1512, 982), usable: box(0, 0, 1512, 900))
+    t.equalBox(dock.reserving(top: 26).usable, box(0, 26, 1512, 874), "the bottom edge is the Dock's")
+
+    // A second display to the right, at its own origin.
+    let right = Monitor(id: 2, frame: box(1512, -100, 1920, 1080), usable: box(1512, -100, 1920, 1080))
+    t.equalBox(right.reserving(top: 26).usable, box(1512, -74, 1920, 1054), "from that display's own top")
+
+    t.equal(full.reserving(top: 0), full, "nothing reserved is the same monitor")
+    t.equal(full.reserving(top: -5), full, "and a negative strip is not a bigger screen")
+    t.equalBox(full.reserving(top: 2000).usable, box(0, 2000, 1512, 0), "a strip taller than the display leaves nothing, not less than nothing")
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in
@@ -3216,7 +3605,7 @@ h.test("a submenu is entered, backed out of, and clears the query on the way in"
     t.equal(m.breadcrumb, ["Setup"], "the level is named")
     t.equal(m.prompt, "Setup…", "and the placeholder says where you are")
     t.equal(m.visible.map(\.title),
-            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
+            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
@@ -3377,9 +3766,9 @@ h.test("the switches live under Setup, and each row is the line it writes") { t 
         return rows
     }
     let shipped = try Config.parse(Config.defaultTOML)
-    t.equal(setup(shipped).map(\.title).suffix(5),
-            ["Workspace slide", "Focus border", "Auto-hide Dock", "Cycle empty workspaces",
-             "Quit app on last window"],
+    t.equal(setup(shipped).map(\.title).suffix(6),
+            ["Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
+             "Cycle empty workspaces", "Quit app on last window"],
             "toe's own switches, under the config and the startup row")
 
     // Each switch is checked through the writer the menu throws it with, against the parser the
@@ -3428,7 +3817,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // Omarchy's `setup.config` first, then toe's own row — the ported rows lead.
     let shipped = try rows(Config.defaultTOML)
     t.equal(shipped.map(\.title),
-            ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
+            ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "every row, Omarchy's leading")
     t.equal(shipped.first?.action,
@@ -3448,7 +3837,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // An exec that opens something else is not an editor for this file.
     let unrelated = try rows("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n")
     t.equal(unrelated.map(\.title),
-            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock",
+            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "no binding that opens the config, no row offering to")
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
@@ -3460,7 +3849,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // The row is there even when the startup toggle cannot be.
     let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
     t.equal(buildDir.map(\.title),
-            ["Config", "Workspace slide", "Focus border", "Auto-hide Dock",
+            ["Config", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "the rows that work are still offered")
 }
@@ -4539,6 +4928,36 @@ h.test("a theme leaves every size and behaviour alone") { t in
     t.equal(themed.menu.listWidth, c.menu.listWidth, "list width")
     t.equal(themed.menu.fontSize, c.menu.fontSize, "font size")
     t.equal(themed.bindings.count, c.bindings.count, "and it is not a config reload")
+}
+
+h.test("a theme colours the bar the way its shell.toml would") { t in
+    let c = try Config.parse(Config.defaultTOML)
+    // `[bar] background = {{ background }}`, `text = {{ foreground }}`, `active = {{ red }}` —
+    // Gruvbox's real palette, with its red in slot 1 where every published theme keeps it.
+    let gruvboxRed = Theme(slug: "gruvbox", name: "Gruvbox", palette: try Palette.parse("""
+    accent = "#7daea3"
+    background = "#282828"
+    foreground = "#d4be98"
+    color1 = "#ea6962"
+    """))
+    let themed = c.applying(gruvboxRed)
+    t.equal(themed.bar.background, "#282828", "background")
+    t.equal(themed.bar.foreground, "#d4be98", "text")
+    t.equal(themed.bar.active, "#ea6962", "active is the theme's red")
+    // And the sizes and behaviours are the user's.
+    t.equal(themed.bar.height, c.bar.height, "height")
+    t.equal(themed.bar.fontSize, c.bar.fontSize, "font")
+    t.equal(themed.bar.clockFormat, c.bar.clockFormat, "clock format")
+    t.equal(themed.bar.batteryPercentage, c.bar.batteryPercentage, "percentage")
+    t.equal(themed.bar.enabled, c.bar.enabled, "and whether there is a bar at all")
+
+    // The defaults are Tokyo Night through the same template, so that theme is a no-op here —
+    // the same promise `MenuConfig` makes, and the reason a fresh install looks themed.
+    t.equal(c.applying(tokyoNight).bar, c.bar, "Tokyo Night changes nothing, to the byte")
+
+    // A palette without a red — no published theme, but a hand-written one could be — takes
+    // the accent for `active`, which is the nearest thing to "calling attention to itself".
+    t.equal(c.applying(gruvbox).bar.active, "#7daea3", "no red, so the accent")
 }
 
 h.test("the theme wins over the colour keys, and says nothing about it") { t in

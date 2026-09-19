@@ -2496,6 +2496,13 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .removeSkill:
             writeSkill(SkillStore.remove())
+
+        case .bar(let visibility):
+            // The verb parses, binds and is catalogued ahead of the bar it acts on, so a config
+            // written against the shipped default keeps loading while the panels arrive (#171,
+            // step 2). Until then there is nothing to show or hide, and saying so beats a
+            // keypress that vanishes.
+            Log.info("\(CommandLabel.describe(.bar(visibility))): the bar is not drawn yet")
         }
     }
 

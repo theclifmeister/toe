@@ -244,13 +244,13 @@ public struct StyleMenu: Equatable {
 /// The case names the line it writes — which table, which key, and how to read it back — because
 /// everything between the row and the file is otherwise the same code once per switch: the menu
 /// builds a row from `value(in:)`, `MenuState` hands the case straight back, and
-/// `Coordinator.toggle` writes `key` into `table` and reloads. A sixth switch is a case here and
+/// `Coordinator.toggle` writes `key` into `table` and reloads. A seventh switch is a case here and
 /// nothing anywhere else.
 ///
 /// Only settings that are *worth* a row belong here — a switch in the menu is a switch somebody
-/// will throw while looking at what it does, so it wants an effect they can see. The first three
-/// change the screen the moment they are written; the fourth changes the next SUPER+TAB and the
-/// fifth the next SUPER+W, keys under the same hand that closed the menu, and close enough to
+/// will throw while looking at what it does, so it wants an effect they can see. The first four
+/// change the screen the moment they are written; the fifth changes the next SUPER+TAB and the
+/// sixth the next SUPER+W, keys under the same hand that closed the menu, and close enough to
 /// count. That is the bar to clear: `restore_session` shows nothing until the next launch, and
 /// is not here.
 public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
@@ -261,6 +261,9 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     case border
     /// `[misc] autohide_dock`. Hands the Dock's strip of screen back to the tiles.
     case dock
+    /// `[bar] enabled`. Omarchy's bar across the top of every display, in place of the menu
+    /// bar — beside the Dock switch because they are the two strips of screen toe can take.
+    case bar
     /// `[misc] cycle_empty_workspaces`. Whether SUPER+TAB stops at the empty slots on the bar.
     case cycleEmpty
     /// `[misc] quit_on_last_window`. Whether SUPER+W on an application's last window is ⌘Q.
@@ -273,6 +276,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .slide:  return "Workspace slide"
         case .border: return "Focus border"
         case .dock:   return "Auto-hide Dock"
+        case .bar:    return "Menu bar"
         case .cycleEmpty: return "Cycle empty workspaces"
         case .quitOnLast: return "Quit app on last window"
         }
@@ -283,6 +287,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .slide:  return "animations"
         case .border: return "border"
         case .dock:   return "misc"
+        case .bar:    return "bar"
         case .cycleEmpty: return "misc"
         case .quitOnLast: return "misc"
         }
@@ -293,6 +298,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .slide:  return "slide_on_swipe"
         case .border: return "enabled"
         case .dock:   return "autohide_dock"
+        case .bar:    return "enabled"
         case .cycleEmpty: return "cycle_empty_workspaces"
         case .quitOnLast: return "quit_on_last_window"
         }
@@ -303,6 +309,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .slide:  return config.animations.slideOnSwipe
         case .border: return config.border.enabled
         case .dock:   return config.misc.autohideDock
+        case .bar:    return config.bar.enabled
         case .cycleEmpty: return config.misc.cycleEmptyWorkspaces
         case .quitOnLast: return config.misc.quitOnLastWindow
         }
@@ -315,6 +322,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
         case .slide:  config.animations.slideOnSwipe = on
         case .border: config.border.enabled = on
         case .dock:   config.misc.autohideDock = on
+        case .bar:    config.bar.enabled = on
         case .cycleEmpty: config.misc.cycleEmptyWorkspaces = on
         case .quitOnLast: config.misc.quitOnLastWindow = on
         }
@@ -689,7 +697,9 @@ public enum MenuModel {
         // than on where you are or what is on it.
         case .swapWorkspace:    return 6
         case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive: return 7
-        case .theme, .removeTheme, .background, .nextBackground: return 8
+        // With the look-and-feel rows: the bar is chrome, and hiding it is a thing done to how
+        // the screen looks, not to a window or to toe.
+        case .theme, .removeTheme, .background, .nextBackground, .bar: return 8
         case .menu:             return 9
         // With `reload` and `quit` rather than with the theme rows: this is a thing done to
         // toe's own installation, not to how the screen looks.
