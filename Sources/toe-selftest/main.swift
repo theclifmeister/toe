@@ -3563,6 +3563,86 @@ h.test("a monitor reserves the bar's strip from the top of its frame") { t in
     t.equalBox(full.reserving(top: 2000).usable, box(0, 2000, 1512, 0), "a strip taller than the display leaves nothing, not less than nothing")
 }
 
+h.test("the right-hand widgets pick their glyphs the way Omarchy's panels do") { t in
+    let m = BarMetrics()
+    func power(_ f: Double, mains: Bool = false, charging: Bool = false, charged: Bool = false,
+               percent: Bool = false) -> BarItem {
+        BarWidgets.power(fraction: f, onMains: mains, charging: charging, charged: charged,
+                         showPercentage: percent, metrics: m)
+    }
+    // batteryIcon: floor(fraction × 10), capped at 9.
+    t.equal(power(0.05).text, Glyphs.battery[0], "5% is the empty step")
+    t.equal(power(0.10).text, Glyphs.battery[1], "10% the next")
+    t.equal(power(0.99).text, Glyphs.battery[9], "99% the last")
+    t.equal(power(1.0).text, Glyphs.battery[9], "and 100% on battery is still the last, not out of range")
+    t.equal(power(0.5, mains: true, charging: true).text, Glyphs.charging[5], "on power and charging, the bolt set")
+    t.equal(power(0.8, mains: true, charging: false).text, Glyphs.battery[8],
+            "on power but held at 80% — the charge threshold — the plain set")
+    t.equal(power(1.0, mains: true, charged: true).text, Glyphs.batteryFull, "charged is the full glyph")
+    t.equal(power(1.3).text, Glyphs.battery[9], "a fraction over 1 is clamped")
+    t.equal(power(-0.2).text, Glyphs.battery[0], "and under 0")
+    t.equal(power(0.5).slot, .fixed(27), "one icon slot")
+    t.equal(power(0.5, percent: true).slot, .fixed(54), "two with the percentage")
+    t.equal(power(0.5, percent: true).text, "50% " + Glyphs.battery[5], "the number leads")
+    t.equal(power(0.5).kind, .power, "power")
+    t.equal(power(0.5).section, .right, "on the right")
+    t.equal(power(0.5).font, .icon, "in the icon font")
+    t.equal(power(0.5).tooltip, "50%, on battery", "the tooltip says the number")
+
+    // outputIcon: headphones first, muted next, then the 0.34 / 0.67 levels.
+    func audio(_ v: Double, muted: Bool = false, phones: Bool = false) -> String {
+        BarWidgets.audio(volume: v, muted: muted, headphones: phones, metrics: m).text
+    }
+    t.equal(audio(0.9, phones: true), Glyphs.headphones, "headphones whatever the volume")
+    t.equal(audio(0.9, muted: true), Glyphs.muted, "muted")
+    t.equal(audio(0.9), Glyphs.volume[2], "loud")
+    t.equal(audio(0.67), Glyphs.volume[2], "0.67 is loud")
+    t.equal(audio(0.5), Glyphs.volume[1], "middling")
+    t.equal(audio(0.34), Glyphs.volume[1], "0.34 is middling")
+    t.equal(audio(0.1), Glyphs.volume[0], "quiet")
+    t.equal(audio(0), Glyphs.muted, "and nothing at all is the muted glyph")
+    t.equal(BarWidgets.audio(volume: 0.5, muted: false, headphones: false, metrics: m).tooltip, "Volume 50%", "tooltip")
+
+    // connectionIcon / wifiIconFor: ceil(strength / 20) − 1.
+    func wifi(_ s: Int, restricted: Bool = false) -> BarItem {
+        BarWidgets.network(.wifi(strength: s, restricted: restricted), metrics: m)
+    }
+    t.equal(wifi(100).text, Glyphs.wifi[4], "full")
+    t.equal(wifi(81).text, Glyphs.wifi[4], "81 is still full")
+    t.equal(wifi(80).text, Glyphs.wifi[3], "80 is the fourth")
+    t.equal(wifi(50).text, Glyphs.wifi[2], "50 the third")
+    t.equal(wifi(20).text, Glyphs.wifi[0], "20 the first")
+    t.equal(wifi(0).text, Glyphs.wifi[0], "and 0 does not fall off the front")
+    t.equal(wifi(50, restricted: true).text, Glyphs.wifiRestricted, "a captive portal")
+    t.equal(wifi(50, restricted: true).active, true, "in the active colour")
+    t.equal(wifi(50).active, false, "and not otherwise")
+    t.equal(BarWidgets.network(.ethernet(restricted: false), metrics: m).text, Glyphs.ethernet, "wired")
+    t.equal(BarWidgets.network(.ethernet(restricted: true), metrics: m).text, Glyphs.ethernetRestricted, "wired, limited")
+    t.equal(BarWidgets.network(.none, metrics: m).text, Glyphs.disconnected, "nothing")
+    // NetworkManager's RSSI to percent, so CoreWLAN's dBm reads the same as nmcli's number.
+    t.equal(BarWidgets.wifiStrength(rssi: -47), 100, "−47 dBm is full")
+    t.equal(BarWidgets.wifiStrength(rssi: -50), 100, "−50 is where full starts")
+    t.equal(BarWidgets.wifiStrength(rssi: -75), 50, "−75 is half")
+    t.equal(BarWidgets.wifiStrength(rssi: -90), 20, "−90 is the first bar")
+    t.equal(BarWidgets.wifiStrength(rssi: -100), 0, "−100 is nothing")
+    t.equal(BarWidgets.wifiStrength(rssi: -120), 0, "and below it does not go negative")
+
+    t.equal(BarWidgets.bluetooth(on: false, connected: 0, metrics: m).text, Glyphs.bluetoothOff, "off")
+    t.equal(BarWidgets.bluetooth(on: true, connected: 0, metrics: m).text, Glyphs.bluetoothOn, "on")
+    t.equal(BarWidgets.bluetooth(on: true, connected: 2, metrics: m).text, Glyphs.bluetoothConnected, "connected")
+    t.equal(BarWidgets.bluetooth(on: false, connected: 2, metrics: m).text, Glyphs.bluetoothOff, "off is off whatever was paired")
+
+    t.equal(BarWidgets.monitor(count: 1, metrics: m).text, Glyphs.monitor, "one display")
+    t.equal(BarWidgets.monitor(count: 2, metrics: m).text, Glyphs.monitors, "two")
+
+    // shortLabel: the first word, three letters, upper case.
+    t.equal(BarWidgets.keyboardLabel("en"), "EN", "a brief")
+    t.equal(BarWidgets.keyboardLabel("de-DE"), "DE", "split at the dash")
+    t.equal(BarWidgets.keyboardLabel("English (US)"), "ENG", "a description, first word, three letters")
+    t.equal(BarWidgets.keyboardLabel("ABC"), "ABC", "the Mac's plain layout")
+    t.equal(BarWidgets.keyboardLabel(""), "", "nothing from nothing")
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in
