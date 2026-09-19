@@ -29,7 +29,10 @@ final class Coordinator: WindowTrackerDelegate {
     private let audio = AudioProvider()
     private let network = NetworkProvider()
     private let keyboard = KeyboardLayoutProvider()
-    private var providers: [BarProvider] { [keyboard, network, audio, power] }
+    /// Starts with the rest but reads nothing until the Bluetooth grant exists — see
+    /// `BluetoothProvider`; the panel's first open is what asks.
+    private let bluetooth = BluetoothProvider()
+    private var providers: [BarProvider] { [keyboard, bluetooth, network, audio, power] }
     /// The panel under a widget — one window for all six, see `BarPanelWindow`.
     private let barPanel = BarPanelWindow()
     /// The month the calendar is showing. Reset to today's every time the clock's panel
@@ -1165,7 +1168,12 @@ final class Coordinator: WindowTrackerDelegate {
         }
 
         // The right section, in Omarchy's order: tray and agents are not portable and are left
-        // out; bluetooth, network, audio, monitor, power follow.
+        // out; bluetooth, network, audio, monitor, power follow. Bluetooth draws the generic
+        // "on" glyph until the grant exists: toe cannot know better, and "off" would be a claim.
+        let bt = bluetooth.state
+        items.append(BarWidgets.bluetooth(on: bt.access != .granted || bt.powered,
+                                          connected: bt.access == .granted ? bt.connected : 0,
+                                          metrics: metrics))
         items.append(BarWidgets.network(network.connection, metrics: metrics))
         if let output = audio.state {
             items.append(BarWidgets.audio(volume: output.volume, muted: output.muted,
@@ -1226,8 +1234,7 @@ final class Coordinator: WindowTrackerDelegate {
         case .network:
             return NetworkPanel.rows(network.link)
         case .bluetooth:
-            // Each arrives with its own step of #177.
-            return nil
+            return BluetoothPanel.rows(bluetooth.state)
         }
     }
 
@@ -1254,6 +1261,9 @@ final class Coordinator: WindowTrackerDelegate {
             barPanel.close()
             return
         }
+        // The one permission a panel asks for, and only this one: the first open of the
+        // Bluetooth panel puts macOS's sheet up, and the panel says so until it is answered.
+        if kind == .bluetooth, bluetooth.needsRequest { bluetooth.request() }
         if kind == .clock, barPanel.kind != .clock {
             let now = ClockPanel.gregorian.dateComponents([.year, .month], from: Date())
             calendarView = ClockPanel.View(year: now.year ?? 2000, month: now.month ?? 1)
@@ -1327,9 +1337,10 @@ final class Coordinator: WindowTrackerDelegate {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
         case .toggleWifi:
             network.toggleWifiPower()
-        case .connectBluetooth, .disconnectBluetooth:
-            // Each arrives with its panel's step of #177.
-            break
+        case .connectBluetooth(let address):
+            bluetooth.connect(address)
+        case .disconnectBluetooth(let address):
+            bluetooth.disconnect(address)
         }
     }
 
@@ -1376,6 +1387,8 @@ final class Coordinator: WindowTrackerDelegate {
             // A panel of toe's own, under the widget — Omarchy's, cut to what a Mac exposes.
             // The Settings pane each widget used to open is the panel's last row.
             openPanel(.power, on: display)
+        case (.bluetooth, .left):
+            openPanel(.bluetooth, on: display)
         case (.network, .left):
             openPanel(.network, on: display)
         case (.audio, .left):

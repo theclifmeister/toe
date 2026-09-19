@@ -4267,6 +4267,54 @@ h.test("the network panel is the connection's switch and numbers, and never a na
     t.equal(NetworkPanel.signalLabel(rssi: -75), "−75 dBm, 50%", "the RSSI and the widget's percentage")
 }
 
+h.test("the Bluetooth panel says where the grant stands, then lists the devices") { t in
+    let asking = BluetoothPanel.rows(BluetoothPanel.State(access: .undetermined))
+    t.equal(asking[0].kind, .hero(glyph: Glyphs.bluetoothOn, title: "Bluetooth", status: "Asking for access", trailing: nil),
+            "the generic glyph while nothing is known, and no switch — power is a private call")
+    t.equal(asking[2].kind, .note("macOS is asking whether toe may use Bluetooth."), "says the sheet is up")
+    t.equal(asking.last?.action, .openSettings(.bluetooth), "the door")
+    t.equal(asking.filter(\.isSelectable).count, 1, "only the door takes the cursor")
+
+    let denied = BluetoothPanel.rows(BluetoothPanel.State(access: .denied))
+    t.equal(BluetoothPanel.status(BluetoothPanel.State(access: .denied)), "Access denied", "denied")
+    t.equal(denied[2].kind, .note("Allow toe under Privacy & Security › Bluetooth."), "and where to change that")
+    t.equal(BluetoothPanel.rows(BluetoothPanel.State(access: .unavailable))[2].kind,
+            .note("This Mac has no Bluetooth adapter."), "no adapter")
+
+    let pods = BluetoothPanel.Device(address: "aa-bb", name: "AirPods Pro", connected: true)
+    let keys = BluetoothPanel.Device(address: "cc-dd", name: "Magic Keyboard", connected: false)
+    let mouse = BluetoothPanel.Device(address: "ee-ff", name: "Magic Mouse", connected: true)
+    let ghost = BluetoothPanel.Device(address: "00-11", name: "", connected: false)
+    let on = BluetoothPanel.State(access: .granted, powered: true, devices: [keys, pods, mouse, ghost])
+    t.equal(on.connected, 2, "two connected, for the widget")
+    t.equal(BluetoothPanel.status(on), "2 connected", "and the status")
+    let rows = BluetoothPanel.rows(on)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.bluetoothConnected, title: "Bluetooth", status: "2 connected", trailing: nil),
+            "the widget's connected glyph")
+    t.equal(rows[2].kind, .header("Connected", trailing: nil), "CONNECTED first")
+    t.equal(rows[3].kind, .pick(glyph: Glyphs.bluetoothConnected, label: "AirPods Pro", detail: "Connected", current: true),
+            "sorted by name, two lines, the selected fill")
+    t.equal(rows[3].action, .disconnectBluetooth("aa-bb"), "Return disconnects")
+    t.equal(rows[4].action, .disconnectBluetooth("ee-ff"), "the mouse next")
+    t.equal(rows[6].kind, .header("Paired", trailing: nil), "then PAIRED")
+    t.equal(rows[7].kind, .pick(glyph: Glyphs.bluetoothOn, label: "Magic Keyboard", detail: nil, current: false),
+            "one line for a device that is only paired")
+    t.equal(rows[7].action, .connectBluetooth("cc-dd"), "Return connects")
+    t.expect(!rows.contains { if case .pick(_, let label, _, _) = $0.kind { return label.isEmpty } else { return false } },
+             "a device with no human name is not listed")
+    t.equal(rows.last?.action, .openSettings(.bluetooth), "and the door")
+
+    var off = on; off.powered = false
+    t.equal(BluetoothPanel.status(off), "Turned off", "off")
+    t.equal(BluetoothPanel.rows(off)[0].kind,
+            .hero(glyph: Glyphs.bluetoothOff, title: "Bluetooth", status: "Turned off", trailing: nil), "the off glyph")
+    t.expect(BluetoothPanel.rows(off)[7].dimmed, "paired rows dim while the radio is off")
+    t.equal(BluetoothPanel.status(BluetoothPanel.State(access: .granted, powered: true, devices: [keys])), "On",
+            "on with nothing connected")
+    t.equal(BluetoothPanel.rows(BluetoothPanel.State(access: .granted, powered: true, devices: [pods])).count, 6,
+            "hero, separator, header, one device, separator, door — no empty PAIRED section")
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in
