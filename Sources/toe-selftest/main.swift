@@ -3413,7 +3413,7 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
     t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
             "the old waybar pulseaudio set")
-    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 6, "the coverage list has them all")
+    t.equal(Glyphs.all.count, 48, "the coverage list has them all: 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 6")
     t.equal(Glyphs.calendar.unicodeScalars.first!.value, 0xF00ED, "nf-md-calendar, the clock panel's hero")
     for glyph in Glyphs.all {
         t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
@@ -3885,10 +3885,10 @@ h.test("a panel's rows stack the way the column upstream does") { t in
     // Border 2 + padding 14 = 16 in from every edge.
     t.equal(frames[0].x, 16, "content inset")
     t.equal(frames[0].y, 16, "from the top too")
-    t.equal(frames[0].w, 380 - 32, "the content width")
+    t.equal(frames[0].w, 348, "the content width")
     // The hero is as tall as its display-large percentage: 28 × 1.32 = 37.
     t.equal(frames[0].h, 37, "the hero's height is the tallest thing in it")
-    t.equal(frames[1].y, 16 + 37 + 14, "the battery bar a block gap below")
+    t.equal(frames[1].y, 67, "the battery bar a block gap below: 16 + 37 + 14")
     t.equal(frames[1].h, 8, "space(8) tall")
     t.equal(frames[2].y, frames[1].maxY + 4, "the stats hang off the bar at labelGap")
     t.equal(frames[2].h, 15, "a bodySmall line: 11 × 1.32 rounded up")
@@ -3896,7 +3896,7 @@ h.test("a panel's rows stack the way the column upstream does") { t in
     t.equal(frames[5].y, frames[4].maxY + 14, "the separator is a block")
     t.equal(frames[5].h, 1, "a hairline")
     t.equal(frames[6].y, frames[5].maxY + 14, "and the settings row a block below it")
-    t.equal(frames[6].h, 16 + 10, "a body line plus rowPadding")
+    t.equal(frames[6].h, 26, "a body line plus rowPadding")
     t.equal(height, frames[6].maxY + 16, "the card ends an inset below the last row")
 
     // A section: header, 6 to its slider, 6 to each device; a two-line device row is taller.
@@ -3907,12 +3907,12 @@ h.test("a panel's rows stack the way the column upstream does") { t in
         .pick(glyph: "p", label: "Pods", detail: "Connected", action: .pickOutput(2)),
     ]
     let f = PanelLayout.frames(audio, width: 380, m).frames
-    t.equal(f[0].h, 14 + 2, "a caption line plus the Nerd Font overshoot")
+    t.equal(f[0].h, 16, "a caption line plus the Nerd Font overshoot")
     t.equal(f[1].y, f[0].maxY + 6, "the slider hangs off its header")
     t.equal(f[1].h, 30, "PanelSlider's 22 plus controlGap")
     t.equal(f[2].y, f[1].maxY + 6, "list rows at the list gap")
-    t.equal(f[2].h, 19 + 10, "one title line plus xl")
-    t.equal(f[3].h, 16 + 1 + 14 + 12, "two lines plus rowPaddingX")
+    t.equal(f[2].h, 29, "one title line plus xl")
+    t.equal(f[3].h, 43, "two lines plus rowPaddingX: 16 + 1 + 14 + 12")
 
     // Hit testing: rows, and the gaps between them are nobody's.
     t.equal(PanelLayout.row(at: Point(x: 100, y: f[1].y + 5), frames: f), 1, "on the slider")
@@ -3941,15 +3941,15 @@ h.test("a panel hangs under its widget, inside the display, and never taller tha
     t.equalBox(mid, box(610, 38, 380, 300), "centred under the slot, gap below the bar")
     // Under the rightmost widget: slid in to keep the gap from the edge.
     let right = PanelLayout.anchor(size: size, underSlotAt: 1710, barHeight: 33, display: display, m)
-    t.equalBox(right, box(1728 - 380 - 5, 38, 380, 300), "hangs inward from the right edge")
+    t.equalBox(right, box(1343, 38, 380, 300), "hangs inward from the right edge: 1728 − 380 − 5")
     // On a second display to the right, in Accessibility coordinates.
     let second = Box(x: 1728, y: -200, w: 2560, h: 1440)
     let far = PanelLayout.anchor(size: size, underSlotAt: 100, barHeight: 26, display: second, m)
-    t.equalBox(far, box(1728 + 5, -200 + 26 + 5, 380, 300), "left edge of the second display")
+    t.equalBox(far, box(1733, -169, 380, 300), "left edge of the second display: x 1728 + 5, y −200 + 26 + 5")
     // Too tall for the screen: cut to what fits under the bar.
     let tall = PanelLayout.anchor(size: Point(x: 380, y: 5000), underSlotAt: 800, barHeight: 33,
                                   display: display, m)
-    t.equal(tall.h, 1117 - 33 - 10, "the screen less the bar and two gaps")
+    t.equal(tall.h, 1074, "the screen less the bar and two gaps: 1117 − 33 − 10")
     t.equal(PanelLayout.maxHeight(display: Box(x: 0, y: 0, w: 800, h: 100), barHeight: 26, m), 120,
             "never under 120, upstream's floor")
     // Too wide for a narrow display: cut to the display less two gaps.
@@ -3966,7 +3966,7 @@ h.test("a card shorter than its rows scrolls to keep the cursor's row in view") 
     t.equal(PanelLayout.scroll(offset: 900, cursor: nil, viewport: 400, content: 1000, m), 600,
             "clamped to the end of the content")
     t.equal(PanelLayout.scroll(offset: 0, cursor: box(16, 700, 300, 30), viewport: 400, content: 1000, m),
-            700 + 30 + 6 - 400, "a row below the viewport brings it up to the margin")
+            336, "a row below the viewport brings it up to the margin: 700 + 30 + 6 − 400")
     t.equal(PanelLayout.scroll(offset: 600, cursor: box(16, 100, 300, 30), viewport: 400, content: 1000, m),
             94, "a row above brings it down to the margin")
     t.equal(PanelLayout.scroll(offset: 100, cursor: box(16, 200, 300, 30), viewport: 400, content: 1000, m),
@@ -4135,14 +4135,16 @@ h.test("the calendar's grid is laid out at Omarchy's cell sizes, with its two cl
     let grid = PanelLayout.calendarGrid(inRow: row, m)
     // 32 + 2 + 14 + 2 + 7 × 52 + 6 × 2 = 426, centred in 528.
     t.equal(grid.w, 426, "the grid's width")
-    t.equal(grid.x, 16 + 51, "centred in the row")
+    t.equal(grid.x, 67, "centred in the row: 16 + 51")
     let calendar = PanelRow(.calendar(ClockPanel.Grid(weekdays: [], weeks: [])))
-    t.equal(PanelLayout.rowHeight(calendar, m), 16 + 3 + 6 * 34 + 5 * 2, "heading, gap, six rows")
+    // 16 + 3 + 6 × 34 + 5 × 2. The sums here are written out: a chain of literals inside a
+    // generic call is what the CI runner's toolchain gives up type-checking.
+    t.equal(PanelLayout.rowHeight(calendar, m), 233, "heading, gap, six rows")
     let w = PanelLayout.weekStartCell(inRow: row, m)
     t.equalBox(w, box(67, 100, 32, 16), "the W over the week column")
-    t.equalBox(PanelLayout.weekdayHeading(0, inRow: row, m), box(67 + 32 + 2 + 14 + 2, 100, 52, 16), "Monday's heading")
-    t.equalBox(PanelLayout.weekNumberCell(1, inRow: row, m), box(67, 100 + 19 + 36, 32, 34), "the second week's number")
-    t.equalBox(PanelLayout.dayCell(week: 1, column: 2, inRow: row, m), box(117 + 54 * 2, 155, 52, 34), "a day cell")
+    t.equalBox(PanelLayout.weekdayHeading(0, inRow: row, m), box(117, 100, 52, 16), "Monday's heading, 67 + 32 + 2 + 14 + 2")
+    t.equalBox(PanelLayout.weekNumberCell(1, inRow: row, m), box(67, 155, 32, 34), "the second week's number, 100 + 19 + 36")
+    t.equalBox(PanelLayout.dayCell(week: 1, column: 2, inRow: row, m), box(225, 155, 52, 34), "a day cell, 117 + 54 × 2")
     t.expect(PanelLayout.calendarHitsWeekStart(at: Point(x: 80, y: 108), inRow: row, m), "a press on the W")
     t.expect(!PanelLayout.calendarHitsWeekStart(at: Point(x: 200, y: 108), inRow: row, m), "not on a heading")
     t.expect(!PanelLayout.calendarHitsWeekStart(at: Point(x: 80, y: 150), inRow: row, m), "not on a week number")
