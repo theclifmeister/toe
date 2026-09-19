@@ -30,6 +30,10 @@ final class BarPanel {
         get { view.onScroll }
         set { view.onScroll = newValue }
     }
+    var onHover: ((Bool) -> Void)? {
+        get { view.onHover }
+        set { view.onHover = newValue }
+    }
 
     init(screen: NSScreen) {
         displayID = screen.displayID
@@ -105,6 +109,12 @@ final class BarView: NSView {
     var onClick: ((BarItem.Kind?, Button) -> Void)?
     /// The wheel over a slot, in whole notches: positive is up, which on a volume is louder.
     var onScroll: ((BarItem.Kind?, Int) -> Void)?
+    /// The pointer arriving on the bar and leaving it. Leaving is reported 120 ms late, as
+    /// upstream's `centerSectionRevealTimer` does: revealing the indicators widens the centre
+    /// section and can slide a neighbour out from under a stationary pointer, and collapsing
+    /// on that un-hover would move it back and re-open the peek.
+    var onHover: ((Bool) -> Void)?
+    private var leaveTimer: DispatchWorkItem?
     /// Upstream's `wheelSteps` accumulator: a trackpad emits many small deltas for one notch of
     /// a wheel, so they are summed and a step is reported per notch's worth, with the remainder
     /// carried and dropped when the direction reverses.
@@ -133,6 +143,29 @@ final class BarView: NSView {
         super.layout()
         removeAllToolTips()
         addToolTip(bounds, owner: self, userData: nil)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        leaveTimer?.cancel()
+        leaveTimer = nil
+        onHover?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        leaveTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.leaveTimer = nil
+            self?.onHover?(false)
+        }
+        leaveTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
     /// `NSViewToolTipOwner`: the tooltip for whatever slot the pointer rests on.
