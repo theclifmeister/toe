@@ -17,6 +17,15 @@ the only permission it needs is Accessibility.
 
 # Quick menu
 <img width="1392" height="948" alt="Screenshot 2026-09-03 at 18 17 33" src="https://github.com/user-attachments/assets/b64c4f20-50a6-42d5-8c53-8379c87aac10" />
+<img width="1392" height="948" alt="Screenshot 2026-09-19 at 22 20 22" src="https://github.com/user-attachments/assets/6ce34e35-9a9d-40b4-babd-9996db8e749a" />
+<img width="1392" height="948" alt="Screenshot 2026-09-19 at 22 20 34" src="https://github.com/user-attachments/assets/a47010c0-6362-4b96-a34a-f1da59e5b20b" />
+
+
+# Status panels
+<img width="1728" height="1117" alt="Screenshot 2026-09-19 at 22 19 14" src="https://github.com/user-attachments/assets/61e64411-613a-46ba-aa80-e092d4170367" />
+<img width="1728" height="1117" alt="Screenshot 2026-09-19 at 22 19 23" src="https://github.com/user-attachments/assets/367a0cbc-341b-437d-8ac5-b38989dee994" />
+
+
 
 ## Install
 
