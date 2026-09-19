@@ -3643,6 +3643,23 @@ h.test("the right-hand widgets pick their glyphs the way Omarchy's panels do") {
     t.equal(BarWidgets.keyboardLabel(""), "", "nothing from nothing")
 }
 
+h.test("the state report says whether the bar is on screen") { t in
+    let wm = WorkspaceManager()
+    wm.setMonitors([Monitor(id: 1, frame: AREA, usable: AREA)])
+    func report(_ bar: BarState) -> StateReport {
+        StateReporter.report(wm, tracked: [], monitorKey: { _ in nil }, appName: { _ in nil },
+                             screenName: { _ in nil }, version: nil, bar: bar)
+    }
+    t.equal(report(.visible).bar, .visible, "visible")
+    t.equal(report(.hidden).bar, .hidden, "hidden, for this run")
+    t.equal(report(.off).bar, .off, "off, in the config")
+    // The word on the wire, since that is what a caller greps for.
+    let json = String(data: try JSONEncoder().encode(report(.hidden)), encoding: .utf8) ?? ""
+    t.expect(json.contains("\"bar\":\"hidden\""), "encoded as the word: \(json.prefix(80))")
+    t.expect(SkillDocument.text(binary: "/x/toe").contains("bar: visible"),
+             "and the skill says what the words mean")
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in

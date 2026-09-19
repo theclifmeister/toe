@@ -47,12 +47,14 @@ public enum StateReporter {
     ///   - appName: what a person calls the process — `NSRunningApplication.localizedName` in the
     ///     app layer. Nil or empty falls back to the bundle identifier, and then to the pid.
     ///   - screenName: the display's own name — `NSScreen.localizedName` — or nil.
+    ///   - bar: whether the bar is on screen, which the Coordinator knows and the layout does not.
     public static func report(_ workspaces: WorkspaceManager,
                               tracked: [TrackedWindow],
                               monitorKey: (UInt32) -> String?,
                               appName: (pid_t) -> String?,
                               screenName: (UInt32) -> String?,
-                              version: String?) -> StateReport {
+                              version: String?,
+                              bar: BarState = .off) -> StateReport {
         let plan = workspaces.render()
         let focused = workspaces.focusedWindow
 
@@ -106,6 +108,7 @@ public enum StateReporter {
         }
 
         return StateReport(version: version,
+                           bar: bar,
                            focusedWindow: focused,
                            focusedWorkspace: workspaces.focusedWorkspaceIndex,
                            focusedMonitor: workspaces.focusedMonitorID,

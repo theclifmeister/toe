@@ -155,6 +155,10 @@ public struct MonitorReport: Codable, Equatable, Sendable {
 /// mean anything against each other.
 public struct StateReport: Codable, Equatable, Sendable {
     public var version: String?
+    /// The bar's three states, as a word: `visible`, `hidden` — `bar hide` for this run — or
+    /// `off`, switched off in the config. A caller reading `usable` wants to know why the top
+    /// of a display is or is not in it.
+    public var bar: BarState
     public var focusedWindow: WindowID?
     public var focusedWorkspace: Int
     public var focusedMonitor: UInt32
@@ -162,10 +166,11 @@ public struct StateReport: Codable, Equatable, Sendable {
     public var workspaces: [WorkspaceReport]
     public var windows: [WindowReport]
 
-    public init(version: String? = nil, focusedWindow: WindowID? = nil, focusedWorkspace: Int,
-                focusedMonitor: UInt32, monitors: [MonitorReport],
+    public init(version: String? = nil, bar: BarState = .off, focusedWindow: WindowID? = nil,
+                focusedWorkspace: Int, focusedMonitor: UInt32, monitors: [MonitorReport],
                 workspaces: [WorkspaceReport], windows: [WindowReport]) {
         self.version = version
+        self.bar = bar
         self.focusedWindow = focusedWindow
         self.focusedWorkspace = focusedWorkspace
         self.focusedMonitor = focusedMonitor
@@ -173,6 +178,11 @@ public struct StateReport: Codable, Equatable, Sendable {
         self.workspaces = workspaces
         self.windows = windows
     }
+}
+
+/// Whether the bar is on screen — see `StateReport.bar`.
+public enum BarState: String, Codable, Equatable, Sendable {
+    case visible, hidden, off
 }
 
 /// One live binding. The key and what it does, in the words the keybindings page uses.
