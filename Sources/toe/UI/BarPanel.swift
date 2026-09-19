@@ -26,6 +26,10 @@ final class BarPanel {
         get { view.onClick }
         set { view.onClick = newValue }
     }
+    var onScroll: ((BarItem.Kind?, Int) -> Void)? {
+        get { view.onScroll }
+        set { view.onScroll = newValue }
+    }
 
     init(screen: NSScreen) {
         displayID = screen.displayID
@@ -99,6 +103,12 @@ final class BarView: NSView {
         didSet { if centre != oldValue { needsDisplay = true } }
     }
     var onClick: ((BarItem.Kind?, Button) -> Void)?
+    /// The wheel over a slot, in whole notches: positive is up, which on a volume is louder.
+    var onScroll: ((BarItem.Kind?, Int) -> Void)?
+    /// Upstream's `wheelSteps` accumulator: a trackpad emits many small deltas for one notch of
+    /// a wheel, so they are summed and a step is reported per notch's worth, with the remainder
+    /// carried and dropped when the direction reverses.
+    private var scrollAccumulator: Double = 0
 
     /// What the last draw put where, for the click that follows it. Laid out in `draw` rather
     /// than when the snapshot arrives because the width is the view's, and the view's width is
@@ -189,6 +199,20 @@ final class BarView: NSView {
         let now = kind(under: event)
         guard let down = mouseDownKind, down == now else { return }
         onClick?(now, button)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // A wheel notch is a whole line; a trackpad reports pixels and much smaller numbers,
+        // and `hasPreciseScrollingDeltas` says which. Ten points of trackpad is one notch.
+        let delta = event.hasPreciseScrollingDeltas ? Double(event.scrollingDeltaY) / 10
+                                                    : Double(event.scrollingDeltaY)
+        if scrollAccumulator * delta < 0 { scrollAccumulator = 0 }
+        scrollAccumulator += delta
+        let steps = scrollAccumulator < 0 ? Int(scrollAccumulator.rounded(.up))
+                                          : Int(scrollAccumulator.rounded(.down))
+        scrollAccumulator -= Double(steps)
+        guard steps != 0 else { return }
+        onScroll?(kind(under: event), steps)
     }
 
     private func kind(under event: NSEvent) -> BarItem.Kind? {

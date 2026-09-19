@@ -26,7 +26,8 @@ final class Coordinator: WindowTrackerDelegate {
     /// The right section's readers, started with the bar and stopped with it. Each says when
     /// what it read changed; `refreshBar` draws the lot. See `BarProvider`.
     private let power = PowerProvider()
-    private var providers: [BarProvider] { [power] }
+    private let audio = AudioProvider()
+    private var providers: [BarProvider] { [audio, power] }
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and `usable` reaches the top again, until `bar show` or a relaunch.
     private var barHidden = false
@@ -294,6 +295,7 @@ final class Coordinator: WindowTrackerDelegate {
     func start() {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
         bar.onClick = { [weak self] display, kind, button in self?.barClicked(kind, button, on: display) }
+        bar.onScroll = { [weak self] kind, steps in self?.barScrolled(kind, steps: steps) }
         clock.onTick = { [weak self] in self?.refreshStatus() }
         for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
 
@@ -1163,6 +1165,10 @@ final class Coordinator: WindowTrackerDelegate {
 
         // The right section, in Omarchy's order: tray and agents are not portable and are left
         // out; bluetooth, network, audio, monitor, power follow.
+        if let output = audio.state {
+            items.append(BarWidgets.audio(volume: output.volume, muted: output.muted,
+                                          headphones: output.headphones, metrics: metrics))
+        }
         items.append(BarWidgets.monitor(count: NSScreen.screens.count, metrics: metrics))
         if let battery = power.state {
             items.append(BarWidgets.power(fraction: battery.fraction, onMains: battery.onMains,
@@ -1182,6 +1188,12 @@ final class Coordinator: WindowTrackerDelegate {
             markWidth: markWidth, markHeight: markHeight))
     }
 
+    /// The wheel over a widget. Audio is the one this pass answers for: upstream's monitor
+    /// widget scrolls the brightness, which on a Mac is `DisplayServices`, private.
+    private func barScrolled(_ kind: BarItem.Kind?, steps: Int) {
+        if kind == .audio { audio.adjustVolume(steps: steps) }
+    }
+
     /// A press on the bar. The table is Omarchy's — `manual/05-the-top-bar.md`, "Clicking
     /// around" — with the Mac's answer in each cell.
     private func barClicked(_ kind: BarItem.Kind?, _ button: BarView.Button, on display: CGDirectDisplayID) {
@@ -1199,6 +1211,10 @@ final class Coordinator: WindowTrackerDelegate {
             dispatch(.workspace(.index(index)))
         case (.accessibility, _):
             Self.openAccessibilitySettings()
+        case (.audio, .left):
+            SettingsPane.sound.open()
+        case (.audio, .right):
+            audio.toggleMute()
         case (.monitor, .left):
             SettingsPane.displays.open()
         case (.power, .left):
