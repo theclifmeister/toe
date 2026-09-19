@@ -2860,7 +2860,8 @@ extension Coordinator {
                                     monitorKey: { keys[$0] },
                                     appName: { [tracker] in StateReporter.appName(of: $0, via: tracker) },
                                     screenName: { screens[$0] },
-                                    version: AppIdentity.version)
+                                    version: AppIdentity.version,
+                                    bar: !config.bar.enabled ? .off : (barHidden ? .hidden : .visible))
     }
 
     private func layoutsReport() -> LayoutsReport {

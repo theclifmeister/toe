@@ -157,6 +157,12 @@ public enum SkillDocument {
           `query state` before assuming the window has gone. The Finder is never quit.
         - **Floating windows are the user's.** toe writes a floating window's frame once and never
           re-asserts it, on purpose. Do not repeatedly place one.
+        - **The bar is not the menu bar.** toe draws Omarchy's bar across the top of every display
+          and sets the macOS menu bar to hide itself; the tiles start under the bar. `query state`
+          reports it as `bar: visible`, `hidden` (`bar hide` gave the strip back to the tiles for
+          this run) or `off` (switched off in the config). `bar show|hide|toggle` is the only verb
+          for it; everything else on it is a click that opens a Settings pane, and there is no
+          command for those.
         - **Never write to a window being dragged.** toe already refuses; a burst of commands
           while somebody has hold of a window is still a fight worth not starting.
         - **`exec` and `quit` are refused over this socket** unless the config's `[cli]` section
