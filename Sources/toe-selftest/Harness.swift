@@ -25,6 +25,15 @@ final class Harness {
         if a == b { passed += 1 } else { failures.append("\(current):\(line) — \(what): got \(a), want \(b)") }
     }
 
+    /// For the arithmetic that lands a hair off in binary: 86.4 + 17.5 is 103.90000000000002.
+    func near(_ a: Double?, _ b: Double, _ what: String, line: Int = #line) {
+        guard let a else {
+            failures.append("\(current):\(line) — \(what): got nil, want \(b)")
+            return
+        }
+        if abs(a - b) < 0.001 { passed += 1 } else { failures.append("\(current):\(line) — \(what): got \(a), want \(b)") }
+    }
+
     func equalBox(_ a: Box?, _ b: Box, _ what: String, line: Int = #line) {
         guard let a else {
             failures.append("\(current):\(line) — \(what): got nil, want \(b.pretty)")
