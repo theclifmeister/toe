@@ -5,7 +5,7 @@ A small native macOS tiling window manager. It brings Hyprland's **dwindle** lay
 bindings, a gradient border around the focused window and a quick menu. There is nothing to
 agonise over — that is the opinion, and it is the whole product.
 
-toe draws Omarchy's bar across the top of every display, in place of the menu bar: the workspace
+toe draws Omarchy's bar across the top of every display, over the menu bar: the workspace
 strip on the left, the clock in the centre, the network, sound, displays and battery on the
 right. It has no Dock icon and no window of its own, and the only permission it needs is
 Accessibility.
@@ -86,7 +86,7 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 | `SUPER` + `SHIFT` + `-` / `=` | Make it 100 pt shorter / taller |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
 | `SUPER` + `SPACE` | The quick menu |
-| `SUPER` + `SHIFT` + `SPACE` | Hide the bar and give the tiles its strip; again to bring it back |
+| `SUPER` + `SHIFT` + `SPACE` | Hide the bar to see the Mac's menu bar; again to bring it back |
 | `SUPER` + `CTRL` + `SPACE` | The background picker, when the theme has pictures |
 | `SUPER` + `SHIFT` + `CTRL` + `SPACE` | The theme picker |
 | `SUPER` + `K` | Every binding, in a list |
@@ -102,17 +102,17 @@ sheets, palettes, minimized and native-fullscreen windows are left alone — and
 that goes fullscreen hands its tile to its neighbours until it comes back, rather than leaving
 a hole on the desktop behind it.
 
-**The bar** is Omarchy's, across the top of every display where the menu bar was. On the left,
+**The bar** is Omarchy's, across the top of every display, over the menu bar. On the left,
 toe's `T` and the workspace strip: the workspace you are on as a filled square, every other
 workspace in use as its digit, and workspaces 1–5 always present. In the centre, the clock —
 right-click it to walk Omarchy's formats, and the one you land on is kept — with the coffee cup
 beside it while something holds the machine awake (click it to hold it yourself) and the keyboard
 layout when you have more than one. On the right, the network, the sound, the displays and the
 battery, each a click away from its Settings pane; right-click the sound to mute, scroll it for
-the volume, right-click the battery for the percentage. The macOS menu bar is set to hide
-itself while the bar is on, and slides in over it when the pointer reaches the top edge, which
-is how you reach an application's menus. Setup › Menu bar in the quick menu switches the bar
-off and puts the strip back in the menu bar as a menu bar item.
+the volume, right-click the battery for the percentage. The macOS menu bar is still there
+underneath: `SUPER` + `SHIFT` + `SPACE` takes the bar away to reach an application's menus, and
+again to bring it back. Setup › Menu bar in the quick menu switches the bar off for good and
+puts the strip back in the menu bar as a menu bar item.
 
 **The quick menu** (`SUPER` + `SPACE`) mirrors Omarchy's: Apps, Learn, Style, Setup, Install,
 Remove, About and Quit. Arrows move, `ENTER` chooses, `ESC` backs out, and typing searches the

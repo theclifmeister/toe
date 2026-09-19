@@ -154,14 +154,13 @@ across a fullscreen Space unless something stops it. With *Displays have separat
 macOS default) "is anything fullscreen" is never the right question — scope it to a display.
 
 **State that outlives the process.** Symbolic hotkeys (`CGSSetSymbolicHotKeyEnabled`), the
-wallpaper-click and edge-tiling preferences, the Dock's auto-hide (`CoreDockSetAutoHideEnabled`)
-and the menu bar's (`_HIHideMenuBar`) belong to the window server or the Dock, not to toe, so a
-`kill -9` during development would leave `Ctrl`+`↑` dead — or the Dock and the menu bar hiding
-themselves — with nothing to explain why. All five are journalled to `~/.local/state/toe/`
-*before* the change is made and replayed in reverse at startup. If you add another such global
-toggle, follow that pattern: `Journal` is the file, `JournalFormat` its lines, and
-`StateDirectory.ensure` the only thing that makes the directory — and a record that could not be
-written is a change that is not made.
+wallpaper-click and edge-tiling preferences and the Dock's auto-hide
+(`CoreDockSetAutoHideEnabled`) belong to the window server or the Dock, not to toe, so a `kill -9`
+during development would leave `Ctrl`+`↑` dead — or the Dock hiding itself — with nothing to
+explain why. All four are journalled to `~/.local/state/toe/` *before* the change is made and
+replayed in reverse at startup. If you add another such global toggle, follow that pattern:
+`Journal` is the file, `JournalFormat` its lines, and `StateDirectory.ensure` the only thing that
+makes the directory — and a record that could not be written is a change that is not made.
 `CoreDock*` is also the one place toe reaches a symbol through `dlsym` instead of declaring it:
 unexported from every header, and a link-time dependency on it would turn its removal into a
 launch failure.
@@ -176,8 +175,9 @@ that runs on every focus change or stack change is a real cost; put it after the
 
 ## The bar
 
-`BarWindowSet` is one `NSPanel` per `NSScreen` across the top of its frame, one level under the
-menu bar; `BarView` draws the items `BarLayout.place` positions, in `draw(_:)` like `MenuView`.
+`BarWindowSet` is one `NSPanel` per `NSScreen` across the top of its frame, one level *above*
+the menu bar — sketchybar's `topmost` — so the bar covers the menu bar rather than replacing it;
+`BarView` draws the items `BarLayout.place` positions, in `draw(_:)` like `MenuView`.
 Everything that can be a value is in `ToeCore/Bar/`: `BarItem` is Omarchy's `WidgetButton`,
 `BarMetrics` its `Style.bar` with `[bar] height` as the scale, `BarWidgets` the glyph rule of
 each widget from the numbers a Mac reports, `ClockFormat` the Qt-spelled formats and their
@@ -188,14 +188,15 @@ read the system and say when it changed — a listener where one exists, never a
 Four things to keep straight:
 
 - **The exclusive zone is `usable`.** `refreshMonitors` reserves the bar's strip from the
-  display's *frame* (`Monitor.reserving(top:)`), and nothing downstream knows the bar exists.
-  `bar hide` gives the strip back by the same route.
-- **The menu bar's auto-hide is journalled** (`MenuBarAutoHide`, on `WallpaperClick`'s template)
-  and `NSScreen` never learns of a hide made by its own process: `visibleFrame` stayed 33
-  points short for the rest of the run, in both directions, while an external flip updated it.
-  So `refreshMonitors` puts the top edge where the *preference* says it is (`isHidden`,
-  `Monitor.settingTop`) and remembers the menu bar's strip per display for the flip back. Do
-  not go back to trusting `visibleFrame` there.
+  display's *frame* (`Monitor.reserving(top:)`) — the menu bar under the bar has already kept
+  its own strip out of `visibleFrame`, so the bar costs the tiles only what it needs beyond
+  that — and nothing downstream knows the bar exists. `bar hide` takes the panels away and the
+  menu bar is what shows; the strip stays the menu bar's.
+- **Do not hide the menu bar.** The first cut set `_HIHideMenuBar` and sat one level under,
+  and the menu bar slid back in over the bar on every trip to the top edge; worse, `NSScreen`
+  never learns of a hide made by its own process, so `visibleFrame` stayed stale for the rest
+  of the run. Covering it at level 25 has neither problem, and no state that outlives toe.
+  The bar is the taller of `[bar] height` and the menu bar's strip, so no line of it shows.
 - **The notch.** AppKit keeps every window out of a notched display's top safe area through
   `constrainFrameRect`; `TopStripPanel` overrides it. On that display the bar is the safe
   area's 32 pt tall and the centre section is centred on the right-hand gap beside the notch
