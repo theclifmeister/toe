@@ -2134,6 +2134,11 @@ final class Coordinator: WindowTrackerDelegate {
         // Cheap on every ordinary path. toe's own workspaces are not Spaces, so nothing routine
         // comes through this callback at all.
         beginSpaceSettle()
+        // The bar goes first and at once: entering fullscreen is a Space change delivered at
+        // the start of the animation, and a bar still drawn over a window growing to fill the
+        // display is the blink the border avoids by hiding. The read is early, but it is the
+        // read that matters — the window is already reporting fullscreen.
+        setBarFullscreen(AX.frontmostFullscreenFrame)
         // Before the border, because it may be about to change which workspace is showing:
         // leaving a fullscreen Space is a Space change, and it is the moment a window that went
         // fullscreen on a since-hidden workspace asks for its workspace back.
@@ -2151,6 +2156,17 @@ final class Coordinator: WindowTrackerDelegate {
         wallpaper.reapply()
     }
 
+    /// Hides the bar on the display a fullscreen window covers, and shows it again when none
+    /// does. Reached from `updateBorder`, which has just paid for the read, and from the two
+    /// moments the border sits out — the start of a Space change and the end of its settle —
+    /// because those are exactly when fullscreen comes and goes, and the border's own read is
+    /// skipped then. Nothing is redrawn unless the answer changed.
+    private func setBarFullscreen(_ fullscreen: Box?) {
+        guard bar.fullscreen != fullscreen else { return }
+        bar.fullscreen = fullscreen
+        bar.refresh(redraw: false)
+    }
+
     /// Opens — or extends — the quiet period the border sits out. See `spaceSettleLatency`.
     private func beginSpaceSettle() {
         spaceSettle?.cancel()
@@ -2158,6 +2174,10 @@ final class Coordinator: WindowTrackerDelegate {
             guard let self else { return }
             self.spaceSettle = nil
             self.updateBorder()
+            // The border may have returned early with nothing to draw — no focus, or a
+            // stashed window — without reading; the bar still needs to know whether the
+            // fullscreen window has gone.
+            self.setBarFullscreen(AX.frontmostFullscreenFrame)
         }
         spaceSettle = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.spaceSettleLatency, execute: work)
@@ -2285,6 +2305,8 @@ final class Coordinator: WindowTrackerDelegate {
         // off in every case where there was nothing to draw. Both `show` paths below test
         // against it, because either can be the one pointed at a fullscreen display.
         let fullscreen = AX.frontmostFullscreenFrame
+        // The bar's answer is the same read: whichever display that window covers has no bar.
+        setBarFullscreen(fullscreen)
 
         // While the user has hold of a window the border marks the tile it will land in rather
         // than the window itself. Two reasons, and they point the same way: toe hears about the
