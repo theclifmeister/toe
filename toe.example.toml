@@ -232,8 +232,9 @@ allow_quit = false
 # the right, each a Nerd Font glyph that opens the matching Settings pane. The menu bar stays
 # where it is, covered, and the tiles start under the bar; SUPER+SHIFT+SPACE takes the bar away
 # to show the menu bar — which is how you reach an application's menus by mouse — and again to
-# bring it back. Off, the workspace strip is a menu bar item, as before.
-enabled = true
+# bring it back. Off by default: the workspace strip is a menu bar item until you ask for the
+# bar, here or in Setup › Menu bar in the quick menu.
+enabled = false
 # Omarchy's bar is 26 tall at its 12px font, and every slot on it scales with the height —
 # 27 for an icon, 21 for a status indicator, 20 for a workspace — so a taller bar keeps its
 # proportions. font_size is the body size; the caption and icon sizes derive from it.

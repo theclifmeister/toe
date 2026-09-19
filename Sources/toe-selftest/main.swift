@@ -3439,9 +3439,9 @@ h.test("right-clicking the clock walks Omarchy's presets and writes the one it l
     t.equal(ClockFormat.needsSeconds("'seconds HH:mm"), false, "an open quote runs to the end")
 }
 
-h.test("[bar] is parsed, range-checked, and on by default") { t in
+h.test("[bar] is parsed, range-checked, and off by default") { t in
     let fresh = try Config.parse("")
-    t.equal(fresh.bar.enabled, true, "absent is on")
+    t.equal(fresh.bar.enabled, false, "absent is off: the menu bar item until asked")
     t.equal(fresh.bar.height, 26, "Omarchy's height")
     t.equal(fresh.bar.fontSize, 12, "and font")
     t.equal(fresh.bar.background, "#1a1b26", "Tokyo Night's background")
@@ -3459,7 +3459,7 @@ h.test("[bar] is parsed, range-checked, and on by default") { t in
 
     let set = try Config.parse("""
     [bar]
-    enabled = false
+    enabled = true
     height = 32
     font_size = 14
     background = "#000000"
@@ -3469,7 +3469,7 @@ h.test("[bar] is parsed, range-checked, and on by default") { t in
     battery_percentage = true
     persistent_workspaces = 3
     """)
-    t.equal(set.bar.enabled, false, "enabled")
+    t.equal(set.bar.enabled, true, "enabled")
     t.equal(set.bar.height, 32, "height")
     t.equal(set.bar.fontSize, 14, "font_size")
     t.equal(set.bar.background, "#000000", "background")
@@ -3483,14 +3483,14 @@ h.test("[bar] is parsed, range-checked, and on by default") { t in
     // Every wrong value is named and the default kept, as the rest of the file does it.
     let bad = try Config.parse("""
     [bar]
-    enabled = "false"
+    enabled = "true"
     height = 8
     font_size = 100
     background = "black"
     clock_format = 1405
     battery_percentage = 1
     """)
-    t.equal(bad.bar.enabled, true, "enabled in quotes is not off")
+    t.equal(bad.bar.enabled, false, "enabled in quotes is not on")
     t.equal(bad.bar.height, 26, "a height with no room for the type keeps the default")
     t.equal(bad.bar.fontSize, 12, "and so does an absurd font")
     t.equal(bad.bar.background, "#1a1b26", "a colour by name is not a colour")
@@ -3500,7 +3500,7 @@ h.test("[bar] is parsed, range-checked, and on by default") { t in
             ["bar.enabled", "bar.height", "bar.font_size", "bar.background", "bar.clock_format",
              "bar.battery_percentage"],
             "each named")
-    t.expect(bad.warnings.contains("bar.enabled: must be true or false, using true"), "in the usual words")
+    t.expect(bad.warnings.contains("bar.enabled: must be true or false, using false"), "in the usual words")
     t.expect(bad.warnings.contains("bar.height: must be a number from 16 to 100, using 26"), "with the range")
 }
 
@@ -3524,13 +3524,13 @@ h.test("the bar has one verb, and the Setup level a switch") { t in
     t.equal(ConfigSwitch.bar.title, "Menu bar", "the row")
     t.equal(ConfigSwitch.bar.table, "bar", "in [bar]")
     t.equal(ConfigSwitch.bar.key, "enabled", "on the enabled line")
-    let off = try Config.parse("[bar]\nenabled = false\n")
-    t.equal(ConfigSwitch.bar.value(in: off), false, "read back")
-    var on = off
-    ConfigSwitch.bar.set(true, in: &on)
-    t.equal(on.bar.enabled, true, "and set")
-    let rows = MenuModel.setup(loginItem: .off, config: off)
-    t.equal(rows.first { $0.title == "Menu bar" }?.value, "off", "the row says off when the file does")
+    let on = try Config.parse("[bar]\nenabled = true\n")
+    t.equal(ConfigSwitch.bar.value(in: on), true, "read back")
+    var off = on
+    ConfigSwitch.bar.set(false, in: &off)
+    t.equal(off.bar.enabled, false, "and set")
+    let rows = MenuModel.setup(loginItem: .off, config: on)
+    t.equal(rows.first { $0.title == "Menu bar" }?.value, "on", "the row says on when the file does")
     t.equal(rows.first { $0.title == "Menu bar" }?.action, .toggleSetting(.bar), "and throws this switch")
 }
 
