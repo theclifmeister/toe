@@ -24,12 +24,8 @@ final class Coordinator: WindowTrackerDelegate {
     private let bar = BarWindowSet()
     private let clock = ClockProvider()
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
-    /// are off screen and `usable` reaches the top again, until `bar show` or a relaunch.
+    /// are off screen and the menu bar under them is what shows, until `bar show` or a relaunch.
     private var barHidden = false
-    /// How tall the menu bar's strip was on each display the last time `visibleFrame` was seen
-    /// reserving it — what the layout puts back when the menu bar returns and `NSScreen` does
-    /// not notice. See `refreshMonitors`.
-    private var menuBarStrips: [UInt32: Double] = [:]
     private let quickMenu = QuickMenu()
     /// The `toe` you type, on the other end of a socket. See `ControlSocket` — it is
     /// opened by `applyCLISetting` rather than here, so that `[cli] enabled = false` is a
@@ -293,7 +289,7 @@ final class Coordinator: WindowTrackerDelegate {
         clock.onTick = { [weak self] in self?.refreshStatus() }
 
         installSignalHandlers()
-        // Before the five repairs below, because the copy this replaces writes those journals on
+        // Before the four repairs below, because the copy this replaces writes those journals on
         // its way out — and before anything grabs a hotkey or a tap it is still holding.
         AppIdentity.takeOver()
         // Symbolic hotkey state outlives the process, so a previous toe that was killed rather
@@ -309,9 +305,6 @@ final class Coordinator: WindowTrackerDelegate {
         // And the last of them: the Dock's auto-hide setting is the Dock's own, so a copy that
         // was killed rather than quit may have left the Dock hiding itself.
         DockAutoHide.repairAfterUncleanExit()
-        // And the menu bar's auto-hide, which the bar switches on and which is the one a user
-        // notices most: a menu bar that has gone, with nothing on screen to say why.
-        MenuBarAutoHide.repairAfterUncleanExit()
         // Not the same thing as those three — the desktop picture is not given back on the way
         // out — but the note of what was there before toe touched it is read at the same point,
         // so a theme picked in a run that was killed is still reversible in this one. See
@@ -1083,21 +1076,17 @@ final class Coordinator: WindowTrackerDelegate {
     ///
     /// Not gated on `isManaging`, unlike `applyMiscSettings`: the bar is where `toe !` is drawn
     /// while Accessibility is still to be granted, so it has to be up before there is anything
-    /// to manage. The menu bar's auto-hide goes with it — a bar behind a showing menu bar is a
-    /// bar nobody can see — and is journalled first, as every setting that outlives toe is.
+    /// to manage. Nothing here outlives the process — the bar covers the menu bar rather than
+    /// hiding it, see `BarPanel` — so there is no journal to write first.
     private func applyBarSetting() {
         let wanted = config.bar.enabled
-        // Before the menu bar is told anything, while `NSScreen` still describes it truthfully.
-        rememberMenuBarStrips()
         if wanted {
             if let status {
                 status.remove()
                 self.status = nil
             }
-            MenuBarAutoHide.enable()
             clock.start(format: config.bar.clockFormat)
         } else {
-            MenuBarAutoHide.restore()
             clock.stop()
             if status == nil { status = makeStatusItem() }
         }
@@ -1111,18 +1100,6 @@ final class Coordinator: WindowTrackerDelegate {
         // reload is what carries a new `[bar] height`, and `loadConfig` re-writes every frame
         // afterwards anyway.
         if isManaging { refreshMonitors() }
-    }
-
-    /// Notes how tall the menu bar's strip is on each display, while it is showing and
-    /// `visibleFrame` says so — the number `refreshMonitors` puts back when the menu bar returns
-    /// and `NSScreen` does not notice. A strip no taller than the safe area is the notch, not
-    /// the menu bar, and is not a menu bar's height to remember.
-    private func rememberMenuBarStrips() {
-        guard !MenuBarAutoHide.isHidden else { return }
-        for screen in NSScreen.screens {
-            let strip = Double(screen.frame.maxY - screen.visibleFrame.maxY)
-            if strip > Double(screen.safeAreaInsets.top) { menuBarStrips[screen.displayID] = strip }
-        }
     }
 
     /// The menu bar item, wired. Made only while the bar is off — see `applyBarSetting`.
@@ -1256,30 +1233,14 @@ final class Coordinator: WindowTrackerDelegate {
     // MARK: - Monitors
 
     private func refreshMonitors() {
-        let menuBarHidden = MenuBarAutoHide.isHidden
         let monitors = NSScreen.screens.map { screen in
-            var monitor = Monitor(id: screen.displayID,
+            let monitor = Monitor(id: screen.displayID,
                                   frame: Coordinates.toAX(screen.frame),
                                   usable: Coordinates.toAX(screen.visibleFrame))
-            let safeArea = Double(screen.safeAreaInsets.top)
-            let strip = monitor.usable.minY - monitor.frame.minY
-            if menuBarHidden {
-                // The menu bar's strip is not reserved once it hides, whatever `visibleFrame`
-                // says: `NSScreen` never hears about a hide made from inside its own process —
-                // see `MenuBarAutoHide.isHidden` — so the top is put where the preference says
-                // it is: the top of the display, less the notch's safe area. The strip is
-                // recorded the other way round below, so it can be put back when the menu bar is.
-                monitor = monitor.settingTop(monitor.frame.minY + safeArea)
-            } else if strip > safeArea {
-                // The menu bar is showing and `visibleFrame` knows it — see `rememberMenuBarStrips`.
-                menuBarStrips[monitor.id] = strip
-            } else if let remembered = menuBarStrips[monitor.id] {
-                // Showing, but `visibleFrame` still thinks it hidden: the flip back that
-                // `NSScreen` did not notice either. The strip it had is put back by hand.
-                monitor = monitor.settingTop(monitor.frame.minY + remembered)
-            }
-            // The bar's exclusive zone, from the frame: on a notched display the safe area is
-            // already the bar's height, and `reserving` keeps whichever starts lower.
+            // The bar's exclusive zone, from the frame: the menu bar under the bar has already
+            // kept its strip out of `visibleFrame`, and `reserving` takes only what the bar
+            // needs beyond that — a point or two on an external display, nothing on a notched
+            // one, whose menu bar is taller than Omarchy's bar.
             guard bar.enabled, !barHidden else { return monitor }
             return monitor.reserving(top: bar.height(on: screen, metrics: BarMetrics(
                 height: config.bar.height, fontSize: config.bar.fontSize)))
@@ -2365,19 +2326,18 @@ final class Coordinator: WindowTrackerDelegate {
         // WindowServer, so it is taken down deliberately rather than left to process death.
         dockSwipes.stop()
         hideBlocker.stop()
-        // Before the five journals below, and for the same family of reason: the socket file is
+        // Before the four journals below, and for the same family of reason: the socket file is
         // state that outlives the process. A copy that is killed rather than quit leaves one
         // behind, which the next `start` unlinks — but a copy that goes away properly should not
         // leave a door that opens onto nothing.
         control.stop()
-        // The five that would otherwise outlive toe: the window server keeps a symbolic hotkey
-        // switched off until something switches it back on, and the reveal-desktop, edge-tiling,
-        // Dock auto-hide and menu bar auto-hide preferences are written to the user's settings.
+        // The four that would otherwise outlive toe: the window server keeps a symbolic hotkey
+        // switched off until something switches it back on, and the reveal-desktop, edge-tiling
+        // and Dock auto-hide preferences are written to the user's settings.
         SymbolicHotkeys.restoreAll()
         WallpaperClick.restore()
         EdgeTiling.restore()
         DockAutoHide.restore()
-        MenuBarAutoHide.restore()
     }
 
     private func unstashEverything() {
@@ -2680,9 +2640,10 @@ final class Coordinator: WindowTrackerDelegate {
             barHidden = hide
             bar.hidden = hide
             bar.refresh()
-            // The strip goes back to the tiles, or is taken from them: the zone is `usable`, so
-            // this is a monitor change and a relayout. A window in the user's hand is left
-            // alone by `apply`, as always, and takes its new tile on release.
+            // The menu bar under the bar is what shows now, and keeps its own strip; what the
+            // bar reserved beyond it goes back to the tiles, or is taken from them. The zone
+            // is `usable`, so this is a monitor change and a relayout. A window in the user's
+            // hand is left alone by `apply`, as always, and takes its new tile on release.
             refreshMonitors()
             desired.removeAll()
             corrections.removeAll()

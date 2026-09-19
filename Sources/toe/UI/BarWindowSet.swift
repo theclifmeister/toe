@@ -20,16 +20,16 @@ final class BarWindowSet {
     /// Hands every panel's clicks to one handler, with the display they came from.
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
 
-    /// How tall the strip is on `screen`: the configured height, or the safe area on a display
-    /// with a notch.
+    /// How tall the strip is on `screen`: the configured height, or the menu bar's strip where
+    /// that is taller.
     ///
-    /// A built-in display with a `safeAreaInsets.top` keeps that strip out of `visibleFrame`
-    /// whether or not the menu bar is hidden — measured for #171: 32 pt, with the menu bar
-    /// showing or not — so a 26-point bar there would leave six points of wallpaper between
-    /// itself and the tiles. The bar takes the strip it is given, and the slots scale with it as
-    /// they would with a taller `[bar] height`.
+    /// The bar sits over the menu bar, so it has to cover all of it or a line of it shows
+    /// under the bar: 33 pt on a notched built-in display (its 32 pt safe area and one more),
+    /// 24 or 25 on an external one, where Omarchy's 26 already covers it. The bar takes the
+    /// taller of the two and the slots scale with it, as they would with a taller `[bar]
+    /// height`.
     func height(on screen: NSScreen, metrics: BarMetrics) -> Double {
-        max(metrics.height, Double(screen.safeAreaInsets.top))
+        max(metrics.height, Double(screen.frame.maxY - screen.visibleFrame.maxY))
     }
 
     /// Where the centre section is centred on `screen`, in the panel's own coordinates, or nil

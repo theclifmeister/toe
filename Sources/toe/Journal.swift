@@ -3,10 +3,9 @@ import ToeCore
 
 /// A note of what a macOS setting was before toe changed it, kept in `~/.local/state/toe`.
 ///
-/// Five of toe's changes outlive the process — Mission Control's shortcut, the wallpaper click,
-/// drag-to-edge tiling, the Dock's auto-hide and the menu bar's belong to the window server,
-/// `cfprefsd` or the Dock, not to toe — and the desktop picture is a sixth that is remembered
-/// the same way. Each
+/// Four of toe's changes outlive the process — Mission Control's shortcut, the wallpaper click,
+/// drag-to-edge tiling and the Dock's auto-hide belong to the window server, `cfprefsd` or the
+/// Dock, not to toe — and the desktop picture is a fifth that is remembered the same way. Each
 /// is journalled *before* the change is made and replayed in reverse at startup, which is what
 /// repairs a crash, a `kill -9` or a logout. The rule every caller works by: a crash between
 /// the journal and the change must leave a record that says too much, never one that says too
@@ -18,7 +17,7 @@ import ToeCore
 /// change instead, and the reason is logged here. `Wallpaper` is the one that goes ahead, and
 /// says why.
 ///
-/// The six files differ only in their lines, and the lines are `JournalFormat`'s so the
+/// The five files differ only in their lines, and the lines are `JournalFormat`'s so the
 /// selftest can read them; what is here is the file.
 struct Journal<Record> {
 

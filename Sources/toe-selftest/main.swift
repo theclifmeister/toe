@@ -3536,18 +3536,19 @@ h.test("the bar has one verb, and the Setup level a switch") { t in
 }
 
 h.test("a monitor reserves the bar's strip from the top of its frame") { t in
-    // A display whose visibleFrame reaches the top: the menu bar is hidden, and the bar takes
-    // the first 26 points.
+    // A display whose visibleFrame reaches the top — a display with no menu bar on it — and
+    // the bar takes the first 26 points.
     let full = Monitor(id: 1, frame: box(0, 0, 1512, 982), usable: box(0, 0, 1512, 982))
     t.equalBox(full.reserving(top: 26).usable, box(0, 26, 1512, 956), "26 off the top")
     t.equal(full.reserving(top: 26).frame, full.frame, "the frame is the display's, untouched")
     t.equal(full.reserving(top: 26).id, 1, "same display")
 
-    // The menu bar is still showing — the bar switched off, or the hide not yet through — so
-    // `usable` already starts 25 below the top, and a 26 bar takes one point more, not 26.
+    // The menu bar is under the bar and has kept its own 25 points out of `usable`, so a 26 bar
+    // takes one point more, not 26 — and a notched display's 33-point strip under a 32 bar,
+    // nothing more.
     let menuBar = Monitor(id: 1, frame: box(0, 0, 1512, 982), usable: box(0, 25, 1512, 957))
-    t.equalBox(menuBar.reserving(top: 26).usable, box(0, 26, 1512, 956), "measured from the frame, not from usable")
-    t.equalBox(menuBar.reserving(top: 20).usable, box(0, 25, 1512, 957), "and a bar behind the menu bar takes nothing")
+    t.equalBox(menuBar.reserving(top: 26).usable, box(0, 26, 1512, 956), "measured from the frame, not added to usable")
+    t.equalBox(menuBar.reserving(top: 20).usable, box(0, 25, 1512, 957), "and a bar shorter than the menu bar takes nothing")
 
     // A Dock at the bottom is somebody else's reservation and stays.
     let dock = Monitor(id: 1, frame: box(0, 0, 1512, 982), usable: box(0, 0, 1512, 900))
@@ -3556,12 +3557,6 @@ h.test("a monitor reserves the bar's strip from the top of its frame") { t in
     // A second display to the right, at its own origin.
     let right = Monitor(id: 2, frame: box(1512, -100, 1920, 1080), usable: box(1512, -100, 1920, 1080))
     t.equalBox(right.reserving(top: 26).usable, box(1512, -74, 1920, 1054), "from that display's own top")
-
-    // `settingTop` is the other half: the caller putting the top edge where it knows it is.
-    t.equalBox(menuBar.settingTop(0).usable, box(0, 0, 1512, 982), "the menu bar's strip handed back")
-    t.equalBox(menuBar.settingTop(0).reserving(top: 26).usable, box(0, 26, 1512, 956), "and then the bar's taken")
-    t.equalBox(dock.settingTop(32).usable, box(0, 32, 1512, 868), "the bottom edge stays the Dock's")
-    t.equalBox(full.settingTop(5000).usable, box(0, 5000, 1512, 0), "and below the bottom is nothing, not less")
 
     t.equal(full.reserving(top: 0), full, "nothing reserved is the same monitor")
     t.equal(full.reserving(top: -5), full, "and a negative strip is not a bigger screen")

@@ -40,11 +40,14 @@ final class BarPanel {
         // nothing.
         panel.ignoresMouseEvents = false
         panel.isFloatingPanel = true
-        // One level under the menu bar, where `SlideOverlay` sits: above every ordinary and
-        // floating window and the Dock, below the menu bar itself — so when the hidden menu bar
-        // slides in on hover it comes in *over* the bar, and the application's menus are
-        // reachable through it.
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue - 1)
+        // One level *above* the menu bar — sketchybar's `topmost`. The bar covers the menu bar
+        // rather than replacing it: the first cut set the system's auto-hide instead and sat
+        // one level under, and every trip of the pointer to the top edge slid the menu bar
+        // back in over the bar. Measured for #171: a panel at 25 draws over the menu bar
+        // entirely, at 24 the menu bar's items draw over it. The menu bar keeps its strip of
+        // `visibleFrame`, which is honest — the bar is on it — and keeps its menus for the
+        // keyboard; `bar hide` takes the panels away, and the menu bar is what is left.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
         panel.isReleasedWhenClosed = false
         // `.fullScreenAuxiliary` so the panel may exist on a fullscreen Space at all, which is
         // what lets it be hidden there deliberately rather than by the window server; see
