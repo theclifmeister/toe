@@ -72,6 +72,11 @@ public enum Glyphs {
     /// `nf-md-chevron_left` / `nf-md-chevron_right`: the month stepper.
     public static let chevronLeft = "\u{F0141}"
     public static let chevronRight = "\u{F0142}"
+    /// `panels/audio/Model.js`, `sinkGlyph` and `sourceGlyph`: a speaker, a microphone, a
+    /// camera's microphone. Headphones, Bluetooth and a display are the widgets' glyphs above.
+    public static let speaker = "\u{F04C3}"
+    public static let microphone = "\u{F036C}"
+    public static let camera = "\u{F0100}"
 
     /// Every glyph above, flat, for a coverage check to walk — the font is asked once for the
     /// whole set at launch rather than per glyph at draw time. Spelled as one `joined()` over
@@ -83,7 +88,7 @@ public enum Glyphs {
             wifi, [wifiRestricted, ethernet, ethernetRestricted, disconnected],
             volume, [muted, headphones, monitor, monitors],
             battery, charging, [batteryFull],
-            [calendar, chevronLeft, chevronRight],
+            [calendar, chevronLeft, chevronRight, speaker, microphone, camera],
         ]
         return Array(rows.joined())
     }()

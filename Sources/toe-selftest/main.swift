@@ -3413,7 +3413,7 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
     t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
             "the old waybar pulseaudio set")
-    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 3, "the coverage list has them all")
+    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 6, "the coverage list has them all")
     t.equal(Glyphs.calendar.unicodeScalars.first!.value, 0xF00ED, "nf-md-calendar, the clock panel's hero")
     for glyph in Glyphs.all {
         t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
@@ -4156,6 +4156,71 @@ h.test("the calendar's grid is laid out at Omarchy's cell sizes, with its two cl
     t.equal(PanelLayout.monthNavStep(x: 20, inRow: nav, m), -1, "the left chevron")
     t.equal(PanelLayout.monthNavStep(x: 540, inRow: nav, m), 1, "the right")
     t.equal(PanelLayout.monthNavStep(x: 280, inRow: nav, m), 0, "the label is today")
+}
+
+h.test("the audio panel is the hero's switch, two sliders and the devices") { t in
+    let speakers = AudioPanel.Device(id: 41, name: "MacBook Pro Speakers", transport: .builtIn)
+    let pods = AudioPanel.Device(id: 57, name: "Clifford's AirPods Pro", transport: .bluetooth)
+    let screen = AudioPanel.Device(id: 63, name: "LG UltraFine", transport: .display)
+    let mic = AudioPanel.Device(id: 42, name: "MacBook Pro Microphone", transport: .builtIn)
+    let cam = AudioPanel.Device(id: 90, name: "FaceTime HD Camera", transport: .usb)
+    let s = AudioPanel.State(volume: 0.55, muted: false, outputs: [speakers, pods, screen], defaultOutput: 41,
+                             inputVolume: 0.8, inputMuted: true, inputs: [mic, cam, pods], defaultInput: 42)
+    let rows = AudioPanel.rows(s)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.volume[1], title: "Audio", status: "Steady groove",
+                                trailing: .toggle(on: true)), "the hero: the widget's glyph, upstream's word for 55%")
+    t.equal(rows[0].action, .toggleOutputMute, "its switch is the output's mute")
+    t.expect(rows[0].isSelectable, "and a cursor target")
+    t.equal(rows[2].kind, .header("Output", trailing: "55%"), "OUTPUT with the percentage")
+    t.equal(rows[3].kind, .slider(.outputVolume, value: 0.55, dimmed: false), "the output slider")
+    t.equal(rows[3].action, .toggleOutputMute, "Return on it mutes")
+    t.equal(rows[4].kind, .pick(glyph: Glyphs.speaker, label: "MacBook Pro Speakers", detail: nil, current: true),
+            "the default output, marked")
+    t.equal(rows[4].action, .pickOutput(41), "pressed, it is picked")
+    t.equal(rows[5].kind, .pick(glyph: Glyphs.headphones, label: "Clifford's AirPods Pro", detail: nil, current: false),
+            "AirPods are headphones")
+    t.equal(rows[6].kind, .pick(glyph: Glyphs.monitor, label: "LG UltraFine", detail: nil, current: false),
+            "a display's speakers")
+    t.equal(rows[7].kind, .separator, "then the input")
+    t.equal(rows[8].kind, .header("Input", trailing: "80%"), "INPUT")
+    t.equal(rows[9].kind, .slider(.inputVolume, value: 0.8, dimmed: true), "the input slider, muted")
+    t.equal(rows[9].action, .toggleInputMute, "with its own mute")
+    t.equal(rows[10].kind, .pick(glyph: Glyphs.microphone, label: "MacBook Pro Microphone", detail: nil, current: true),
+            "the default input")
+    t.equal(rows[10].action, .pickInput(42), "picked as an input")
+    t.equal(rows[11].kind, .pick(glyph: Glyphs.camera, label: "FaceTime HD Camera", detail: nil, current: false),
+            "a camera's microphone")
+    t.equal(rows[12].kind, .pick(glyph: Glyphs.bluetoothOn, label: "Clifford's AirPods Pro", detail: nil, current: false),
+            "the AirPods as an input are Bluetooth, not a headset")
+    t.equal(rows.last?.action, .openSettings(.sound), "the door")
+
+    // No input device at all: the section is left out, as upstream leaves it out with no source.
+    let deaf = AudioPanel.State(volume: 0.2, muted: true, outputs: [speakers], defaultOutput: 41)
+    let quiet = AudioPanel.rows(deaf)
+    t.equal(quiet.count, 7, "hero, separator, header, slider, one device, separator, door")
+    t.equal(quiet[0].kind, .hero(glyph: Glyphs.muted, title: "Audio", status: "Muted", trailing: .toggle(on: false)),
+            "muted: the switch off, the glyph muted")
+    t.equal(quiet[3].kind, .slider(.outputVolume, value: 0.2, dimmed: true), "and the slider dimmed")
+
+    // The widget's headphone rule, now from the device rather than a name read twice.
+    t.expect(s.headphones == false, "speakers are not headphones")
+    var onPods = s; onPods.defaultOutput = 57
+    t.expect(onPods.headphones, "AirPods are")
+    t.equal(AudioPanel.heroGlyph(onPods), Glyphs.headphones, "and the hero says so whatever the volume")
+    let jack = AudioPanel.Device(id: 41, name: "MacBook Pro Speakers", transport: .builtIn, jack: true)
+    t.expect(AudioPanel.isHeadphones(jack), "the headphone jack is, whatever the name")
+    let btSpeaker = AudioPanel.Device(id: 3, name: "Bose SoundLink Speaker", transport: .bluetooth)
+    t.expect(!AudioPanel.isHeadphones(btSpeaker), "a Bluetooth speaker says speaker and is one")
+    t.equal(AudioPanel.outputGlyph(btSpeaker), Glyphs.bluetoothOn, "drawn as Bluetooth")
+    t.equal(AudioPanel.outputGlyph(AudioPanel.Device(id: 4, name: "USB Audio", transport: .usb)), Glyphs.speaker,
+            "anything else is a speaker")
+
+    // `outputVolumeName`, at upstream's thresholds.
+    for (v, word) in [(0.0, "Silenced"), (0.1, "Whisper"), (0.15, "Murmur"), (0.3, "Easy listening"),
+                      (0.5, "Steady groove"), (0.7, "Cranked up"), (0.85, "Party mode"), (1.0, "Concert hall")] {
+        t.equal(AudioPanel.volumeName(v, muted: false), word, "\(v)")
+    }
+    t.equal(AudioPanel.volumeName(0.9, muted: true), "Muted", "muted trumps the number")
 }
 
 // MARK: - The quick menu

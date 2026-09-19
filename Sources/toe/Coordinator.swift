@@ -1220,7 +1220,10 @@ final class Coordinator: WindowTrackerDelegate {
             return MonitorPanel.rows(displays())
         case .clock:
             return ClockPanel.rows(view: calendarView, weekStart: config.bar.weekStart, today: Date())
-        case .audio, .network, .bluetooth:
+        case .audio:
+            guard let state = audio.state else { return nil }
+            return AudioPanel.rows(state)
+        case .network, .bluetooth:
             // Each arrives with its own step of #177.
             return nil
         }
@@ -1297,6 +1300,12 @@ final class Coordinator: WindowTrackerDelegate {
             SettingsPane(pane).open()
         case .toggleOutputMute:
             audio.toggleMute()
+        case .toggleInputMute:
+            audio.toggleInputMute()
+        case .pickOutput(let id):
+            audio.setDefaultOutput(id)
+        case .pickInput(let id):
+            audio.setDefaultInput(id)
         case .stepMonth(let delta):
             calendarView = ClockPanel.step(calendarView, months: delta)
             refreshPanel()
@@ -1314,8 +1323,7 @@ final class Coordinator: WindowTrackerDelegate {
             }, verify: { ClockPanel.weekdayNames[$0.bar.weekStart] == next })
         case .openCalendar:
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
-        case .toggleInputMute, .pickOutput, .pickInput, .toggleWifi, .toggleBluetooth,
-             .connectBluetooth, .disconnectBluetooth:
+        case .toggleWifi, .toggleBluetooth, .connectBluetooth, .disconnectBluetooth:
             // Each arrives with its panel's step of #177.
             break
         }
@@ -1324,7 +1332,7 @@ final class Coordinator: WindowTrackerDelegate {
     private func panelSlide(_ slider: PanelSlider, to value: Double) {
         switch slider {
         case .outputVolume: audio.setVolume(value)
-        case .inputVolume: break
+        case .inputVolume: audio.setInputVolume(value)
         }
     }
 
@@ -1367,7 +1375,7 @@ final class Coordinator: WindowTrackerDelegate {
         case (.network, .left):
             SettingsPane.wifi.open()
         case (.audio, .left):
-            SettingsPane.sound.open()
+            openPanel(.audio, on: display)
         case (.audio, .right):
             audio.toggleMute()
         case (.monitor, .left):
