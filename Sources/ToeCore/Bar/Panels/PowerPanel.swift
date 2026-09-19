@@ -22,7 +22,10 @@ public enum PowerPanel {
         /// unplug.
         public var minutesToEmpty: Int?
         public var minutesToFull: Int?
-        /// `kIOPSBatteryHealthKey`: "Good", "Fair", "Poor" — or nil on a Mac that will not say.
+        /// `kIOPSBatteryHealthKey`: "Good", "Fair", "Poor" — or nil on a Mac that will not say,
+        /// which on macOS 27 is every Apple silicon Mac: the condition System Settings shows
+        /// comes from a private health service, and the power-source description has no
+        /// health key at all. The cell is left out rather than dashed when it is nil.
         public var health: String?
         /// From the `AppleSmartBattery` registry entry, which every Mac with a battery has.
         public var cycleCount: Int?
@@ -64,9 +67,8 @@ public enum PowerPanel {
     }
 
     /// System Settings' two words for `kIOPSBatteryHealthKey`'s three.
-    public static func conditionLabel(_ health: String?) -> String {
-        guard let health else { return "—" }
-        return health == "Good" ? "Normal" : "Service recommended"
+    public static func conditionLabel(_ health: String) -> String {
+        health == "Good" ? "Normal" : "Service recommended"
     }
 
     public static func rows(_ b: Battery) -> [PanelRow] {
@@ -82,18 +84,26 @@ public enum PowerPanel {
         } else {
             time = PanelRow.Info("Time to full", timeLabel(minutes: b.minutesToFull))
         }
-        return [
+        // The two-by-two upstream, with a third line for what a Mac adds; the condition is
+        // the one cell that comes and goes, so it is last.
+        var stats: [PanelRow.Info] = [
+            time,
+            PanelRow.Info("Maximum capacity", b.maximumCapacity.map { "\($0)%" } ?? "—"),
+            PanelRow.Info("Charge cycles", b.cycleCount.map(String.init) ?? "—"),
+            PanelRow.Info("Power source", b.onMains ? "Power adapter" : "Battery"),
+            PanelRow.Info("Low Power Mode", b.lowPowerMode ? "On" : "Off"),
+        ]
+        if let health = b.health { stats.append(PanelRow.Info("Condition", conditionLabel(health))) }
+        var rows: [PanelRow] = [
             .hero(glyph: BarWidgets.batteryGlyph(fraction: b.fraction, onMains: b.onMains,
                                                  charging: b.charging, charged: b.charged),
                   title: "Battery", status: status(b), trailing: .text("\(percent)%")),
             .progress(b.fraction),
-            .info([time, PanelRow.Info("Condition", conditionLabel(b.health))]),
-            .info([PanelRow.Info("Charge cycles", b.cycleCount.map(String.init) ?? "—"),
-                   PanelRow.Info("Maximum capacity", b.maximumCapacity.map { "\($0)%" } ?? "—")]),
-            .info([PanelRow.Info("Power source", b.onMains ? "Power adapter" : "Battery"),
-                   PanelRow.Info("Low Power Mode", b.lowPowerMode ? "On" : "Off")]),
-            .separator,
-            .settings(.battery),
         ]
+        for pair in stride(from: 0, to: stats.count, by: 2) {
+            rows.append(.info(Array(stats[pair..<min(pair + 2, stats.count)])))
+        }
+        rows += [.separator, .settings(.battery)]
+        return rows
     }
 }

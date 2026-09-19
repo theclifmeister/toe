@@ -3980,12 +3980,12 @@ h.test("the power panel says what the battery menu says") { t in
         t.equal(trailing, .text("77%"), "the big number")
     } else { t.expect(false, "a hero first") }
     t.equal(rows[1].kind, .progress(0.77), "the bar")
-    t.equal(rows[2].kind, .info([PanelRow.Info("Time left", "2:14"), PanelRow.Info("Condition", "Normal")]),
-            "time and condition")
-    t.equal(rows[3].kind, .info([PanelRow.Info("Charge cycles", "312"), PanelRow.Info("Maximum capacity", "89%")]),
-            "cycles and capacity")
-    t.equal(rows[4].kind, .info([PanelRow.Info("Power source", "Battery"), PanelRow.Info("Low Power Mode", "Off")]),
-            "source and low power")
+    t.equal(rows[2].kind, .info([PanelRow.Info("Time left", "2:14"), PanelRow.Info("Maximum capacity", "89%")]),
+            "time and capacity")
+    t.equal(rows[3].kind, .info([PanelRow.Info("Charge cycles", "312"), PanelRow.Info("Power source", "Battery")]),
+            "cycles and source")
+    t.equal(rows[4].kind, .info([PanelRow.Info("Low Power Mode", "Off"), PanelRow.Info("Condition", "Normal")]),
+            "low power, and the condition on a Mac that reports one")
     t.equal(rows[5].kind, .separator, "then the door")
     t.equal(rows[6].action, .openSettings(.battery), "to the Battery pane")
     t.expect(rows.filter(\.isSelectable).count == 1, "only the settings row takes the cursor")
@@ -3994,13 +3994,13 @@ h.test("the power panel says what the battery menu says") { t in
     charging.onMains = true; charging.charging = true; charging.minutesToFull = 45
     t.equal(PowerPanel.status(charging), "Charging", "on power and flowing")
     t.equal(PowerPanel.rows(charging)[2].kind,
-            .info([PanelRow.Info("Time to full", "0:45"), PanelRow.Info("Condition", "Normal")]),
+            .info([PanelRow.Info("Time to full", "0:45"), PanelRow.Info("Maximum capacity", "89%")]),
             "time to full on power")
     var held = charging
     held.charging = false; held.fraction = 0.8
     t.equal(PowerPanel.status(held), "Charging on hold", "Optimized Battery Charging, in the Mac's words")
     t.equal(PowerPanel.rows(held)[2].kind,
-            .info([PanelRow.Info("Time to full", "—"), PanelRow.Info("Condition", "Normal")]),
+            .info([PanelRow.Info("Time to full", "—"), PanelRow.Info("Maximum capacity", "89%")]),
             "and no time while nothing flows")
     var full = held
     full.charged = true; full.fraction = 1
@@ -4009,14 +4009,15 @@ h.test("the power panel says what the battery menu says") { t in
     t.equal(PowerPanel.timeLabel(minutes: 5), "0:05", "padded minutes")
     t.equal(PowerPanel.timeLabel(minutes: 600), "10:00", "hours")
     t.equal(PowerPanel.conditionLabel("Fair"), "Service recommended", "anything but Good")
-    t.equal(PowerPanel.conditionLabel(nil), "—", "or nothing")
     var lpm = b
-    lpm.lowPowerMode = true; lpm.cycleCount = nil; lpm.maximumCapacity = nil
-    t.equal(PowerPanel.rows(lpm)[4].kind,
-            .info([PanelRow.Info("Power source", "Battery"), PanelRow.Info("Low Power Mode", "On")]), "on")
-    t.equal(PowerPanel.rows(lpm)[3].kind,
-            .info([PanelRow.Info("Charge cycles", "—"), PanelRow.Info("Maximum capacity", "—")]),
+    lpm.lowPowerMode = true; lpm.cycleCount = nil; lpm.maximumCapacity = nil; lpm.health = nil
+    t.equal(PowerPanel.rows(lpm)[4].kind, .info([PanelRow.Info("Low Power Mode", "On")]),
+            "on, and alone on its line on a Mac with no condition to report")
+    t.equal(PowerPanel.rows(lpm)[2].kind,
+            .info([PanelRow.Info("Time left", "2:14"), PanelRow.Info("Maximum capacity", "—")]),
             "dashes for what the Mac would not say")
+    t.equal(PowerPanel.rows(lpm)[3].kind,
+            .info([PanelRow.Info("Charge cycles", "—"), PanelRow.Info("Power source", "Battery")]), "cycles too")
     _ = m
 }
 

@@ -91,8 +91,15 @@ final class AudioProvider: BarProvider {
 
     /// The wheel: 5% a notch, as upstream's `wheelSteps × 0.05`, clamped.
     func adjustVolume(steps: Int) {
-        guard device != kAudioObjectUnknown, let state, steps != 0 else { return }
-        var value = Float32(max(0, min(1, state.volume + Double(steps) * 0.05)))
+        guard let state, steps != 0 else { return }
+        setVolume(state.volume + Double(steps) * 0.05)
+    }
+
+    /// The panel's slider: the output volume outright, clamped. The device's own listener
+    /// reports the value back, which is what redraws the widget and the panel.
+    func setVolume(_ volume: Double) {
+        guard device != kAudioObjectUnknown else { return }
+        var value = Float32(max(0, min(1, volume)))
         var address = Self.volume
         AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
     }

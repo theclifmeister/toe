@@ -105,6 +105,18 @@ final class BarWindowSet {
         }
     }
 
+    /// Where a panel for `kind` hangs on `display`: the widget's slot, the bar's height there
+    /// and the display's frame — nil when the bar is not up on that display or the widget is
+    /// not on it. `slotMidX` is in the display's coordinates, as the bar laid it out; the
+    /// screen's frame is what the bar spans, so the two share an origin.
+    func anchor(for kind: BarItem.Kind, on display: CGDirectDisplayID) -> PanelAnchor? {
+        guard let panel = panels[display], panel.panel.isVisible, let snapshot,
+              let screen = NSScreen.screens.first(where: { $0.displayID == display }),
+              let midX = panel.slotMidX(of: kind) else { return nil }
+        return PanelAnchor(slotMidX: midX, barHeight: height(on: screen, metrics: snapshot.metrics),
+                           display: Coordinates.toAX(screen.frame), displayID: display)
+    }
+
     private func make(for screen: NSScreen) -> BarPanel {
         let panel = BarPanel(screen: screen)
         let id = screen.displayID
