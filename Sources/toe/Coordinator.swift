@@ -17,7 +17,22 @@ final class Coordinator: WindowTrackerDelegate {
     private let snapshot = ScreenSnapshot()
     private let slide = SlideOverlay()
     private let hideBlocker = HideBlocker()
-    private let status = StatusItem()
+    /// The menu bar item, which is only there while the bar is off: the two are one strip drawn
+    /// in two places, and `applyBarSetting` makes and removes this as the config says.
+    private var status: StatusItem?
+    /// Omarchy's bar across the top of every display. See `BarWindowSet`.
+    private let bar = BarWindowSet()
+    private let clock = ClockProvider()
+    /// The right section's readers, started with the bar and stopped with it. Each says when
+    /// what it read changed; `refreshBar` draws the lot. See `BarProvider`.
+    private let power = PowerProvider()
+    private let audio = AudioProvider()
+    private let network = NetworkProvider()
+    private let keyboard = KeyboardLayoutProvider()
+    private var providers: [BarProvider] { [keyboard, network, audio, power] }
+    /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
+    /// are off screen and the menu bar under them is what shows, until `bar show` or a relaunch.
+    private var barHidden = false
     private let quickMenu = QuickMenu()
     /// The `toe` you type, on the other end of a socket. See `ControlSocket` — it is
     /// opened by `applyCLISetting` rather than here, so that `[cli] enabled = false` is a
@@ -277,11 +292,10 @@ final class Coordinator: WindowTrackerDelegate {
 
     func start() {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
-        status.onSelectWorkspace = { [weak self] index in
-            self?.dispatch(.workspace(.index(index)))
-        }
-        status.onOpenAccessibility = { Self.openAccessibilitySettings() }
-        status.onOpenMenu = { [weak self] in self?.dispatch(.menu(.root)) }
+        bar.onClick = { [weak self] display, kind, button in self?.barClicked(kind, button, on: display) }
+        bar.onScroll = { [weak self] kind, steps in self?.barScrolled(kind, steps: steps) }
+        clock.onTick = { [weak self] in self?.refreshStatus() }
+        for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
 
         installSignalHandlers()
         // Before the four repairs below, because the copy this replaces writes those journals on
@@ -441,8 +455,7 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     static func openAccessibilitySettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
+        SettingsPane.accessibility.open()
     }
 
     // MARK: - Config
@@ -563,7 +576,8 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.cycleEmptyWorkspaces = config.misc.cycleEmptyWorkspaces
         tracker.floatRules = config.floatRules
         border.apply(config.border)
-        status.persistentWorkspaces = config.bar.persistentWorkspaces
+        status?.persistentWorkspaces = config.bar.persistentWorkspaces
+        applyBarSetting()
         applyDockSwipeSetting()
         applyAnimationSetting()
         applyMiscSettings()
@@ -1058,9 +1072,172 @@ final class Coordinator: WindowTrackerDelegate {
         // properly, and it was on screen at the moment the user was looking at the menu anyway.
         // Sorted so the tooltip does not reorder itself between two refreshes; the dictionary
         // has no order of its own.
-        status.update(workspaces: workspaceStates(),
-                      warnings: warnings + setupWarnings + runtimeWarnings.values.sorted(),
-                      accessibilityGranted: AXIsProcessTrusted())
+        status?.update(workspaces: workspaceStates(),
+                       warnings: warnings + setupWarnings + runtimeWarnings.values.sorted(),
+                       accessibilityGranted: AXIsProcessTrusted())
+        refreshBar()
+    }
+
+    // MARK: - The bar
+
+    /// `[bar] enabled`, applied: the bar on and the menu bar item gone, or the other way round.
+    ///
+    /// Not gated on `isManaging`, unlike `applyMiscSettings`: the bar is where `toe !` is drawn
+    /// while Accessibility is still to be granted, so it has to be up before there is anything
+    /// to manage. Nothing here outlives the process — the bar covers the menu bar rather than
+    /// hiding it, see `BarPanel` — so there is no journal to write first.
+    private func applyBarSetting() {
+        let wanted = config.bar.enabled
+        if wanted {
+            if let status {
+                status.remove()
+                self.status = nil
+            }
+            clock.start(format: config.bar.clockFormat)
+            for provider in providers { provider.start() }
+        } else {
+            clock.stop()
+            for provider in providers { provider.stop() }
+            if status == nil { status = makeStatusItem() }
+        }
+        bar.enabled = wanted
+        bar.peekEnabled = config.bar.menuBarPeek
+        // Told the panels now, not left to `refreshBar`: that returns before it reaches them
+        // while the bar is off, which is exactly the moment they have to come down — the
+        // first cut left every panel drawn under the menu bar it had just handed back.
+        bar.refresh(redraw: false)
+        // The strip the tiles get changes with the bar and with its height, on the display's own
+        // frame rather than on `visibleFrame` — see `refreshMonitors`. Every reload, because a
+        // reload is what carries a new `[bar] height`, and `loadConfig` re-writes every frame
+        // afterwards anyway.
+        if isManaging { refreshMonitors() }
+    }
+
+    /// The menu bar item, wired. Made only while the bar is off — see `applyBarSetting`.
+    private func makeStatusItem() -> StatusItem {
+        let status = StatusItem()
+        status.persistentWorkspaces = config.bar.persistentWorkspaces
+        status.onSelectWorkspace = { [weak self] index in
+            self?.dispatch(.workspace(.index(index)))
+        }
+        status.onOpenAccessibility = { Self.openAccessibilitySettings() }
+        status.onOpenMenu = { [weak self] in self?.dispatch(.menu(.root)) }
+        return status
+    }
+
+    /// What the bar draws right now, on every display. Runs on every focus change like the
+    /// strip's own refresh, so it stays to what the bar actually reads: the strip's states, the
+    /// clock, and — in later steps — what the providers last said.
+    private func refreshBar() {
+        guard bar.enabled else { return }
+        let metrics = BarMetrics(height: config.bar.height, fontSize: config.bar.fontSize)
+        // The mark stands at the body font's cap height, as it does beside the digits in the
+        // menu bar item — set like the capital it is, on the digits' baseline.
+        let body = MenuFont.text(size: metrics.pointSize(.body))
+        let markHeight = Double((body.capHeight * 2).rounded(.up) / 2)
+        let markWidth = Double(ToeMark.width(forHeight: CGFloat(markHeight)))
+
+        var items = [BarItems.menu(markWidth: markWidth, metrics: metrics)]
+        if AXIsProcessTrusted() {
+            let strip = WorkspaceStrip.items(for: workspaceStates(),
+                                             persistent: config.bar.persistentWorkspaces)
+            items += BarItems.workspaces(strip, metrics: metrics)
+        } else {
+            items.append(BarItems.accessibility())
+        }
+        // No indicators to the clock's left. StayAwake was here and was taken out — a coffee
+        // cup for a `caffeinate` is not what a Mac user is looking for — and Dnd's Focus state
+        // lives in a database toe cannot read without Full Disk Access. `BarItems.indicator`
+        // and its hover reveal stay in ToeCore for the day one comes back.
+        items.append(BarItems.clock(ClockFormat.render(config.bar.clockFormat, at: Date())))
+        if let layout = keyboard.state {
+            items.append(BarItems.keyboardLayout(layout.label, full: layout.name))
+        }
+
+        // The right section, in Omarchy's order: tray and agents are not portable and are left
+        // out; bluetooth, network, audio, monitor, power follow.
+        items.append(BarWidgets.network(network.connection, metrics: metrics))
+        if let output = audio.state {
+            items.append(BarWidgets.audio(volume: output.volume, muted: output.muted,
+                                          headphones: output.headphones, metrics: metrics))
+        }
+        items.append(BarWidgets.monitor(count: NSScreen.screens.count, metrics: metrics))
+        if let battery = power.state {
+            items.append(BarWidgets.power(fraction: battery.fraction, onMains: battery.onMains,
+                                          charging: battery.charging, charged: battery.charged,
+                                          showPercentage: config.bar.batteryPercentage,
+                                          metrics: metrics))
+        }
+
+        // Tokyo Night's tokens stand in for a colour that would not parse; the config layer has
+        // already named the typo in the tooltip.
+        let fallback = BarConfig()
+        bar.update(BarSnapshot(
+            items: items, metrics: metrics,
+            background: Colors.rgba(config.bar.background, or: Hex.rgba(fallback.background)!),
+            foreground: Colors.rgba(config.bar.foreground, or: Hex.rgba(fallback.foreground)!),
+            active: Colors.rgba(config.bar.active, or: Hex.rgba(fallback.active)!),
+            markWidth: markWidth, markHeight: markHeight))
+    }
+
+    /// The wheel over a widget. Audio is the one this pass answers for: upstream's monitor
+    /// widget scrolls the brightness, which on a Mac is `DisplayServices`, private.
+    private func barScrolled(_ kind: BarItem.Kind?, steps: Int) {
+        if kind == .audio { audio.adjustVolume(steps: steps) }
+    }
+
+    /// A press on the bar. The table is Omarchy's — `manual/05-the-top-bar.md`, "Clicking
+    /// around" — with the Mac's answer in each cell.
+    private func barClicked(_ kind: BarItem.Kind?, _ button: BarView.Button, on display: CGDirectDisplayID) {
+        switch (kind, button) {
+        case (.menu, .left):
+            dispatch(.menu(.root))
+        case (.menu, .right):
+            // Whatever `super-enter` is bound to — Omarchy's terminal key, and the same key here.
+            // Read from the config the way `Setup › Config` reads the config opener: the row is
+            // the binding, and toe names no terminal of its own.
+            if let binding = config.bindings.first(where: { $0.source == "super-enter" }) {
+                dispatch(binding.command)
+            }
+        case (.workspace(let index), .left):
+            dispatch(.workspace(.index(index)))
+        case (.accessibility, _):
+            Self.openAccessibilitySettings()
+        case (.keyboardLayout, .left):
+            keyboard.selectNext()
+        case (.network, .left):
+            SettingsPane.wifi.open()
+        case (.audio, .left):
+            SettingsPane.sound.open()
+        case (.audio, .right):
+            audio.toggleMute()
+        case (.monitor, .left):
+            SettingsPane.displays.open()
+        case (.power, .left):
+            SettingsPane.battery.open()
+        case (.power, .right):
+            // Persisted, as upstream's `togglePercentage` writes it to shell.json: the
+            // percentage you asked for is the percentage from then on.
+            let wanted = !config.bar.batteryPercentage
+            rewriteConfig("battery_percentage", edit: {
+                ConfigWriter.setting("battery_percentage", to: wanted ? "true" : "false",
+                                     inTable: "bar", of: $0)
+            }, verify: { $0.bar.batteryPercentage == wanted })
+        case (.clock, .left):
+            // "What is the date?" is what a click on a clock means; Omarchy opens its calendar
+            // panel, and the Mac has one.
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+        case (.clock, .right):
+            // Applied through the file rather than in memory, as `toggle` applies a switch: the
+            // format the bar shows is the format the config stores, so a cycled format is the
+            // format from then on rather than something that reverts on the next reload.
+            let next = ClockFormat.next(after: config.bar.clockFormat)
+            rewriteConfig("clock_format", edit: {
+                ConfigWriter.setting("clock_format", to: "\"\(next)\"", inTable: "bar", of: $0)
+            }, verify: { $0.bar.clockFormat == next })
+        default:
+            break
+        }
     }
 
     /// Reads the application folders again, off the main thread, and pushes the answer into
@@ -1116,9 +1293,16 @@ final class Coordinator: WindowTrackerDelegate {
 
     private func refreshMonitors() {
         let monitors = NSScreen.screens.map { screen in
-            Monitor(id: screen.displayID,
-                    frame: Coordinates.toAX(screen.frame),
-                    usable: Coordinates.toAX(screen.visibleFrame))
+            let monitor = Monitor(id: screen.displayID,
+                                  frame: Coordinates.toAX(screen.frame),
+                                  usable: Coordinates.toAX(screen.visibleFrame))
+            // The bar's exclusive zone, from the frame: the menu bar under the bar has already
+            // kept its strip out of `visibleFrame`, and `reserving` takes only what the bar
+            // needs beyond that — a point or two on an external display, nothing on a notched
+            // one, whose menu bar is taller than Omarchy's bar.
+            guard bar.enabled, !barHidden else { return monitor }
+            return monitor.reserving(top: bar.height(on: screen, metrics: BarMetrics(
+                height: config.bar.height, fontSize: config.bar.fontSize)))
         }
         guard !monitors.isEmpty else { return }
         workspaces.setMonitors(monitors)
@@ -1773,6 +1957,9 @@ final class Coordinator: WindowTrackerDelegate {
         // A slide in flight is a picture of a screen that no longer exists in that shape.
         cancelSlide()
         refreshMonitors()
+        // The panels are framed against the screens, so they are re-framed against the new ones
+        // — before the layout, since the tiles are about to be put under them.
+        bar.screensChanged()
         // Both cached pictures are of a screen that no longer has that shape — and the rects the
         // wallpapers were keyed on have just changed, so they would miss anyway. Warmed again on
         // the back of the new list, since `refreshMonitors` has already run and the rects are
@@ -1899,6 +2086,11 @@ final class Coordinator: WindowTrackerDelegate {
         // Cheap on every ordinary path. toe's own workspaces are not Spaces, so nothing routine
         // comes through this callback at all.
         beginSpaceSettle()
+        // The bar goes first and at once: entering fullscreen is a Space change delivered at
+        // the start of the animation, and a bar still drawn over a window growing to fill the
+        // display is the blink the border avoids by hiding. The read is early, but it is the
+        // read that matters — the window is already reporting fullscreen.
+        setBarFullscreen(AX.frontmostFullscreenFrame)
         // Before the border, because it may be about to change which workspace is showing:
         // leaving a fullscreen Space is a Space change, and it is the moment a window that went
         // fullscreen on a since-hidden workspace asks for its workspace back.
@@ -1916,6 +2108,17 @@ final class Coordinator: WindowTrackerDelegate {
         wallpaper.reapply()
     }
 
+    /// Hides the bar on the display a fullscreen window covers, and shows it again when none
+    /// does. Reached from `updateBorder`, which has just paid for the read, and from the two
+    /// moments the border sits out — the start of a Space change and the end of its settle —
+    /// because those are exactly when fullscreen comes and goes, and the border's own read is
+    /// skipped then. Nothing is redrawn unless the answer changed.
+    private func setBarFullscreen(_ fullscreen: Box?) {
+        guard bar.fullscreen != fullscreen else { return }
+        bar.fullscreen = fullscreen
+        bar.refresh(redraw: false)
+    }
+
     /// Opens — or extends — the quiet period the border sits out. See `spaceSettleLatency`.
     private func beginSpaceSettle() {
         spaceSettle?.cancel()
@@ -1923,6 +2126,10 @@ final class Coordinator: WindowTrackerDelegate {
             guard let self else { return }
             self.spaceSettle = nil
             self.updateBorder()
+            // The border may have returned early with nothing to draw — no focus, or a
+            // stashed window — without reading; the bar still needs to know whether the
+            // fullscreen window has gone.
+            self.setBarFullscreen(AX.frontmostFullscreenFrame)
         }
         spaceSettle = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.spaceSettleLatency, execute: work)
@@ -2050,6 +2257,8 @@ final class Coordinator: WindowTrackerDelegate {
         // off in every case where there was nothing to draw. Both `show` paths below test
         // against it, because either can be the one pointed at a fullscreen display.
         let fullscreen = AX.frontmostFullscreenFrame
+        // The bar's answer is the same read: whichever display that window covers has no bar.
+        setBarFullscreen(fullscreen)
 
         // While the user has hold of a window the border marks the tile it will land in rather
         // than the window itself. Two reasons, and they point the same way: toe hears about the
@@ -2496,6 +2705,31 @@ final class Coordinator: WindowTrackerDelegate {
 
         case .removeSkill:
             writeSkill(SkillStore.remove())
+
+        case .bar(let visibility):
+            guard config.bar.enabled else {
+                Log.info("\(CommandLabel.describe(command)): the bar is off in the config")
+                return
+            }
+            let hide: Bool
+            switch visibility {
+            case .show: hide = false
+            case .hide: hide = true
+            case .toggle: hide = !barHidden
+            }
+            guard hide != barHidden else { return }
+            barHidden = hide
+            bar.hidden = hide
+            bar.refresh()
+            // The menu bar under the bar is what shows now, and keeps its own strip; what the
+            // bar reserved beyond it goes back to the tiles, or is taken from them. The zone
+            // is `usable`, so this is a monitor change and a relayout. A window in the user's
+            // hand is left alone by `apply`, as always, and takes its new tile on release.
+            refreshMonitors()
+            desired.removeAll()
+            corrections.removeAll()
+            apply(refocus: false)
+            Log.info("bar: \(hide ? "hidden" : "shown")")
         }
     }
 
@@ -2578,7 +2812,8 @@ extension Coordinator {
                                     monitorKey: { keys[$0] },
                                     appName: { [tracker] in StateReporter.appName(of: $0, via: tracker) },
                                     screenName: { screens[$0] },
-                                    version: AppIdentity.version)
+                                    version: AppIdentity.version,
+                                    bar: !config.bar.enabled ? .off : (barHidden ? .hidden : .visible))
     }
 
     private func layoutsReport() -> LayoutsReport {

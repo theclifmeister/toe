@@ -1,0 +1,118 @@
+import AppKit
+import ToeCore
+
+/// The bar on every display: one `BarPanel` per `NSScreen`, kept in step with the displays and
+/// with whether the bar is meant to be on screen at all.
+///
+/// Three things decide whether a panel shows, and they are kept apart because they change on
+/// different occasions. `enabled` is `[bar] enabled`, the config; `hidden` is `bar toggle`, the
+/// session; and a display with a native-fullscreen window in front has no bar on it whatever
+/// the other two say — `fullscreen`, per display, the way the border scopes it. `refresh` is
+/// the one place the three are combined.
+final class BarWindowSet {
+
+    private var panels: [CGDirectDisplayID: BarPanel] = [:]
+    private var snapshot: BarSnapshot?
+    /// `[bar] enabled`.
+    var enabled = false
+    /// `bar hide`: the panels are off screen and the strip is the tiles' again, until `bar show`.
+    var hidden = false
+    /// `[bar] menu_bar_peek`, handed to every panel — see `BarPanel.peekEnabled`.
+    var peekEnabled = true {
+        didSet { for panel in panels.values { panel.peekEnabled = peekEnabled } }
+    }
+    /// The frame of the native-fullscreen window in front, if there is one, in Accessibility
+    /// coordinates — `AX.frontmostFullscreenFrame`. A panel whose display it covers is hidden;
+    /// the other displays keep theirs. Under *Displays have separate Spaces* — the default —
+    /// each display shows its own Space, so "is anything fullscreen" is never the question,
+    /// and a fullscreen Safari on one display says nothing about the bar on another. The panel
+    /// is `.fullScreenAuxiliary` and would otherwise draw straight across the fullscreen Space.
+    var fullscreen: Box?
+    /// Hands every panel's clicks to one handler, with the display they came from.
+    var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
+    /// The wheel, in whole notches — see `BarView.scrollWheel`.
+    var onScroll: ((BarItem.Kind?, Int) -> Void)?
+
+    /// How tall the strip is on `screen`: the configured height, or the menu bar's strip where
+    /// that is taller.
+    ///
+    /// The bar sits over the menu bar, so it has to cover all of it or a line of it shows
+    /// under the bar: 33 pt on a notched built-in display (its 32 pt safe area and one more),
+    /// 24 or 25 on an external one, where Omarchy's 26 already covers it. The bar takes the
+    /// taller of the two and the slots scale with it, as they would with a taller `[bar]
+    /// height`.
+    func height(on screen: NSScreen, metrics: BarMetrics) -> Double {
+        max(metrics.height, Double(screen.frame.maxY - screen.visibleFrame.maxY))
+    }
+
+    /// Where the centre section is centred on `screen`, in the panel's own coordinates, or nil
+    /// for the middle of the bar.
+    ///
+    /// The middle of a notched display is the notch, and a clock under the camera housing is a
+    /// clock nobody can see — the framebuffer has it, the glass does not. So the centre section
+    /// centres on one of the two gaps beside it. The right one: the two are the same width on
+    /// every notched Mac so far (771.5 pt each at this display's scale), and to the right is
+    /// where the Mac has always kept its clock, so the eye that goes there finds it. The choice
+    /// is made from the geometry alone, not from what the sections hold, so the clock does not
+    /// move as workspaces come and go.
+    func centre(on screen: NSScreen) -> Double? {
+        guard screen.safeAreaInsets.top > 0, let gap = screen.auxiliaryTopRightArea else { return nil }
+        return Double(gap.midX - screen.frame.minX)
+    }
+
+    /// Draws `snapshot` on every display, creating panels for screens that have none and
+    /// dropping the ones whose screen has gone. Called on every `refreshStatus` — cheap when
+    /// nothing changed, since a panel whose snapshot is equal is not redrawn.
+    func update(_ snapshot: BarSnapshot) {
+        let changed = snapshot != self.snapshot
+        self.snapshot = snapshot
+        refresh(redraw: changed)
+    }
+
+    /// The displays changed shape or number: re-frame every panel against the new screens.
+    func screensChanged() {
+        refresh(redraw: true)
+    }
+
+    /// Applies `enabled` and `hidden` against the current screens.
+    func refresh(redraw: Bool = true) {
+        guard enabled, !hidden, let snapshot else {
+            for panel in panels.values { panel.hide() }
+            return
+        }
+        let screens = Dictionary(uniqueKeysWithValues: NSScreen.screens.map { ($0.displayID, $0) })
+        for id in panels.keys where screens[id] == nil {
+            panels[id]?.hide()
+            panels.removeValue(forKey: id)
+        }
+        for (id, screen) in screens {
+            let panel = panels[id] ?? make(for: screen)
+            // The same test the border makes, against the display's frame: a fullscreen window
+            // fills exactly one display, so overlapping its frame is sharing its display.
+            if BorderGeometry.isBehindFullscreen(window: Coordinates.toAX(screen.frame),
+                                                 fullscreen: fullscreen) {
+                panel.hide()
+                continue
+            }
+            // A panel that has stepped aside for the menu bar stays aside until its own
+            // sampling ends the peek and says so through `onPeekChanged`; a redraw meanwhile
+            // — the clock ticking — must not bring it back over the menu the user is in.
+            if panel.isPeeking { continue }
+            let height = height(on: screen, metrics: snapshot.metrics)
+            if redraw || !panel.panel.isVisible {
+                panel.show(on: screen, height: height, centre: centre(on: screen), snapshot: snapshot)
+            }
+        }
+    }
+
+    private func make(for screen: NSScreen) -> BarPanel {
+        let panel = BarPanel(screen: screen)
+        let id = screen.displayID
+        panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
+        panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
+        panel.peekEnabled = peekEnabled
+        panel.onPeekChanged = { [weak self] in self?.refresh(redraw: false) }
+        panels[id] = panel
+        return panel
+    }
+}

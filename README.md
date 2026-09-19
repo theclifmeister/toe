@@ -5,8 +5,10 @@ A small native macOS tiling window manager. It brings Hyprland's **dwindle** lay
 bindings, a gradient border around the focused window and a quick menu. There is nothing to
 agonise over — that is the opinion, and it is the whole product.
 
-toe lives in the menu bar as a workspace strip. It has no Dock icon and no window of its own, and
-the only permission it needs is Accessibility.
+toe lives in the menu bar as a workspace strip — or, if you ask for it, draws Omarchy's bar
+across the top of every display: the strip on the left, the clock in the centre, the network,
+sound, displays and battery on the right. It has no Dock icon and no window of its own, and the
+only permission it needs is Accessibility.
 
 # Bindings
 <img width="1728" height="1117" alt="image" src="https://github.com/user-attachments/assets/2256d0c4-884f-4af4-a405-51368390425c" />
@@ -93,6 +95,7 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 | `SUPER` + `SHIFT` + `-` / `=` | Make it 100 pt shorter / taller |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
 | `SUPER` + `SPACE` | The quick menu |
+| `SUPER` + `SHIFT` + `SPACE` | Hide the bar to see the Mac's menu bar; again to bring it back |
 | `SUPER` + `CTRL` + `SPACE` | The background picker, when the theme has pictures |
 | `SUPER` + `SHIFT` + `CTRL` + `SPACE` | The theme picker |
 | `SUPER` + `K` | Every binding, in a list |
@@ -111,6 +114,20 @@ a hole on the desktop behind it.
 **The menu bar** shows the workspace strip: the workspace you are on as a filled square, every
 other workspace in use as its digit, and workspaces 1–5 always present. Click a workspace to
 switch to it, or the `T` at the front to open the quick menu.
+
+**The bar** is Omarchy's, across the top of every display, over the menu bar — off until you
+turn it on with Setup › Menu bar in the quick menu, or `[bar] enabled = true`. On the left,
+toe's `T` and the same workspace strip: the workspace you are on as a filled square, every other
+workspace in use as its digit, and workspaces 1–5 always present. In the centre, the clock —
+right-click it to walk Omarchy's formats, and the one you land on is kept — with the keyboard
+layout beside it when you have more than one. On the right, the network, the sound, the displays and the
+battery, each a click away from its Settings pane; right-click the sound to mute, scroll it for
+the volume, right-click the battery for the percentage. The macOS menu bar is still there
+underneath: rest the pointer against the top edge for a moment and the bar on that display
+steps aside to show it — an application's own menus, by mouse — and comes back once you have
+left the strip and closed the menu (`[bar] menu_bar_peek = false` turns the gesture off).
+`SUPER` + `SHIFT` + `SPACE` takes the bar away outright, and again brings it back. Setup › Menu bar in the quick menu switches the bar off for good and
+puts the strip back in the menu bar as a menu bar item.
 
 **The quick menu** (`SUPER` + `SPACE`) mirrors Omarchy's: Apps, Learn, Style, Setup, Install,
 Remove, About and Quit. Arrows move, `ENTER` chooses, `ESC` backs out, and typing searches the
@@ -161,7 +178,7 @@ Binding specs accept the dash spelling and Omarchy's, so `"alt-shift-1"`, `"supe
 `workspace`, `movetoworkspace`, `movetoworkspacesilent`, `swapworkspace`, `killactive`,
 `togglefloating`, `togglesplit`, `swapsplit`, `growactive`, `resizeactive`, `exec`, `reload`,
 `menu`, `keybindings`, `theme`, `removetheme`, `background`, `nextbackground`, `installskill`,
-`removeskill` and `quit`.
+`removeskill`, `bar` and `quit`.
 `growactive <dx> <dy>` grows the focused window by that much; Hyprland's `resizeactive` moves the
 split by that much instead, which from a right-hand window is the other way round, and is accepted
 for configs copied from Omarchy. `swapworkspace left` / `right` is toe's own: it renumbers two
@@ -180,7 +197,10 @@ Other sections worth knowing about:
 - `[animations] slide_on_swipe` — slide the screen on a swipe the way Spaces does. Off by
   default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
   menu flips it.
-- `[bar] persistent_workspaces` — how many workspaces always keep a slot on the menu bar.
+- `[bar]` — the bar: whether it is drawn at all (off by default), its height and font, its three colours (the
+  theme's while one is set), the clock's format and whether the battery shows its percentage —
+  the last two are also what right-clicking those widgets writes — and `persistent_workspaces`,
+  how many workspaces always keep a slot on the strip.
 - `[cli]` — the command line below: whether its socket is opened at all, and whether `exec` and
   `quit` may travel over it. Both are refused by default.
 

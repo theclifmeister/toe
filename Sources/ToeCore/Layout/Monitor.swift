@@ -14,6 +14,26 @@ public struct Monitor: Equatable, Sendable {
         self.frame = frame
         self.usable = usable
     }
+
+    /// The same display with a strip `height` tall reserved along the top of its frame — the
+    /// bar's exclusive zone, in Hyprland's words.
+    ///
+    /// Reserved from the *frame*, not added to `usable`: the bar sits over the menu bar, and
+    /// the menu bar has already kept its own strip out of `visibleFrame`, so adding the bar's
+    /// height to that would cost the tiles the strip twice. Measured from the top of the
+    /// display, the tiling area keeps whichever of the two starts lower — a point or two more
+    /// than the menu bar on an external display, nothing more on a notched one. Nothing
+    /// downstream changes: the layout, the floats, the stash corner and the quick menu all key
+    /// off `usable` already, which is the whole reason the zone is expressed here.
+    ///
+    /// A strip taller than the display leaves a zero-height `usable` rather than a negative one.
+    public func reserving(top height: Double) -> Monitor {
+        guard height > 0 else { return self }
+        let top = max(usable.minY, frame.minY + height)
+        let bottom = max(top, usable.maxY)
+        return Monitor(id: id, frame: frame,
+                       usable: Box(x: usable.x, y: top, w: usable.w, h: bottom - top))
+    }
 }
 
 /// Where a window goes when its workspace is hidden.

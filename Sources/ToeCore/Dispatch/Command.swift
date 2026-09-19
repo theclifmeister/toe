@@ -1,5 +1,11 @@
 import Foundation
 
+/// What `bar` does to the bar — Omarchy's `omarchy toggle bar`, with the two one-way spellings
+/// a caller on the socket wants when it does not know which way the bar is.
+public enum BarVisibility: Equatable, Sendable {
+    case show, hide, toggle
+}
+
 public enum WorkspaceTarget: Equatable {
     case index(Int)
     case next
@@ -61,6 +67,10 @@ public enum Command: Equatable {
     /// Takes that file away again — the Remove level's mirror of the row above, and the same
     /// bounded kind of destructive as `removeTheme`: one path toe wrote, and no other.
     case removeSkill
+    /// Shows or hides the bar — Omarchy's `Super+Shift+Space`. Hidden, the bar's panels go and
+    /// the macOS menu bar they cover is what shows. The one verb the bar adds: everything else
+    /// on it is a click that opens something, and a Settings pane is not a command.
+    case bar(BarVisibility)
 }
 
 public extension Command {
@@ -284,6 +294,17 @@ public enum CommandParser {
         // verb and its argument, so the noun goes in the verb rather than after it.
         case "installskill":                return .installSkill
         case "removeskill":                 return .removeSkill
+
+        // `bar` alone toggles, the way `menu` alone opens the root: the bare word is what a
+        // binding wants, and the two one-way forms are for a caller that needs to land on a
+        // known state rather than the other one.
+        case "bar":
+            switch argument.lowercased() {
+            case "", "toggle": return .bar(.toggle)
+            case "show":       return .bar(.show)
+            case "hide":       return .bar(.hide)
+            default:           throw CommandError.badArgument(name, argument)
+            }
 
         // Spelled the way `omarchy-menu` and `omarchy-menu keybindings` are invoked, so a
         // binding can be read across from an Omarchy config without translating it.

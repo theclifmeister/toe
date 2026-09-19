@@ -69,8 +69,8 @@ public extension Config {
     /// It is also what keeps the selftest able to assert what the shipped config *says* while the
     /// Coordinator asserts what it *does*.
     ///
-    /// The theme wins outright. With `[theme] name` set, the colour keys in `[border]` and
-    /// `[menu]` are not consulted at all — not merged with, not warned about. Not merged, because
+    /// The theme wins outright. With `[theme] name` set, the colour keys in `[border]`, `[menu]`
+    /// and `[bar]` are not consulted at all — not merged with, not warned about. Not merged, because
     /// a merge would mean a theme that recoloured your border and not your menu depending on which
     /// keys you happened to have written, which is a rule nobody could hold in their head. And not
     /// warned about, because the config toe ships sets every one of those keys explicitly and the
@@ -78,9 +78,11 @@ public extension Config {
     /// for every single user the first time they picked a theme, five deep in a tooltip. The
     /// comment blocks in the file say it instead, where there is room to say it once and properly.
     ///
-    /// What a theme does not touch: `width`, `angle`, `radius`, `enabled`, `opacity`, `font_size`
-    /// and the two menu widths. Those are sizes and behaviours, and `colors.toml` has nothing to
-    /// say about them — Omarchy's own theme template sets `col.active_border` and nothing else.
+    /// What a theme does not touch: `width`, `angle`, `radius`, `enabled`, `opacity`, `font_size`,
+    /// the two menu widths, and the bar's `height`, `font_size`, `clock_format` and
+    /// `battery_percentage`. Those are sizes and behaviours, and `colors.toml` has nothing to say
+    /// about them — Omarchy's own theme template sets `col.active_border` and the three bar
+    /// colours, and nothing else.
     func applying(_ theme: Theme) -> Config {
         var out = self
 
@@ -100,6 +102,15 @@ public extension Config {
         out.menu.foreground = theme.palette.foreground
         out.menu.accent = theme.palette.accent
         out.menu.border = nil
+
+        // Omarchy's own `shell.toml` template, which is where the bar's colours come from
+        // upstream: `background = {{ background }}`, `text = {{ foreground }}`, `active = {{ red
+        // }}`. Red is ANSI slot 1 in every theme Omarchy publishes — see `Palette.ansiNames` —
+        // and a theme that has left it out (none has) falls back to the accent, which is what
+        // "calling attention to itself" means in the rest of the theme.
+        out.bar.background = theme.palette.background
+        out.bar.foreground = theme.palette.foreground
+        out.bar.active = theme.palette.color(1) ?? theme.palette.accent
 
         // The resolved name, not the one the file spelled: the menu marks its current row by
         // comparing against this, and `name = "Tokyo Night"` should still tick Tokyo Night.

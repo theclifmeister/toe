@@ -144,6 +144,10 @@ public enum CommandCatalogue {
         CommandDescriptor(verb: "removeskill",
                           summary: "Take that skill file away again.",
                           sample: "removeskill"),
+        CommandDescriptor(verb: "bar", argument: "[show|hide|toggle]",
+                          summary: "Show or hide the bar along the top of every display. Hidden, "
+                                 + "the macOS menu bar under it shows. Bare `bar` toggles.",
+                          sample: "bar toggle"),
         CommandDescriptor(verb: "menu", argument: "[root|keybindings|apps|learn|style|theme|background|setup|install|remove]",
                           summary: "Open the quick menu, at a level.",
                           sample: "menu theme"),

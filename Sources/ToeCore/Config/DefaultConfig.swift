@@ -236,6 +236,37 @@ allow_exec = false
 allow_quit = false
 
 [bar]
+# Omarchy's bar, across the top of every display over the macOS menu bar: the menu and the
+# workspaces on the left, the clock in the centre, and network, audio, displays and power on
+# the right, each a Nerd Font glyph that opens the matching Settings pane. The menu bar stays
+# where it is, covered, and the tiles start under the bar; rest the pointer on the top edge to
+# see it (menu_bar_peek, below), or SUPER+SHIFT+SPACE takes the bar away until pressed again.
+# Off by default: the workspace strip is a menu bar item until you ask for the
+# bar, here or in Setup › Menu bar in the quick menu.
+enabled = false
+# Omarchy's bar is 26 tall at its 12px font, and every slot on it scales with the height —
+# 27 for an icon, 21 for a status indicator, 20 for a workspace — so a taller bar keeps its
+# proportions. font_size is the body size; the caption and icon sizes derive from it.
+height    = 26
+font_size = 12
+# The bar's three colours, from Omarchy's shell.toml for its default theme: the background, the
+# text, and the colour a widget calling attention to itself takes — the theme's red. Ignored
+# while [theme] name is set, like the [menu] colours below; the sizes are not.
+background = "#1a1b26"
+foreground = "#a9b1d6"
+active     = "#f7768e"
+# The clock, in Qt's spelling because that is what Omarchy stores: dddd is the day's name, HH:mm
+# the 24-hour time, `d MMMM 'W'ww yyyy` the date with its ISO week. Right-clicking the clock
+# walks Omarchy's presets and writes the one it lands on here.
+clock_format = "dddd HH:mm"
+# Whether the power widget prints the percentage beside its battery. Right-clicking it flips
+# this, and writes it here too. On a desktop with no battery there is no power widget.
+battery_percentage = false
+# Hold the pointer against the top edge of a display for a moment and the bar there steps
+# aside to show the menu bar under it — an application's own menus, by mouse — and comes back
+# once the pointer has left the strip and no menu is open. A flick to the top does not count;
+# it has to rest there. Off, the menu bar is reached with SUPER+SHIFT+SPACE alone.
+menu_bar_peek = true
 # waybar's persistent-workspaces: the fewest slots the bar ever has, so a fresh session still
 # shows 1-5, the empty ones dimmed. It is a floor and not a claim on the first five: once five
 # workspaces are in use the padding has nothing left to do, and an empty 4 between a busy 3 and
@@ -386,6 +417,9 @@ font_size  = 18
 # shortcut off in System Settings › Keyboard › Keyboard Shortcuts › Input Sources.
 "super-ctrl-space"       = "menu background"
 "super-shift-ctrl-space" = "menu theme"
+# Omarchy's SUPER+SHIFT+SPACE: the bar off and on again without stopping anything. Hidden, the
+# macOS menu bar under it shows; `bar show` and `bar hide` are the one-way spellings.
+"super-shift-space"      = "bar toggle"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 # AppleScript's `new window` reuses the running instance, so the window opens on the current

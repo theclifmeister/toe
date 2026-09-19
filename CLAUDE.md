@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A native macOS tiling window manager: a direct port of Hyprland's `CHyprDwindleLayout`, with
 Omarchy's defaults (`preserve_split = true`, `force_split = 2`). It runs as a background agent
-(`.accessory`) with no Dock icon and no main window — a menu bar item, key bindings and a
-gradient border around the focused window. Accessibility is the only permission it asks for by
-default; the opt-in `[animations] slide_on_swipe` is the one feature behind a second one (Screen
-Recording — see `ScreenSnapshot`).
+(`.accessory`) with no Dock icon and no main window — a menu bar item or, with `[bar] enabled`,
+Omarchy's bar across the top of every display, key bindings and a gradient border around the
+focused window. Accessibility is the only
+permission it asks for by default; the opt-in `[animations] slide_on_swipe` is the one feature
+behind a second one (Screen Recording — see `ScreenSnapshot`).
 
 ## Commands
 
@@ -172,6 +173,56 @@ rather than expired by age.
 **AX calls are synchronous and on the main thread**, capped at 250 ms (`axMessagingTimeout`). They
 are not rare — `isManageable` alone is six round trips per candidate window. Adding one to a path
 that runs on every focus change or stack change is a real cost; put it after the cheap conditions.
+
+## The bar
+
+Off by default — `[bar] enabled = false`, and absent reads as off — because it takes the menu
+bar away from a Mac user who did not ask; on, the `NSStatusItem` is not created and the bar is
+the strip. `BarWindowSet` is one `NSPanel` per `NSScreen` across the top of its frame, one
+level *above* the menu bar — sketchybar's `topmost` — so the bar covers the menu bar rather than
+replacing it; `BarView` draws the items `BarLayout.place` positions, in `draw(_:)` like
+`MenuView`.
+Everything that can be a value is in `ToeCore/Bar/`: `BarItem` is Omarchy's `WidgetButton`,
+`BarMetrics` its `Style.bar` with `[bar] height` as the scale, `BarWidgets` the glyph rule of
+each widget from the numbers a Mac reports, `ClockFormat` the Qt-spelled formats and their
+`DateFormatter` translation, `Glyphs` the codepoints. The providers in `toe/Bar/Providers/`
+read the system and say when it changed — a listener where one exists, never a poll — and
+`Coordinator.refreshBar` assembles a `BarSnapshot` on every `refreshStatus`.
+
+Four things to keep straight:
+
+- **The exclusive zone is `usable`.** `refreshMonitors` reserves the bar's strip from the
+  display's *frame* (`Monitor.reserving(top:)`) — the menu bar under the bar has already kept
+  its own strip out of `visibleFrame`, so the bar costs the tiles only what it needs beyond
+  that — and nothing downstream knows the bar exists. `bar hide` takes the panels away and the
+  menu bar is what shows; the strip stays the menu bar's.
+- **Do not hide the menu bar.** The first cut set `_HIHideMenuBar` and sat one level under,
+  and the menu bar slid back in over the bar on every trip to the top edge; worse, `NSScreen`
+  never learns of a hide made by its own process, so `visibleFrame` stayed stale for the rest
+  of the run. Covering it at level 25 has neither problem, and no state that outlives toe.
+  The bar is the taller of `[bar] height` and the menu bar's strip, so no line of it shows.
+- **The peek is how the menus are reached by mouse.** `MenuBarPeek` (ToeCore, in the
+  selftest) is auto-hide's gesture with a dwell: the pointer held against the top edge for
+  0.3 s orders that display's panel out, and it comes back 0.4 s after the pointer has left
+  the strip with no menu open. `BarPanel` drives it from a 50 ms timer that runs only while
+  the pointer is on the strip or a peek is on — never a global mouse monitor, which is the
+  cost sketchybar's maintainer measured and refused. "A menu is open" is an on-screen window
+  at `kCGPopUpMenuWindowLevel` (101) in the window list, checked only when the pointer has
+  left mid-peek. `BarWindowSet.refresh` leaves a peeking panel alone, so the clock ticking
+  does not bring the bar back over a menu the user is reading.
+- **The notch.** AppKit keeps every window out of a notched display's top safe area through
+  `constrainFrameRect`; `TopStripPanel` overrides it. On that display the bar is the safe
+  area's 32 pt tall and the centre section is centred on the right-hand gap beside the notch
+  (`BarWindowSet.centre(on:)`) — a clock under the camera housing is in the framebuffer and not
+  on the glass.
+- **Fullscreen is scoped per display**, as the border scopes it: `BarWindowSet.fullscreen` is
+  the frontmost fullscreen window's frame, and only the panel on the display it overlaps
+  hides. Read where `updateBorder` already reads it, and on its own at the start of a Space
+  change and the end of the settle.
+
+Two widgets wait on a permission toe does not ask for: Bluetooth needs the Bluetooth TCC grant
+through IOBluetooth, and the Focus state (Dnd) lives in a Full-Disk-Access-protected database.
+The glyph rule for the first is in `BarWidgets`; neither has a provider.
 
 ## The control socket
 
