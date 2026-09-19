@@ -1327,7 +1327,7 @@ final class Coordinator: WindowTrackerDelegate {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
         case .toggleWifi:
             network.toggleWifiPower()
-        case .toggleBluetooth, .connectBluetooth, .disconnectBluetooth:
+        case .connectBluetooth, .disconnectBluetooth:
             // Each arrives with its panel's step of #177.
             break
         }

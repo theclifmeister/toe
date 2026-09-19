@@ -74,15 +74,16 @@ public enum PowerPanel {
     public static func rows(_ b: Battery) -> [PanelRow] {
         let percent = Int((max(0, min(1, b.fraction)) * 100).rounded())
         let idle = b.charged || (b.onMains && (!b.charging || b.fraction >= 1))
-        // "Time left" on battery, "Time to full" on power, and a dash rather than a time when
-        // nothing is flowing — held at 80% has no time to full.
+        // "Time left" on battery, "Full in" on power — short, because "Calculating…" beside
+        // "Time to full" was wider than the cell — and a dash rather than a time when nothing
+        // is flowing: held at 80% has no time to full.
         let time: PanelRow.Info
         if !b.onMains {
             time = PanelRow.Info("Time left", timeLabel(minutes: b.minutesToEmpty))
         } else if idle {
-            time = PanelRow.Info("Time to full", "—")
+            time = PanelRow.Info("Full in", "—")
         } else {
-            time = PanelRow.Info("Time to full", timeLabel(minutes: b.minutesToFull))
+            time = PanelRow.Info("Full in", timeLabel(minutes: b.minutesToFull))
         }
         // The two-by-two upstream, with a third line for what a Mac adds; the condition is
         // the one cell that comes and goes, so it is last.
@@ -90,7 +91,7 @@ public enum PowerPanel {
             time,
             PanelRow.Info("Maximum capacity", b.maximumCapacity.map { "\($0)%" } ?? "—"),
             PanelRow.Info("Charge cycles", b.cycleCount.map(String.init) ?? "—"),
-            PanelRow.Info("Power source", b.onMains ? "Power adapter" : "Battery"),
+            PanelRow.Info("Source", b.onMains ? "Power adapter" : "Battery"),
             PanelRow.Info("Low Power Mode", b.lowPowerMode ? "On" : "Off"),
         ]
         if let health = b.health { stats.append(PanelRow.Info("Condition", conditionLabel(health))) }

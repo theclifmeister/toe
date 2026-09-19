@@ -53,8 +53,7 @@ public enum PanelAction: Equatable, Sendable {
     case pickInput(UInt32)
     // Network
     case toggleWifi
-    // Bluetooth
-    case toggleBluetooth
+    // Bluetooth — no power switch: setting the adapter's power is a private preference call.
     /// By address, the one name a device keeps across connects and disconnects.
     case connectBluetooth(String)
     case disconnectBluetooth(String)
@@ -77,7 +76,6 @@ public enum PanelAction: Equatable, Sendable {
         case .pickOutput(let id):            return "output:\(id)"
         case .pickInput(let id):             return "input:\(id)"
         case .toggleWifi:                    return "wifi"
-        case .toggleBluetooth:               return "bluetooth"
         case .connectBluetooth(let address), .disconnectBluetooth(let address):
             return "bluetooth:\(address)"
         case .stepMonth(let delta):          return "month:\(delta)"

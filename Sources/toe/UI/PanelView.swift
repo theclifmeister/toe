@@ -120,8 +120,17 @@ final class PanelView: NSView {
                 for (i, cell) in cells.enumerated() {
                     let box = NSRect(x: frame.minX + (cellWidth + spacing) * CGFloat(i), y: frame.minY,
                                      width: cellWidth, height: frame.height)
-                    draw(cell.label, in: box, font: .bodySmall, colour: fg.withAlpha(0.6), s)
-                    draw(cell.value, in: box, font: .bodySmall, colour: fg, alignment: .right, s)
+                    // The value keeps its width and the label yields to it, cut with an
+                    // ellipsis past a gap — `MenuLayout.columns`' rule for the menu's two
+                    // columns. Drawn in one box they collided: "Time to full" against
+                    // "Calculating…" was the pair that showed it.
+                    let value = attributed(cell.value, font: .bodySmall, colour: fg, s)
+                    let valueWidth = min(value.size().width, box.width)
+                    let labelWidth = max(0, box.width - valueWidth - CGFloat(m.glyphGap))
+                    draw(cell.label, in: NSRect(x: box.minX, y: box.minY, width: labelWidth, height: box.height),
+                         font: .bodySmall, colour: fg.withAlpha(0.6), s)
+                    draw(cell.value, in: NSRect(x: box.maxX - valueWidth, y: box.minY, width: valueWidth, height: box.height),
+                         font: .bodySmall, colour: fg, alignment: .right, s)
                 }
 
             case .pick(let glyph, let label, let detail, let current):
