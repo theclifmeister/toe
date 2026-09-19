@@ -14,8 +14,36 @@ public struct BorderConfig: Equatable {
     public init() {}
 }
 
-/// The menu bar's workspace strip.
+/// The bar across the top of every display — Omarchy's, in place of the menu bar.
+///
+/// Sizes are the user's; colours are the theme's. The three colour defaults are Omarchy's `[bar]`
+/// section of `shell.toml` rendered for its default theme, Tokyo Night: `background` is the
+/// palette's background, `text` its foreground, and `active` — the colour a widget calling
+/// attention to itself takes — its red. That is the same arrangement `MenuConfig` has with
+/// walker's tokens, and for the same reason: choosing Tokyo Night as a theme should change
+/// nothing here, so that a fresh install with no theme at all still looks themed.
 public struct BarConfig: Equatable {
+    /// Whether the bar is drawn at all. On, the macOS menu bar is set to hide and toe's bar takes
+    /// its strip; off, nothing changes from a bar-less toe and the workspace strip goes back to
+    /// being a menu bar item. Absent reads as on.
+    public var enabled: Bool = true
+    /// `[bar] size-horizontal`: 26 at Omarchy's 12px base font. Every slot on the bar scales
+    /// with it, the way `Style.barToken` scales them with the font — see `BarMetrics`.
+    public var height: Double = 26
+    /// `[font] base-size`: the body size, 12px. The caption and icon sizes derive from it.
+    public var fontSize: Double = 12
+    public var background: String = "#1a1b26"
+    public var foreground: String = "#a9b1d6"
+    /// Tokyo Night's `color1`.
+    public var active: String = "#f7768e"
+    /// The clock's label, in Qt's spelling — `dddd HH:mm` — because that is what Omarchy stores
+    /// on the clock's `shell.json` entry, and a format copied across should read the same.
+    /// `ClockFormat` translates it for `DateFormatter`. Right-clicking the clock walks
+    /// `ClockFormat.presets` and writes the result back here.
+    public var clockFormat: String = ClockFormat.defaultFormat
+    /// Whether the power widget prints the percentage beside its glyph. Right-clicking it flips
+    /// this and writes it back, as Omarchy's `togglePercentage` does.
+    public var batteryPercentage: Bool = false
     /// waybar's `persistent-workspaces`: how many workspaces keep a slot whether or not
     /// anything is on them. 0 shows only the ones in use.
     public var persistentWorkspaces: Int = WorkspaceStrip.defaultPersistent
@@ -510,6 +538,57 @@ public struct Config: Equatable {
         }
 
         if let b = root["bar"]?.tableValue {
+            // Booleans told apart from absent, as `[misc]` does: `enabled = "false"` in quotes is
+            // the difference between a bar and a menu bar, and silence about it reads as toe
+            // ignoring the file.
+            for (key, path) in [("enabled", "bar.enabled"),
+                                ("battery_percentage", "bar.battery_percentage")] {
+                guard let raw = b[key] else { continue }
+                guard let value = raw.boolValue else {
+                    let current = key == "enabled" ? config.bar.enabled : config.bar.batteryPercentage
+                    config.warnings.append("\(path): must be true or false, using \(current)")
+                    continue
+                }
+                if key == "enabled" { config.bar.enabled = value } else { config.bar.batteryPercentage = value }
+            }
+            // The floor is the bar's own use, not a style: below 16 the 12px body has no line to
+            // sit on. The ceiling is generous because the height is what the slots scale with —
+            // see `BarMetrics` — and a bar twice Omarchy's is a choice, where one four times it
+            // is a typo.
+            if let v = number(b["height"], "bar.height", in: 16...100,
+                              keeping: config.bar.height, warnings: &config.warnings) {
+                config.bar.height = v
+            }
+            if let v = number(b["font_size"], "bar.font_size", in: 8...48,
+                              keeping: config.bar.fontSize, warnings: &config.warnings) {
+                config.bar.fontSize = v
+            }
+            // Checked here rather than at drawing time, as `[menu]`'s are, so a typo is named in
+            // the tooltip instead of resolving to some other colour on screen.
+            for (key, path) in [("background", "bar.background"), ("foreground", "bar.foreground"),
+                                ("active", "bar.active")] {
+                guard let raw = b[key]?.stringValue else { continue }
+                guard Hex.rgba(raw) != nil else {
+                    config.warnings.append("\(path): '\(raw)' is not a #RRGGBB or #RRGGBBAA colour, "
+                                           + "using the default")
+                    continue
+                }
+                switch key {
+                case "background": config.bar.background = raw
+                case "foreground": config.bar.foreground = raw
+                default: config.bar.active = raw
+                }
+            }
+            if let raw = b["clock_format"] {
+                // A format is a string; a bare `HH:mm` is a TOML time and parses as something
+                // else, so a non-string is named rather than silently kept.
+                if let v = raw.stringValue, !v.trimmingCharacters(in: .whitespaces).isEmpty {
+                    config.bar.clockFormat = v
+                } else {
+                    config.warnings.append("bar.clock_format: must be a format in quotes, using "
+                                           + "\"\(config.bar.clockFormat)\"")
+                }
+            }
             if let v = choice(b["persistent_workspaces"], "bar.persistent_workspaces",
                               among: 0...WorkspaceManager.workspaceCount,
                               keeping: config.bar.persistentWorkspaces, warnings: &config.warnings) {
