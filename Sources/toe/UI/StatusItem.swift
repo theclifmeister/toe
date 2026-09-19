@@ -54,12 +54,9 @@ final class StatusItem: NSObject {
     /// cap height of its neighbours puts it above their tops and below their baseline at once —
     /// which reads as a misalignment however carefully the centring is done.
     private var markHeight: CGFloat { capBox }
-    /// The T's bounding box in `scripts/make-icon.swift` is `tWidth` by `tHeight` of the icon's
-    /// shape, so the mark keeps that proportion here rather than being squared off.
-    private var markWidth: CGFloat { snap(markHeight * 0.52 / 0.60) }
-    /// Half a point, which is a whole pixel on every display toe supports. Strokes two points
-    /// wide have to land on the grid or they render as three grey ones.
-    private func snap(_ value: CGFloat) -> CGFloat { (value * 2).rounded() / 2 }
+    /// The icon's own proportion — see `ToeMark.width(forHeight:)`.
+    private var markWidth: CGFloat { ToeMark.width(forHeight: markHeight) }
+    private func snap(_ value: CGFloat) -> CGFloat { ToeMark.snap(value) }
 
     /// AppKit lands a text attachment's image half a device pixel above the baseline. Measured,
     /// not assumed: without this the mark and the markers rendered with their top and bottom
@@ -85,6 +82,13 @@ final class StatusItem: NSObject {
         item.button?.target = self
         item.button?.action = #selector(buttonClicked(_:))
         item.button?.sendAction(on: [.leftMouseUp])
+    }
+
+    /// Takes the item out of the menu bar. The bar and the item are two drawings of one strip,
+    /// and only one of them is on screen at a time: this is what goes when the bar arrives,
+    /// and a fresh `StatusItem` is what comes back when it is switched off.
+    func remove() {
+        NSStatusBar.system.removeStatusItem(item)
     }
 
     /// Cheap: only the title strip is recomputed, from the little the strip reads.
@@ -185,19 +189,7 @@ final class StatusItem: NSObject {
             : markerSide
     }
 
-    /// toe's own mark: the crossbar and stem of the app icon's T, without the tile under it.
-    ///
-    /// Drawn rather than scaled down from `Toe.icns`, for two reasons. A template image is made
-    /// from its alpha, and the icon's alpha is the whole rounded square — as a menu bar template
-    /// it would be a solid blob. And the proportions here are the icon's own, read off
-    /// `scripts/make-icon.swift`, so the two stay one design rather than two drawings of it.
-    ///
-    /// The gutter goes, as it does in that script under 128px: a gap a quarter of a pixel wide
-    /// is grey mud rather than a seam. The stem thickening that goes with it there does *not*,
-    /// though — it exists to hold the stem up against a crossbar sitting on a tile, and here
-    /// there is no tile and the neighbours are light digits, where a stem half again as wide as
-    /// the crossbar reads as a different weight of type. Dropped, the two strokes come out equal,
-    /// which is what the icon's own proportions ask for at every size that can afford them.
+    /// toe's own mark — `ToeMark`, which says why it is drawn rather than scaled from the icon.
     ///
     /// `labelColor` rather than white, resolved at draw time like the workspace markers: macOS
     /// darkens the menu bar to suit the desktop picture, and a hardcoded white goes invisible
@@ -205,16 +197,7 @@ final class StatusItem: NSObject {
     private func mark() -> NSImage {
         let image = NSImage(size: NSSize(width: markWidth, height: markHeight),
                             flipped: false) { rect in
-            NSColor.labelColor.setFill()
-            let crossbarHeight = self.snap(rect.height * 0.24)
-            let stemWidth = self.snap(rect.width * 0.28)
-            let radius: CGFloat = 0.5
-            let crossbar = NSRect(x: rect.minX, y: rect.maxY - crossbarHeight,
-                                  width: rect.width, height: crossbarHeight)
-            let stem = NSRect(x: self.snap(rect.midX - stemWidth / 2), y: rect.minY,
-                              width: stemWidth, height: rect.height - crossbarHeight)
-            NSBezierPath(roundedRect: crossbar, xRadius: radius, yRadius: radius).fill()
-            NSBezierPath(roundedRect: stem, xRadius: radius, yRadius: radius).fill()
+            ToeMark.draw(in: rect, colour: .labelColor)
             return true
         }
         // Redrawn on every use, so a light/dark switch cannot leave a stale mark behind.

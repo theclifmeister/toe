@@ -58,6 +58,12 @@ public enum CommandLabel {
         // is the thing they went looking for.
         case .installSkill:          return "Install the Claude Code skill"
         case .removeSkill:           return "Remove the Claude Code skill"
+        case .bar(let visibility):
+            switch visibility {
+            case .show:   return "Show the bar"
+            case .hide:   return "Hide the bar"
+            case .toggle: return "Toggle the bar"
+            }
         }
     }
 
