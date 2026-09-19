@@ -5,10 +5,10 @@ A small native macOS tiling window manager. It brings Hyprland's **dwindle** lay
 bindings, a gradient border around the focused window and a quick menu. There is nothing to
 agonise over — that is the opinion, and it is the whole product.
 
-toe draws Omarchy's bar across the top of every display, over the menu bar: the workspace
-strip on the left, the clock in the centre, the network, sound, displays and battery on the
-right. It has no Dock icon and no window of its own, and the only permission it needs is
-Accessibility.
+toe lives in the menu bar as a workspace strip — or, if you ask for it, draws Omarchy's bar
+across the top of every display: the strip on the left, the clock in the centre, the network,
+sound, displays and battery on the right. It has no Dock icon and no window of its own, and the
+only permission it needs is Accessibility.
 
 # Bindings
 <img width="1728" height="1117" alt="image" src="https://github.com/user-attachments/assets/2256d0c4-884f-4af4-a405-51368390425c" />
@@ -102,8 +102,13 @@ sheets, palettes, minimized and native-fullscreen windows are left alone — and
 that goes fullscreen hands its tile to its neighbours until it comes back, rather than leaving
 a hole on the desktop behind it.
 
-**The bar** is Omarchy's, across the top of every display, over the menu bar. On the left,
-toe's `T` and the workspace strip: the workspace you are on as a filled square, every other
+**The menu bar** shows the workspace strip: the workspace you are on as a filled square, every
+other workspace in use as its digit, and workspaces 1–5 always present. Click a workspace to
+switch to it, or the `T` at the front to open the quick menu.
+
+**The bar** is Omarchy's, across the top of every display, over the menu bar — off until you
+turn it on with Setup › Menu bar in the quick menu, or `[bar] enabled = true`. On the left,
+toe's `T` and the same workspace strip: the workspace you are on as a filled square, every other
 workspace in use as its digit, and workspaces 1–5 always present. In the centre, the clock —
 right-click it to walk Omarchy's formats, and the one you land on is kept — with the coffee cup
 beside it while something holds the machine awake (click it to hold it yourself) and the keyboard
@@ -182,7 +187,7 @@ Other sections worth knowing about:
 - `[animations] slide_on_swipe` — slide the screen on a swipe the way Spaces does. Off by
   default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
   menu flips it.
-- `[bar]` — the bar: whether it is drawn at all, its height and font, its three colours (the
+- `[bar]` — the bar: whether it is drawn at all (off by default), its height and font, its three colours (the
   theme's while one is set), the clock's format and whether the battery shows its percentage —
   the last two are also what right-clicking those widgets writes — and `persistent_workspaces`,
   how many workspaces always keep a slot on the strip.

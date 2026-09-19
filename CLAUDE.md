@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A native macOS tiling window manager: a direct port of Hyprland's `CHyprDwindleLayout`, with
 Omarchy's defaults (`preserve_split = true`, `force_split = 2`). It runs as a background agent
-(`.accessory`) with no Dock icon and no main window — Omarchy's bar across the top of every
-display, key bindings and a gradient border around the focused window. Accessibility is the only
+(`.accessory`) with no Dock icon and no main window — a menu bar item or, with `[bar] enabled`,
+Omarchy's bar across the top of every display, key bindings and a gradient border around the
+focused window. Accessibility is the only
 permission it asks for by default; the opt-in `[animations] slide_on_swipe` is the one feature
 behind a second one (Screen Recording — see `ScreenSnapshot`).
 
@@ -175,9 +176,12 @@ that runs on every focus change or stack change is a real cost; put it after the
 
 ## The bar
 
-`BarWindowSet` is one `NSPanel` per `NSScreen` across the top of its frame, one level *above*
-the menu bar — sketchybar's `topmost` — so the bar covers the menu bar rather than replacing it;
-`BarView` draws the items `BarLayout.place` positions, in `draw(_:)` like `MenuView`.
+Off by default — `[bar] enabled = false`, and absent reads as off — because it takes the menu
+bar away from a Mac user who did not ask; on, the `NSStatusItem` is not created and the bar is
+the strip. `BarWindowSet` is one `NSPanel` per `NSScreen` across the top of its frame, one
+level *above* the menu bar — sketchybar's `topmost` — so the bar covers the menu bar rather than
+replacing it; `BarView` draws the items `BarLayout.place` positions, in `draw(_:)` like
+`MenuView`.
 Everything that can be a value is in `ToeCore/Bar/`: `BarItem` is Omarchy's `WidgetButton`,
 `BarMetrics` its `Style.bar` with `[bar] height` as the scale, `BarWidgets` the glyph rule of
 each widget from the numbers a Mac reports, `ClockFormat` the Qt-spelled formats and their
