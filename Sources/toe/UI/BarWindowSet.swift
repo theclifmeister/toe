@@ -19,6 +19,8 @@ final class BarWindowSet {
     var hidden = false
     /// Hands every panel's clicks to one handler, with the display they came from.
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
+    /// The wheel, in whole notches — see `BarView.scrollWheel`.
+    var onScroll: ((BarItem.Kind?, Int) -> Void)?
 
     /// How tall the strip is on `screen`: the configured height, or the menu bar's strip where
     /// that is taller.
@@ -85,6 +87,7 @@ final class BarWindowSet {
         let panel = BarPanel(screen: screen)
         let id = screen.displayID
         panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
+        panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
         panels[id] = panel
         return panel
     }
