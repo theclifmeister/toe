@@ -23,6 +23,10 @@ final class Coordinator: WindowTrackerDelegate {
     /// Omarchy's bar across the top of every display. See `BarWindowSet`.
     private let bar = BarWindowSet()
     private let clock = ClockProvider()
+    /// The right section's readers, started with the bar and stopped with it. Each says when
+    /// what it read changed; `refreshBar` draws the lot. See `BarProvider`.
+    private let power = PowerProvider()
+    private var providers: [BarProvider] { [power] }
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and `usable` reaches the top again, until `bar show` or a relaunch.
     private var barHidden = false
@@ -291,6 +295,7 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
         bar.onClick = { [weak self] display, kind, button in self?.barClicked(kind, button, on: display) }
         clock.onTick = { [weak self] in self?.refreshStatus() }
+        for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
 
         installSignalHandlers()
         // Before the five repairs below, because the copy this replaces writes those journals on
@@ -453,8 +458,7 @@ final class Coordinator: WindowTrackerDelegate {
     }
 
     static func openAccessibilitySettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
+        SettingsPane.accessibility.open()
     }
 
     // MARK: - Config
@@ -1096,9 +1100,11 @@ final class Coordinator: WindowTrackerDelegate {
             }
             MenuBarAutoHide.enable()
             clock.start(format: config.bar.clockFormat)
+            for provider in providers { provider.start() }
         } else {
             MenuBarAutoHide.restore()
             clock.stop()
+            for provider in providers { provider.stop() }
             if status == nil { status = makeStatusItem() }
         }
         bar.enabled = wanted
@@ -1155,6 +1161,16 @@ final class Coordinator: WindowTrackerDelegate {
         }
         items.append(BarItems.clock(ClockFormat.render(config.bar.clockFormat, at: Date())))
 
+        // The right section, in Omarchy's order: tray and agents are not portable and are left
+        // out; bluetooth, network, audio, monitor, power follow.
+        items.append(BarWidgets.monitor(count: NSScreen.screens.count, metrics: metrics))
+        if let battery = power.state {
+            items.append(BarWidgets.power(fraction: battery.fraction, onMains: battery.onMains,
+                                          charging: battery.charging, charged: battery.charged,
+                                          showPercentage: config.bar.batteryPercentage,
+                                          metrics: metrics))
+        }
+
         // Tokyo Night's tokens stand in for a colour that would not parse; the config layer has
         // already named the typo in the tooltip.
         let fallback = BarConfig()
@@ -1183,6 +1199,18 @@ final class Coordinator: WindowTrackerDelegate {
             dispatch(.workspace(.index(index)))
         case (.accessibility, _):
             Self.openAccessibilitySettings()
+        case (.monitor, .left):
+            SettingsPane.displays.open()
+        case (.power, .left):
+            SettingsPane.battery.open()
+        case (.power, .right):
+            // Persisted, as upstream's `togglePercentage` writes it to shell.json: the
+            // percentage you asked for is the percentage from then on.
+            let wanted = !config.bar.batteryPercentage
+            rewriteConfig("battery_percentage", edit: {
+                ConfigWriter.setting("battery_percentage", to: wanted ? "true" : "false",
+                                     inTable: "bar", of: $0)
+            }, verify: { $0.bar.batteryPercentage == wanted })
         case (.clock, .left):
             // "What is the date?" is what a click on a clock means; Omarchy opens its calendar
             // panel, and the Mac has one.
