@@ -23,9 +23,9 @@ public struct BorderConfig: Equatable {
 /// walker's tokens, and for the same reason: choosing Tokyo Night as a theme should change
 /// nothing here, so that a fresh install with no theme at all still looks themed.
 public struct BarConfig: Equatable {
-    /// Whether the bar is drawn at all. On, the macOS menu bar is set to hide and toe's bar takes
-    /// its strip; off, nothing changes from a bar-less toe and the workspace strip goes back to
-    /// being a menu bar item. Absent reads as on.
+    /// Whether the bar is drawn at all. On, toe's bar covers the macOS menu bar; off, nothing
+    /// changes from a bar-less toe and the workspace strip goes back to being a menu bar item.
+    /// Absent reads as on.
     public var enabled: Bool = true
     /// `[bar] size-horizontal`: 26 at Omarchy's 12px base font. Every slot on the bar scales
     /// with it, the way `Style.barToken` scales them with the font — see `BarMetrics`.

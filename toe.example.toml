@@ -227,14 +227,12 @@ allow_exec = false
 allow_quit = false
 
 [bar]
-# Omarchy's bar, across the top of every display in place of the macOS menu bar: the menu and
-# the workspaces on the left, the clock in the centre, and bluetooth, network, audio, displays
-# and power on the right, each a Nerd Font glyph that opens the matching Settings pane. While
-# this is on the system's menu bar is set to hide itself — it still slides in when the pointer
-# reaches the top edge, over the bar, which is how you reach an application's menus — and the
-# tiles start under the bar. SUPER+SHIFT+SPACE hides the bar and gives the tiles its strip back.
-# The setting outlives toe: it is journalled before it is changed and put back at quit, and at
-# the next launch after an unclean exit. Off, the workspace strip is a menu bar item, as before.
+# Omarchy's bar, across the top of every display over the macOS menu bar: the menu and the
+# workspaces on the left, the clock in the centre, and network, audio, displays and power on
+# the right, each a Nerd Font glyph that opens the matching Settings pane. The menu bar stays
+# where it is, covered, and the tiles start under the bar; SUPER+SHIFT+SPACE takes the bar away
+# to show the menu bar — which is how you reach an application's menus by mouse — and again to
+# bring it back. Off, the workspace strip is a menu bar item, as before.
 enabled = true
 # Omarchy's bar is 26 tall at its 12px font, and every slot on it scales with the height —
 # 27 for an icon, 21 for a status indicator, 20 for a workspace — so a taller bar keeps its
@@ -405,7 +403,7 @@ font_size  = 18
 "super-ctrl-space"       = "menu background"
 "super-shift-ctrl-space" = "menu theme"
 # Omarchy's SUPER+SHIFT+SPACE: the bar off and on again without stopping anything. Hidden, the
-# tiles take its strip back; `bar show` and `bar hide` are the one-way spellings.
+# macOS menu bar under it shows; `bar show` and `bar hide` are the one-way spellings.
 "super-shift-space"      = "bar toggle"
 
 # ── Launch ────────────────────────────────────────────────────────────────────

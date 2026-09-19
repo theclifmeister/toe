@@ -67,10 +67,9 @@ public enum Command: Equatable {
     /// Takes that file away again — the Remove level's mirror of the row above, and the same
     /// bounded kind of destructive as `removeTheme`: one path toe wrote, and no other.
     case removeSkill
-    /// Shows or hides the bar — Omarchy's `Super+Shift+Space`. Hidden, the bar's panels park
-    /// off the top edge and the strip they reserved goes back to the tiles, as the exclusive
-    /// zone goes with Omarchy's. The one verb the bar adds: everything else on it is a click
-    /// that opens something, and a Settings pane is not a command.
+    /// Shows or hides the bar — Omarchy's `Super+Shift+Space`. Hidden, the bar's panels go and
+    /// the macOS menu bar they cover is what shows. The one verb the bar adds: everything else
+    /// on it is a click that opens something, and a Settings pane is not a command.
     case bar(BarVisibility)
 }
 
