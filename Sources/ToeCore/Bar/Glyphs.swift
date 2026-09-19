@@ -21,8 +21,6 @@ public enum Glyphs {
 
     // MARK: Indicators — `shell/plugins/bar/indicators/`
 
-    /// `nf-md-coffee`. StayAwake: the idle lock is held off.
-    public static let stayAwake = "\u{F0176}"
     /// `nf-md-bell_off`. Dnd: notifications are silenced — a Focus is on, on a Mac.
     public static let doNotDisturb = "\u{F009B}"
 
@@ -73,7 +71,7 @@ public enum Glyphs {
     /// "unable to type-check this expression in reasonable time" on the CI runner's.
     public static let all: [String] = {
         let rows: [[String]] = [
-            [workspace, stayAwake, doNotDisturb, bluetoothOff, bluetoothOn, bluetoothConnected],
+            [workspace, doNotDisturb, bluetoothOff, bluetoothOn, bluetoothConnected],
             wifi, [wifiRestricted, ethernet, ethernetRestricted, disconnected],
             volume, [muted, headphones, monitor, monitors],
             battery, charging, [batteryFull],

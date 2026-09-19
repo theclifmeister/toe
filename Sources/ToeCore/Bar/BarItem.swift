@@ -24,7 +24,6 @@ public struct BarItem: Equatable, Sendable {
         /// strip to draw without it, and no way to grant it from the bar but a click here —
         /// the menu bar item's `toe !`, moved.
         case accessibility
-        case stayAwake
         case doNotDisturb
         case clock
         case keyboardLayout

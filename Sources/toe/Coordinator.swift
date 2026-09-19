@@ -29,11 +29,7 @@ final class Coordinator: WindowTrackerDelegate {
     private let audio = AudioProvider()
     private let network = NetworkProvider()
     private let keyboard = KeyboardLayoutProvider()
-    private let stayAwake = StayAwakeProvider()
-    private var providers: [BarProvider] { [stayAwake, keyboard, network, audio, power] }
-    /// Whether the pointer is on the bar, which is when the inactive indicators show at 0.45 —
-    /// upstream's centre-section hover, held until the pointer leaves the bar.
-    private var barHovered = false
+    private var providers: [BarProvider] { [keyboard, network, audio, power] }
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and the menu bar under them is what shows, until `bar show` or a relaunch.
     private var barHidden = false
@@ -298,11 +294,6 @@ final class Coordinator: WindowTrackerDelegate {
         workspaces.cursorLocation = { Coordinates.toAX(NSEvent.mouseLocation) }
         bar.onClick = { [weak self] display, kind, button in self?.barClicked(kind, button, on: display) }
         bar.onScroll = { [weak self] kind, steps in self?.barScrolled(kind, steps: steps) }
-        bar.onHover = { [weak self] hovered in
-            guard let self, self.barHovered != hovered else { return }
-            self.barHovered = hovered
-            self.refreshBar()
-        }
         clock.onTick = { [weak self] in self?.refreshStatus() }
         for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
 
@@ -1153,13 +1144,10 @@ final class Coordinator: WindowTrackerDelegate {
         } else {
             items.append(BarItems.accessibility())
         }
-        // The indicators, to the clock's left: the active ones always, the rest while the bar
-        // is hovered. Dnd is not here — the Focus state lives in a database toe cannot read
-        // without Full Disk Access — so it is StayAwake alone in this pass.
-        items.append(BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: stayAwake.active,
-                                        revealed: barHovered,
-                                        tooltip: stayAwake.active ? "Allow display sleep" : "Stay awake",
-                                        metrics: metrics))
+        // No indicators to the clock's left. StayAwake was here and was taken out — a coffee
+        // cup for a `caffeinate` is not what a Mac user is looking for — and Dnd's Focus state
+        // lives in a database toe cannot read without Full Disk Access. `BarItems.indicator`
+        // and its hover reveal stay in ToeCore for the day one comes back.
         items.append(BarItems.clock(ClockFormat.render(config.bar.clockFormat, at: Date())))
         if let layout = keyboard.state {
             items.append(BarItems.keyboardLayout(layout.label, full: layout.name))
@@ -1214,8 +1202,6 @@ final class Coordinator: WindowTrackerDelegate {
             dispatch(.workspace(.index(index)))
         case (.accessibility, _):
             Self.openAccessibilitySettings()
-        case (.stayAwake, .left):
-            stayAwake.toggle()
         case (.keyboardLayout, .left):
             keyboard.selectNext()
         case (.network, .left):

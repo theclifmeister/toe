@@ -3260,10 +3260,10 @@ h.test("the bar lays its three sections out the way Bar.qml does") { t in
 
 h.test("the centre section is built around the clock, so it never moves") { t in
     let m = BarMetrics()
-    let hidden = BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: false, revealed: false,
-                                    tooltip: "Stay Awake", metrics: m)
-    let shown = BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: false, revealed: true,
-                                   tooltip: "Stay Awake", metrics: m)
+    let hidden = BarItems.indicator(.doNotDisturb, glyph: Glyphs.doNotDisturb, on: false, revealed: false,
+                                    tooltip: "Do Not Disturb", metrics: m)
+    let shown = BarItems.indicator(.doNotDisturb, glyph: Glyphs.doNotDisturb, on: false, revealed: true,
+                                   tooltip: "Do Not Disturb", metrics: m)
     let on = BarItems.indicator(.doNotDisturb, glyph: Glyphs.doNotDisturb, on: true, revealed: false,
                                 tooltip: "Allow Notifications", metrics: m)
     let clock = BarItems.clock("14:05")
@@ -3272,25 +3272,30 @@ h.test("the centre section is built around the clock, so it never moves") { t in
         placed.first { $0.item.kind == kind }
     }
 
-    // Not hovered: the inactive indicator takes no room and the active one sits against the
-    // clock; the keyboard layout hangs off the clock's right.
-    let quiet = BarLayout.place([hidden, on, clock, layout], width: 600, metrics: m, measure: barMeasure)
+    // Not hovered: an inactive indicator takes no room; the keyboard layout hangs off the
+    // clock's right.
+    let quiet = BarLayout.place([hidden, clock, layout], width: 600, metrics: m, measure: barMeasure)
     t.equal(find(quiet, .clock)?.midX, 300, "the clock is centred")
     t.equal(find(quiet, .clock)?.width, 53.5, "5 × 7.2 + 2 × 8.75")
-    t.equal(find(quiet, .doNotDisturb)?.maxX, find(quiet, .clock)?.x, "the active indicator ends where the clock begins")
-    t.equal(find(quiet, .doNotDisturb)?.width, 21, "in the status slot")
-    t.equal(find(quiet, .stayAwake)?.width, 0, "the concealed one has no width")
-    t.equal(find(quiet, .stayAwake)?.item.isHidden, true, "and is hidden")
+    t.equal(find(quiet, .doNotDisturb)?.width, 0, "the concealed indicator has no width")
+    t.equal(find(quiet, .doNotDisturb)?.item.isHidden, true, "and is hidden")
     t.equal(find(quiet, .keyboardLayout)?.x, find(quiet, .clock)?.maxX, "the layout starts where the clock ends")
     t.equal(find(quiet, .keyboardLayout)?.width, 24, "2 × 6 caption + 2 × 6 margin, at 10pt")
 
-    // Hovered: the inactive indicator appears at 0.45 and pushes the active one left. The clock
-    // does not move — that is the whole point of the anchor.
-    let hovered = BarLayout.place([shown, on, clock, layout], width: 600, metrics: m, measure: barMeasure)
+    // An active indicator sits against the clock, always.
+    let active = BarLayout.place([on, clock, layout], width: 600, metrics: m, measure: barMeasure)
+    t.equal(find(active, .clock)?.x, find(quiet, .clock)?.x, "the clock has not moved")
+    t.equal(find(active, .doNotDisturb)?.maxX, find(active, .clock)?.x, "the active indicator ends where the clock begins")
+    t.equal(find(active, .doNotDisturb)?.width, 21, "in the status slot")
+    t.equal(find(active, .doNotDisturb)?.item.opacity, 1, "at full opacity")
+
+    // Hovered: an inactive indicator appears at 0.45, and the clock still does not move — that
+    // is the whole point of the anchor.
+    let hovered = BarLayout.place([shown, clock, layout], width: 600, metrics: m, measure: barMeasure)
     t.equal(find(hovered, .clock)?.x, find(quiet, .clock)?.x, "the clock has not moved")
-    t.equal(find(hovered, .stayAwake)?.width, 21, "the revealed indicator has its slot")
-    t.equal(find(hovered, .stayAwake)?.item.opacity, 0.45, "at Omarchy's dimmed opacity")
-    t.equal(find(hovered, .stayAwake)?.maxX, find(hovered, .doNotDisturb)?.x, "to the left of the active one")
+    t.equal(find(hovered, .doNotDisturb)?.width, 21, "the revealed indicator has its slot")
+    t.equal(find(hovered, .doNotDisturb)?.item.opacity, 0.45, "at Omarchy's dimmed opacity")
+    t.equal(find(hovered, .doNotDisturb)?.maxX, find(hovered, .clock)?.x, "against the clock")
 
     // A notched display centres on a point of the caller's choosing.
     let beside = BarLayout.place([clock], width: 600, metrics: m, centre: 200, measure: barMeasure)
@@ -3315,7 +3320,7 @@ h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
             WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
             WorkspaceStrip.State(index: 2, isFocused: false, isVisible: false, isEmpty: true),
         ], persistent: 2), metrics: m)
-        + [BarItems.indicator(.stayAwake, glyph: Glyphs.stayAwake, on: false, revealed: false,
+        + [BarItems.indicator(.doNotDisturb, glyph: Glyphs.doNotDisturb, on: false, revealed: false,
                               tooltip: "", metrics: m),
            BarItems.clock("14:05"),
            BarItems.icon(.power, glyph: Glyphs.battery[9], metrics: m)]
@@ -3361,7 +3366,6 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     // that way. The one worth restating: the square is U+F14FB, the decoded surrogate pair in
     // Workspaces.qml, and not U+F0FB.
     t.equal(Glyphs.workspace.unicodeScalars.first?.value, 0xF14FB, "nf-md-square_rounded")
-    t.equal(Glyphs.stayAwake.unicodeScalars.first?.value, 0xF0176, "StayAwake")
     t.equal(Glyphs.doNotDisturb.unicodeScalars.first?.value, 0xF009B, "Dnd")
     t.equal(Glyphs.wifi.map { $0.unicodeScalars.first!.value },
             [0xF092F, 0xF091F, 0xF0922, 0xF0925, 0xF0928], "the five signal strengths")
@@ -3370,7 +3374,7 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
     t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
             "the old waybar pulseaudio set")
-    t.equal(Glyphs.all.count, 6 + 5 + 4 + 3 + 4 + 10 + 10 + 1, "the coverage list has them all")
+    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1, "the coverage list has them all")
     for glyph in Glyphs.all {
         t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
     }

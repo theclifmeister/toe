@@ -110,9 +110,8 @@ switch to it, or the `T` at the front to open the quick menu.
 turn it on with Setup › Menu bar in the quick menu, or `[bar] enabled = true`. On the left,
 toe's `T` and the same workspace strip: the workspace you are on as a filled square, every other
 workspace in use as its digit, and workspaces 1–5 always present. In the centre, the clock —
-right-click it to walk Omarchy's formats, and the one you land on is kept — with the coffee cup
-beside it while something holds the machine awake (click it to hold it yourself) and the keyboard
-layout when you have more than one. On the right, the network, the sound, the displays and the
+right-click it to walk Omarchy's formats, and the one you land on is kept — with the keyboard
+layout beside it when you have more than one. On the right, the network, the sound, the displays and the
 battery, each a click away from its Settings pane; right-click the sound to mute, scroll it for
 the volume, right-click the battery for the percentage. The macOS menu bar is still there
 underneath: `SUPER` + `SHIFT` + `SPACE` takes the bar away to reach an application's menus, and
