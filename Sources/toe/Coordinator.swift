@@ -1212,9 +1212,26 @@ final class Coordinator: WindowTrackerDelegate {
         case .power:
             guard let battery = power.state else { return nil }
             return PowerPanel.rows(battery)
-        case .audio, .network, .bluetooth, .monitor, .clock:
+        case .monitor:
+            return MonitorPanel.rows(displays())
+        case .audio, .network, .bluetooth, .clock:
             // Each arrives with its own step of #177.
             return nil
+        }
+    }
+
+    /// Every display as the monitor panel lists it. `NSScreen` for the name and the points,
+    /// `CGDisplayCopyDisplayMode` for the refresh rate, which AppkKit does not expose.
+    private func displays() -> [MonitorPanel.Display] {
+        NSScreen.screens.map { screen in
+            let id = screen.displayID
+            return MonitorPanel.Display(
+                id: id, name: screen.localizedName,
+                width: Double(screen.frame.width), height: Double(screen.frame.height),
+                scale: Double(screen.backingScaleFactor),
+                refreshRate: CGDisplayCopyDisplayMode(id)?.refreshRate ?? 0,
+                builtin: CGDisplayIsBuiltin(id) != 0,
+                focused: id == workspaces.focusedMonitorID)
         }
     }
 
@@ -1327,7 +1344,7 @@ final class Coordinator: WindowTrackerDelegate {
         case (.audio, .right):
             audio.toggleMute()
         case (.monitor, .left):
-            SettingsPane.displays.open()
+            openPanel(.monitor, on: display)
         case (.power, .right):
             // Persisted, as upstream's `togglePercentage` writes it to shell.json: the
             // percentage you asked for is the percentage from then on.

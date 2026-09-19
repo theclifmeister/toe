@@ -4021,6 +4021,35 @@ h.test("the power panel says what the battery menu says") { t in
     _ = m
 }
 
+h.test("the monitor panel lists the displays and leads to the Displays pane") { t in
+    let one = MonitorPanel.Display(id: 1, name: "Built-in Retina Display", width: 1728, height: 1117,
+                                   scale: 2, refreshRate: 120, builtin: true, focused: true)
+    let two = MonitorPanel.Display(id: 2, name: "LG UltraFine", width: 2560, height: 1440, scale: 1,
+                                   refreshRate: 59.94)
+    let rows = MonitorPanel.rows([one, two])
+    if case .hero(let glyph, let title, let status, let trailing) = rows[0].kind {
+        t.equal(glyph, Glyphs.monitors, "the widget's two-display glyph")
+        t.equal(title, "Display", "title")
+        t.equal(status, "2 displays", "how many")
+        t.equal(trailing, nil, "nothing to switch — brightness has no public route")
+    } else { t.expect(false, "a hero first") }
+    t.equal(rows[2].kind, .header("Displays", trailing: nil), "then the list")
+    t.equal(rows[3].kind, .pick(glyph: Glyphs.monitor, label: "Built-in Retina Display · focused",
+                                detail: "1728 × 1117 at 2×, 120 Hz", current: true), "the focused one, marked")
+    t.equal(rows[4].kind, .pick(glyph: Glyphs.monitor, label: "LG UltraFine",
+                                detail: "2560 × 1440, 59.94 Hz", current: false), "a 1× external, its rate as given")
+    t.expect(!rows[3].isSelectable, "a display row is told, not pressed: nothing here can switch one off")
+    t.equal(rows.last?.action, .openSettings(.displays), "the door")
+    t.equal(rows.filter(\.isSelectable).count, 1, "and it is the one row the cursor lands on")
+
+    t.equal(MonitorPanel.rows([one])[0].kind,
+            .hero(glyph: Glyphs.monitor, title: "Display", status: "1 display", trailing: nil), "one display")
+    t.equal(MonitorPanel.detail(MonitorPanel.Display(id: 3, name: "x", width: 1920, height: 1080)),
+            "1920 × 1080", "no scale clause at 1×, no rate clause at 0")
+    t.equal(MonitorPanel.detail(MonitorPanel.Display(id: 3, name: "x", width: 1920, height: 1080, scale: 1.5)),
+            "1920 × 1080 at 1.5×", "a fractional scale keeps its fraction")
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in
