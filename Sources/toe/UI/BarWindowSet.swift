@@ -21,6 +21,12 @@ final class BarWindowSet {
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
     /// The wheel, in whole notches — see `BarView.scrollWheel`.
     var onScroll: ((BarItem.Kind?, Int) -> Void)?
+    /// Whether the pointer is on any of the panels. Counted rather than a bool, as upstream's
+    /// `barHoverCount` is: a pointer crossing from one display's bar to another's leaves one
+    /// and enters the other in whichever order the events land, and a single bool would be
+    /// left false by whichever came last.
+    var onHover: ((Bool) -> Void)?
+    private var hoverCount = 0
 
     /// How tall the strip is on `screen`: the configured height, or the menu bar's strip where
     /// that is taller.
@@ -88,6 +94,13 @@ final class BarWindowSet {
         let id = screen.displayID
         panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
         panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
+        panel.onHover = { [weak self] entered in
+            guard let self else { return }
+            let was = self.hoverCount > 0
+            self.hoverCount = max(0, self.hoverCount + (entered ? 1 : -1))
+            let now = self.hoverCount > 0
+            if was != now { self.onHover?(now) }
+        }
         panels[id] = panel
         return panel
     }
