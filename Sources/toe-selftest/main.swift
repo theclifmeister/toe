@@ -3413,7 +3413,8 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
     t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
             "the old waybar pulseaudio set")
-    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1, "the coverage list has them all")
+    t.equal(Glyphs.all.count, 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 3, "the coverage list has them all")
+    t.equal(Glyphs.calendar.unicodeScalars.first!.value, 0xF00ED, "nf-md-calendar, the clock panel's hero")
     for glyph in Glyphs.all {
         t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
     }
@@ -3511,6 +3512,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     foreground = "#ffffff"
     active = "#ff000080"
     clock_format = "HH:mm"
+    week_start = "sunday"
     battery_percentage = true
     menu_bar_peek = false
     persistent_workspaces = 3
@@ -3522,6 +3524,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(set.bar.foreground, "#ffffff", "foreground")
     t.equal(set.bar.active, "#ff000080", "active, with an alpha")
     t.equal(set.bar.clockFormat, "HH:mm", "clock_format")
+    t.equal(set.bar.weekStart, 0, "week_start = \"sunday\"")
     t.equal(set.bar.batteryPercentage, true, "battery_percentage")
     t.equal(set.bar.menuBarPeek, false, "menu_bar_peek")
     t.equal(set.bar.persistentWorkspaces, 3, "persistent_workspaces")
@@ -3535,6 +3538,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     font_size = 100
     background = "black"
     clock_format = 1405
+    week_start = "someday"
     battery_percentage = 1
     menu_bar_peek = "no"
     """)
@@ -3545,9 +3549,10 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(bad.bar.clockFormat, "dddd HH:mm", "a number is not a format")
     t.equal(bad.bar.batteryPercentage, false, "1 is not true")
     t.equal(bad.bar.menuBarPeek, true, "and a word is not false")
+    t.equal(bad.bar.weekStart, 1, "a day that is not one keeps Monday")
     t.equal(Set(bad.warnings.map { $0.split(separator: ":").first.map(String.init) ?? "" }),
             ["bar.enabled", "bar.height", "bar.font_size", "bar.background", "bar.clock_format",
-             "bar.battery_percentage", "bar.menu_bar_peek"],
+             "bar.week_start", "bar.battery_percentage", "bar.menu_bar_peek"],
             "each named")
     t.expect(bad.warnings.contains("bar.enabled: must be true or false, using false"), "in the usual words")
     t.expect(bad.warnings.contains("bar.height: must be a number from 16 to 100, using 26"), "with the range")
@@ -4048,6 +4053,109 @@ h.test("the monitor panel lists the displays and leads to the Displays pane") { 
             "1920 × 1080", "no scale clause at 1×, no rate clause at 0")
     t.equal(MonitorPanel.detail(MonitorPanel.Display(id: 3, name: "x", width: 1920, height: 1080, scale: 1.5)),
             "1920 × 1080 at 1.5×", "a fractional scale keeps its fraction")
+}
+
+h.test("the calendar's month grid is Omarchy's: six weeks, ISO-numbered by their Thursday") { t in
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
+    let september = ClockPanel.View(year: 2026, month: 9)
+    let today = DateComponents(year: 2026, month: 9, day: 19)
+
+    let monday = ClockPanel.monthGrid(september, weekStart: 1, today: today, calendar: cal)
+    t.equal(monday.count, 6, "always six weeks")
+    t.equal(monday.map(\.number), [36, 37, 38, 39, 40, 41], "ISO weeks down the side")
+    t.equal(monday[0].days.map(\.day), [31, 1, 2, 3, 4, 5, 6], "the first row starts on the Monday before the 1st")
+    t.equal(monday[4].days.map(\.day), [28, 29, 30, 1, 2, 3, 4], "and runs into October")
+    t.equal(monday[0].days[0].inMonth, false, "August 31 is not September")
+    t.equal(monday[0].days[1].inMonth, true, "September 1 is")
+    t.equal(monday[2].days[5].today, true, "Saturday the 19th is today")
+    t.equal(monday[2].days[5].weekend, true, "and a weekend")
+    t.equal(monday[2].days[4].weekend, false, "Friday is not")
+    t.equal(monday[0].days.filter(\.today).count, 0, "only one day is today")
+
+    // Sunday start: the rows shift a day, and every row is still numbered by its Thursday.
+    let sunday = ClockPanel.monthGrid(september, weekStart: 0, today: today, calendar: cal)
+    t.equal(sunday[0].days.map(\.day), [30, 31, 1, 2, 3, 4, 5], "from the Sunday before")
+    t.equal(sunday.map(\.number), [36, 37, 38, 39, 40, 41], "the same week numbers")
+
+    // Week 53, and a year boundary in the grid.
+    let january = ClockPanel.monthGrid(ClockPanel.View(year: 2027, month: 1), weekStart: 1,
+                                       today: today, calendar: cal)
+    t.equal(january[0].number, 53, "2026 has a week 53")
+    t.equal(january[0].days.map(\.day), [28, 29, 30, 31, 1, 2, 3], "December's tail")
+    t.equal(january[0].days[4].year, 2027, "the year turns in the row")
+    t.equal(ClockPanel.isoWeek(year: 2024, month: 12, day: 30, calendar: cal), 1, "Dec 30 2024 is week 1 of 2025")
+
+    // Stepping carries the year both ways.
+    t.equal(ClockPanel.step(september, months: 1), ClockPanel.View(year: 2026, month: 10), "one on")
+    t.equal(ClockPanel.step(september, months: 4), ClockPanel.View(year: 2027, month: 1), "into next year")
+    t.equal(ClockPanel.step(september, months: -9), ClockPanel.View(year: 2025, month: 12), "back a year")
+    t.equal(ClockPanel.step(september, months: -12), ClockPanel.View(year: 2025, month: 9), "a year back")
+
+    // The week start, in every spelling Omarchy's coerceWeekStart takes.
+    t.equal(ClockPanel.weekStart("monday"), 1, "a name")
+    t.equal(ClockPanel.weekStart("Sun"), 0, "three letters, any case")
+    t.equal(ClockPanel.weekStart("6"), 6, "a number")
+    t.equal(ClockPanel.weekStart("8"), 1, "wrapped")
+    t.equal(ClockPanel.weekStart("someday"), nil, "nonsense is nil")
+    t.equal(ClockPanel.toggledWeekStart(1), 0, "Monday toggles to Sunday")
+    t.equal(ClockPanel.toggledWeekStart(0), 1, "and back")
+    t.equal(ClockPanel.toggledWeekStart(6), 1, "anything else lands on Monday")
+    t.equal(ClockPanel.weekdayOrder(start: 1), [1, 2, 3, 4, 5, 6, 0], "the week from Monday")
+
+    let en = Locale(identifier: "en_US")
+    t.equal(ClockPanel.weekdayLabels(start: 1, locale: en, calendar: cal), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+            "two-letter headings in the week's order")
+    t.equal(ClockPanel.monthLabel(september, locale: en, calendar: cal), "SEPTEMBER 2026", "the month line")
+    let date = cal.date(from: DateComponents(year: 2026, month: 9, day: 19))!
+    t.equal(ClockPanel.todayLabel(date, locale: en, calendar: cal), "September 19", "the hero, MMMM d")
+
+    // The rows: hero, grid, month line, the door — and the hero is the way home once you leave.
+    let rows = ClockPanel.rows(view: september, weekStart: 1, today: date, locale: en, calendar: cal)
+    t.equal(rows.count, 5, "five rows")
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.calendar, title: "September 19", status: "Today", trailing: nil), "today")
+    t.equal(rows[0].action, .none, "nothing to go back to")
+    t.expect(!rows[0].isSelectable, "so the hero is not a cursor target this month")
+    if case .calendar(let grid) = rows[1].kind {
+        t.equal(grid.weeks, monday, "the grid")
+        t.equal(grid.weekdays.first, "MO", "headed from Monday")
+    } else { t.expect(false, "the grid second") }
+    t.expect(!rows[1].isSelectable, "the grid is looked at, not landed on")
+    t.equal(rows[2].kind, .monthNav("SEPTEMBER 2026"), "the month line")
+    t.equal(rows[2].action, .today, "Return on it is today")
+    t.equal(rows[4].action, .openCalendar, "and the Mac's Calendar is the door")
+
+    let away = ClockPanel.rows(view: ClockPanel.View(year: 2027, month: 3), weekStart: 1, today: date,
+                               locale: en, calendar: cal)
+    t.equal(away[0].action, .today, "stepped away, the hero is the way back")
+    if case .hero(_, _, let status, _) = away[0].kind { t.equal(status, "Back to today", "and says so") }
+}
+
+h.test("the calendar's grid is laid out at Omarchy's cell sizes, with its two click targets") { t in
+    let m = PanelMetrics()
+    let row = Box(x: 16, y: 100, w: 560 - 32, h: 0)
+    let grid = PanelLayout.calendarGrid(inRow: row, m)
+    // 32 + 2 + 14 + 2 + 7 × 52 + 6 × 2 = 426, centred in 528.
+    t.equal(grid.w, 426, "the grid's width")
+    t.equal(grid.x, 16 + 51, "centred in the row")
+    let calendar = PanelRow(.calendar(ClockPanel.Grid(weekdays: [], weeks: [])))
+    t.equal(PanelLayout.rowHeight(calendar, m), 16 + 3 + 6 * 34 + 5 * 2, "heading, gap, six rows")
+    let w = PanelLayout.weekStartCell(inRow: row, m)
+    t.equalBox(w, box(67, 100, 32, 16), "the W over the week column")
+    t.equalBox(PanelLayout.weekdayHeading(0, inRow: row, m), box(67 + 32 + 2 + 14 + 2, 100, 52, 16), "Monday's heading")
+    t.equalBox(PanelLayout.weekNumberCell(1, inRow: row, m), box(67, 100 + 19 + 36, 32, 34), "the second week's number")
+    t.equalBox(PanelLayout.dayCell(week: 1, column: 2, inRow: row, m), box(117 + 54 * 2, 155, 52, 34), "a day cell")
+    t.expect(PanelLayout.calendarHitsWeekStart(at: Point(x: 80, y: 108), inRow: row, m), "a press on the W")
+    t.expect(!PanelLayout.calendarHitsWeekStart(at: Point(x: 200, y: 108), inRow: row, m), "not on a heading")
+    t.expect(!PanelLayout.calendarHitsWeekStart(at: Point(x: 80, y: 150), inRow: row, m), "not on a week number")
+    let line = PanelLayout.calendarGutterLine(inRow: row, m)
+    t.equal(line.y, 119, "the hairline starts under the headings")
+    t.equal(line.w, 1, "and is a hairline")
+
+    let nav = Box(x: 16, y: 400, w: 528, h: 26)
+    t.equal(PanelLayout.monthNavStep(x: 20, inRow: nav, m), -1, "the left chevron")
+    t.equal(PanelLayout.monthNavStep(x: 540, inRow: nav, m), 1, "the right")
+    t.equal(PanelLayout.monthNavStep(x: 280, inRow: nav, m), 0, "the label is today")
 }
 
 // MARK: - The quick menu

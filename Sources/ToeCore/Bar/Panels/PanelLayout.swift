@@ -91,6 +91,17 @@ public struct PanelMetrics: Equatable, Sendable {
     public var glyphSlot: Double { space(22) }
     /// `ensureCursorVisible`'s margin: how close to the edge the cursor's row may scroll.
     public var scrollMargin: Double { space(6) }
+    /// The calendar's grid, `panels/clock/Panel.qml`: a 52 × 34 cell, 2 apart, a 32-wide week
+    /// column, a 14 gutter between it and the days, a 16-tall heading row 3 above the grid.
+    public var calendarCellWidth: Double { space(52) }
+    public var calendarCellHeight: Double { space(34) }
+    public var calendarCellGap: Double { space(2) }
+    public var calendarWeekColumn: Double { space(32) }
+    public var calendarGutter: Double { space(14) }
+    public var calendarHeadingHeight: Double { space(16) }
+    public var calendarHeadingGap: Double { space(3) }
+    /// A chevron's hit zone at either end of the month line.
+    public var monthChevronZone: Double { space(40) }
 }
 
 /// Where everything in a panel sits: the card's own coordinates, origin top-left, y downward,
@@ -137,6 +148,12 @@ public enum PanelLayout {
             return 1
         case .action, .note:
             return m.lineHeight(.body) + m.rowPadding
+        case .calendar:
+            return m.calendarHeadingHeight + m.calendarHeadingGap
+                + m.calendarCellHeight * 6 + m.calendarCellGap * 5
+        case .monthNav:
+            // `monthNav.height`: the label's line plus `space(10)`.
+            return m.lineHeight(.body) + m.rowPadding
         }
     }
 
@@ -152,6 +169,11 @@ public enum PanelLayout {
             return m.space(4)
         case (.pick, .pick), (.slider, .pick), (.pick, .action), (.note, .action):
             return m.listGap
+        case (.hero, .calendar):
+            // The grid sits `space(18)` under the hero's block, past the column's own 8.
+            return m.space(26)
+        case (.calendar, .monthNav):
+            return m.space(8)
         default:
             return m.blockGap
         }
@@ -220,6 +242,68 @@ public enum PanelLayout {
         let track = sliderTrack(inRow: row, m)
         let x = max(track.x, min(track.maxX - m.knobSize, track.x + track.w * value - m.knobSize / 2))
         return Box(x: x, y: track.y + track.h / 2 - m.knobSize / 2, w: m.knobSize, h: m.knobSize)
+    }
+
+    // MARK: - The calendar
+
+    /// The grid's own box inside its row: `calendarWeekColumn + gap + gutter + gap + 7 cells`
+    /// wide, centred, the full row tall.
+    public static func calendarGrid(inRow row: Box, _ m: PanelMetrics) -> Box {
+        let width = m.calendarWeekColumn + m.calendarCellGap + m.calendarGutter + m.calendarCellGap
+            + m.calendarCellWidth * 7 + m.calendarCellGap * 6
+        return Box(x: row.x + ((row.w - width) / 2).rounded(), y: row.y, w: width, h: row.h)
+    }
+
+    /// The `W` heading over the week numbers — the week-start toggle.
+    public static func weekStartCell(inRow row: Box, _ m: PanelMetrics) -> Box {
+        let grid = calendarGrid(inRow: row, m)
+        return Box(x: grid.x, y: grid.y, w: m.calendarWeekColumn, h: m.calendarHeadingHeight)
+    }
+
+    /// The heading over day column `column` (0…6).
+    public static func weekdayHeading(_ column: Int, inRow row: Box, _ m: PanelMetrics) -> Box {
+        let grid = calendarGrid(inRow: row, m)
+        let x = grid.x + m.calendarWeekColumn + m.calendarCellGap + m.calendarGutter + m.calendarCellGap
+            + Double(column) * (m.calendarCellWidth + m.calendarCellGap)
+        return Box(x: x, y: grid.y, w: m.calendarCellWidth, h: m.calendarHeadingHeight)
+    }
+
+    /// The week number beside week `week` (0…5).
+    public static func weekNumberCell(_ week: Int, inRow row: Box, _ m: PanelMetrics) -> Box {
+        let grid = calendarGrid(inRow: row, m)
+        let y = grid.y + m.calendarHeadingHeight + m.calendarHeadingGap
+            + Double(week) * (m.calendarCellHeight + m.calendarCellGap)
+        return Box(x: grid.x, y: y, w: m.calendarWeekColumn, h: m.calendarCellHeight)
+    }
+
+    /// Day `column` of week `week`.
+    public static func dayCell(week: Int, column: Int, inRow row: Box, _ m: PanelMetrics) -> Box {
+        let heading = weekdayHeading(column, inRow: row, m)
+        let number = weekNumberCell(week, inRow: row, m)
+        return Box(x: heading.x, y: number.y, w: m.calendarCellWidth, h: m.calendarCellHeight)
+    }
+
+    /// The hairline down the gutter, beside the day rows only.
+    public static func calendarGutterLine(inRow row: Box, _ m: PanelMetrics) -> Box {
+        let grid = calendarGrid(inRow: row, m)
+        let top = grid.y + m.calendarHeadingHeight + m.calendarHeadingGap
+        return Box(x: grid.x + m.calendarWeekColumn + m.calendarCellGap + (m.calendarGutter / 2).rounded(),
+                   y: top, w: 1, h: grid.maxY - top)
+    }
+
+    /// What a press on the calendar row lands on: the week-start toggle, or nothing — the days
+    /// are looked at, not pressed.
+    public static func calendarHitsWeekStart(at point: Point, inRow row: Box, _ m: PanelMetrics) -> Bool {
+        let cell = weekStartCell(inRow: row, m)
+        return point.x >= cell.x && point.x < cell.maxX && point.y >= cell.y && point.y < cell.maxY
+    }
+
+    /// The month line: −1 in the left chevron's zone, +1 in the right's, 0 on the label —
+    /// which is the way back to today, as the hero is.
+    public static func monthNavStep(x: Double, inRow row: Box, _ m: PanelMetrics) -> Int {
+        if x < row.x + m.monthChevronZone { return -1 }
+        if x >= row.maxX - m.monthChevronZone { return 1 }
+        return 0
     }
 
     // MARK: - Scrolling

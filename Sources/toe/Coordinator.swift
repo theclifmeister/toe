@@ -32,6 +32,10 @@ final class Coordinator: WindowTrackerDelegate {
     private var providers: [BarProvider] { [keyboard, network, audio, power] }
     /// The panel under a widget — one window for all six, see `BarPanelWindow`.
     private let barPanel = BarPanelWindow()
+    /// The month the calendar is showing. Reset to today's every time the clock's panel
+    /// opens: a calendar that opened on the month you left it in last week would read as the
+    /// wrong month.
+    private var calendarView = ClockPanel.View(year: 2000, month: 1)
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and the menu bar under them is what shows, until `bar show` or a relaunch.
     private var barHidden = false
@@ -1214,7 +1218,9 @@ final class Coordinator: WindowTrackerDelegate {
             return PowerPanel.rows(battery)
         case .monitor:
             return MonitorPanel.rows(displays())
-        case .audio, .network, .bluetooth, .clock:
+        case .clock:
+            return ClockPanel.rows(view: calendarView, weekStart: config.bar.weekStart, today: Date())
+        case .audio, .network, .bluetooth:
             // Each arrives with its own step of #177.
             return nil
         }
@@ -1242,6 +1248,10 @@ final class Coordinator: WindowTrackerDelegate {
         if barPanel.isVisible, barPanel.kind == kind, barPanel.displayID == display {
             barPanel.close()
             return
+        }
+        if kind == .clock, barPanel.kind != .clock {
+            let now = ClockPanel.gregorian.dateComponents([.year, .month], from: Date())
+            calendarView = ClockPanel.View(year: now.year ?? 2000, month: now.month ?? 1)
         }
         guard let rows = panelRows(kind), let anchor = bar.anchor(for: kind.widget, on: display) else {
             barPanel.close()
@@ -1287,8 +1297,25 @@ final class Coordinator: WindowTrackerDelegate {
             SettingsPane(pane).open()
         case .toggleOutputMute:
             audio.toggleMute()
+        case .stepMonth(let delta):
+            calendarView = ClockPanel.step(calendarView, months: delta)
+            refreshPanel()
+        case .today:
+            let now = ClockPanel.gregorian.dateComponents([.year, .month], from: Date())
+            calendarView = ClockPanel.View(year: now.year ?? calendarView.year, month: now.month ?? calendarView.month)
+            refreshPanel()
+        case .toggleWeekStart:
+            // Through the file, as the clock's format and the battery's percentage go: the
+            // week the calendar starts on is the week it starts on from then on. The panel
+            // is rebuilt by the reload's `refreshBar`.
+            let next = ClockPanel.weekdayNames[ClockPanel.toggledWeekStart(config.bar.weekStart)]
+            rewriteConfig("week_start", edit: {
+                ConfigWriter.setting("week_start", to: "\"\(next)\"", inTable: "bar", of: $0)
+            }, verify: { ClockPanel.weekdayNames[$0.bar.weekStart] == next })
+        case .openCalendar:
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
         case .toggleInputMute, .pickOutput, .pickInput, .toggleWifi, .toggleBluetooth,
-             .connectBluetooth, .disconnectBluetooth, .stepMonth, .toggleWeekStart, .today:
+             .connectBluetooth, .disconnectBluetooth:
             // Each arrives with its panel's step of #177.
             break
         }
@@ -1354,9 +1381,9 @@ final class Coordinator: WindowTrackerDelegate {
                                      inTable: "bar", of: $0)
             }, verify: { $0.bar.batteryPercentage == wanted })
         case (.clock, .left):
-            // "What is the date?" is what a click on a clock means; Omarchy opens its calendar
-            // panel, and the Mac has one.
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+            // "What is the date?" is what a click on a clock means, and Omarchy's calendar
+            // panel is the answer; the Mac's Calendar is its last row.
+            openPanel(.clock, on: display)
         case (.clock, .right):
             // Applied through the file rather than in memory, as `toggle` applies a switch: the
             // format the bar shows is the format the config stores, so a cycled format is the

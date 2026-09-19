@@ -50,6 +50,11 @@ public struct BarConfig: Equatable {
     /// application's menus have to be reachable by mouse somehow; off for whoever finds the
     /// gesture trips too easily and is content with `bar hide`.
     public var menuBarPeek: Bool = true
+    /// The day the calendar panel's weeks start on, 0 Sunday to 6 Saturday — Omarchy's
+    /// `weekStartDay` on the clock's `shell.json` entry, stored here as the day's name. Monday,
+    /// because the clock's `ww` is the ISO week and ISO weeks start on Monday. The panel's `W`
+    /// heading toggles it and writes it back.
+    public var weekStart: Int = 1
     /// waybar's `persistent-workspaces`: how many workspaces keep a slot whether or not
     /// anything is on them. 0 shows only the ones in use.
     public var persistentWorkspaces: Int = WorkspaceStrip.defaultPersistent
@@ -595,6 +600,14 @@ public struct Config: Equatable {
                 } else {
                     config.warnings.append("bar.clock_format: must be a format in quotes, using "
                                            + "\"\(config.bar.clockFormat)\"")
+                }
+            }
+            if let raw = b["week_start"] {
+                if let v = raw.stringValue.flatMap(ClockPanel.weekStart) {
+                    config.bar.weekStart = v
+                } else {
+                    config.warnings.append("bar.week_start: must be a day's name in quotes, using "
+                                           + "\"\(ClockPanel.weekdayNames[config.bar.weekStart])\"")
                 }
             }
             if let v = choice(b["persistent_workspaces"], "bar.persistent_workspaces",

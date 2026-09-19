@@ -65,6 +65,14 @@ public enum Glyphs {
     /// `nf-md-battery_charging_100`: full, and still plugged in.
     public static let batteryFull = "\u{F0085}"
 
+    // MARK: Panels — `panels/*/Panel.qml`
+
+    /// `nf-md-calendar`: the clock panel's hero.
+    public static let calendar = "\u{F00ED}"
+    /// `nf-md-chevron_left` / `nf-md-chevron_right`: the month stepper.
+    public static let chevronLeft = "\u{F0141}"
+    public static let chevronRight = "\u{F0142}"
+
     /// Every glyph above, flat, for a coverage check to walk — the font is asked once for the
     /// whole set at launch rather than per glyph at draw time. Spelled as one `joined()` over
     /// typed rows rather than a chain of `+`: the chain is fine on a current toolchain and
@@ -75,6 +83,7 @@ public enum Glyphs {
             wifi, [wifiRestricted, ethernet, ethernetRestricted, disconnected],
             volume, [muted, headphones, monitor, monitors],
             battery, charging, [batteryFull],
+            [calendar, chevronLeft, chevronRight],
         ]
         return Array(rows.joined())
     }()

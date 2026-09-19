@@ -62,6 +62,8 @@ public enum PanelAction: Equatable, Sendable {
     case stepMonth(Int)
     case toggleWeekStart
     case today
+    /// The Calendar application — where a click on the clock went before it had a panel.
+    case openCalendar
 
     /// What the action is *about*, so a row can be recognised after its action changed: a
     /// device that connects goes from `connectBluetooth` to `disconnectBluetooth` and is the
@@ -81,6 +83,7 @@ public enum PanelAction: Equatable, Sendable {
         case .stepMonth(let delta):          return "month:\(delta)"
         case .toggleWeekStart:               return "weekstart"
         case .today:                         return "today"
+        case .openCalendar:                  return "calendar"
         }
     }
 }
@@ -140,6 +143,12 @@ public struct PanelRow: Equatable, Sendable {
         case action(String)
         /// A row that explains itself and does nothing: "Bluetooth access was denied".
         case note(String)
+        /// The clock panel's month: weekday headings across the top, six weeks of seven days
+        /// with the ISO week number down the side. Not a cursor target — the `W` heading is
+        /// the week-start toggle, found by `PanelLayout.calendarHit`.
+        case calendar(ClockPanel.Grid)
+        /// The month and year under the grid, with a chevron at each end that steps it.
+        case monthNav(String)
     }
 
     public let kind: Kind

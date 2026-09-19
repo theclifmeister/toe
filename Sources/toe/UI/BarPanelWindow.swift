@@ -162,8 +162,8 @@ final class BarPanelWindow {
             act(state?.activate() ?? .none)
         case 0x7D: move(1)                          // down
         case 0x7E: move(-1)                         // up
-        case 0x7B: act(state?.adjust(by: -1) ?? .none)   // left
-        case 0x7C: act(state?.adjust(by: 1) ?? .none)    // right
+        case 0x7B: sideways(-1)                     // left
+        case 0x7C: sideways(1)                      // right
         case 0x73: state?.moveToTop(); render()     // home
         case 0x77: state?.moveToEnd(); render()     // end
         case 0x30:                                  // tab
@@ -174,8 +174,15 @@ final class BarPanelWindow {
             switch chars {
             case "j": move(1)
             case "k": move(-1)
-            case "h": act(state?.adjust(by: -1) ?? .none)
-            case "l": act(state?.adjust(by: 1) ?? .none)
+            case "h": sideways(-1)
+            case "l": sideways(1)
+            // The calendar's own keys, `onTextKey` in `panels/clock/Panel.qml`.
+            case "[" where kind == .clock: act(.perform(.stepMonth(-1)))
+            case "]" where kind == .clock: act(.perform(.stepMonth(1)))
+            case "{" where kind == .clock: act(.perform(.stepMonth(-12)))
+            case "}" where kind == .clock: act(.perform(.stepMonth(12)))
+            case "t", "T": if kind == .clock { act(.perform(.today)) }
+            case "w", "W": if kind == .clock { act(.perform(.toggleWeekStart)) }
             default: break
             }
         }
@@ -184,6 +191,16 @@ final class BarPanelWindow {
     private func move(_ delta: Int) {
         state?.move(by: delta)
         render()
+    }
+
+    /// ←/→: a slider under the cursor moves; on the calendar the month steps, wherever the
+    /// cursor is, since that is what the arrows mean on a calendar; anywhere else nothing.
+    private func sideways(_ delta: Int) {
+        if state?.selectedRow?.slider != nil {
+            act(state?.adjust(by: delta) ?? .none)
+        } else if kind == .clock {
+            act(.perform(.stepMonth(delta)))
+        }
     }
 
     private func act(_ outcome: PanelOutcome) {
@@ -195,7 +212,10 @@ final class BarPanelWindow {
             // forward, and the card wants to be gone before it does. Everything else — a
             // device picked, a switch thrown — shows its result under the cursor, as the
             // menu's toggles do.
-            if case .openSettings = action { close() }
+            switch action {
+            case .openSettings, .openCalendar: close()
+            default: break
+            }
             onAction?(action)
             render()
         case .slide(let slider, let value):
@@ -232,6 +252,20 @@ final class BarPanelWindow {
                 act(self.state?.activate() ?? .none)
             }
             return
+        }
+        // The calendar's two controls sit on rows the cursor does not land on: the `W`
+        // heading toggles the week start, and the month line's ends step it.
+        if case .calendar = target.kind, button == .left, let style,
+           PanelLayout.calendarHitsWeekStart(at: point, inRow: frames[row], style.metrics) {
+            act(.perform(.toggleWeekStart))
+            return
+        }
+        if case .monthNav = target.kind, button == .left, let style {
+            let step = PanelLayout.monthNavStep(x: point.x, inRow: frames[row], style.metrics)
+            if step != 0 {
+                act(.perform(.stepMonth(step)))
+                return
+            }
         }
         guard target.isSelectable, button == .left else { return }
         self.state?.select(row: row)

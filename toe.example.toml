@@ -258,6 +258,9 @@ battery_percentage = false
 # once the pointer has left the strip and no menu is open. A flick to the top does not count;
 # it has to rest there. Off, the menu bar is reached with SUPER+SHIFT+SPACE alone.
 menu_bar_peek = true
+# The day the clock panel's calendar starts its weeks on — monday, as the ISO week the clock's
+# ww counts does, or sunday. Clicking the W over the week numbers flips it, and writes it here.
+week_start = "monday"
 # waybar's persistent-workspaces: the fewest slots the bar ever has, so a fresh session still
 # shows 1-5, the empty ones dimmed. It is a floor and not a claim on the first five: once five
 # workspaces are in use the padding has nothing left to do, and an empty 4 between a busy 3 and

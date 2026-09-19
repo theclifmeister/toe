@@ -167,6 +167,21 @@ final class PanelView: NSView {
             case .note(let text):
                 draw(text, in: frame.insetBy(dx: CGFloat(m.sliderInset), dy: 0), font: .body,
                      colour: fg.withAlpha(0.6), s)
+
+            case .calendar(let grid):
+                drawCalendar(grid, in: s.frames[index], s)
+
+            case .monthNav(let label):
+                // The label centred and fixed-width, so the chevrons hold still between a
+                // "MAY 2026" and a "SEPTEMBER 2026"; the chevrons at the row's ends.
+                if selected { wash(frame, s) }
+                draw(label, in: frame, font: .body, colour: selected ? st.accent : fg.withAlpha(0.7),
+                     kern: 1, alignment: .center, s)
+                let zone = CGFloat(m.monthChevronZone)
+                draw(Glyphs.chevronLeft, in: NSRect(x: frame.minX, y: frame.minY, width: zone, height: frame.height),
+                     font: .title, colour: colour, alignment: .center, s)
+                draw(Glyphs.chevronRight, in: NSRect(x: frame.maxX - zone, y: frame.minY, width: zone, height: frame.height),
+                     font: .title, colour: colour, alignment: .center, s)
             }
         }
         NSGraphicsContext.restoreGraphicsState()
@@ -216,6 +231,38 @@ final class PanelView: NSView {
         draw(status.uppercased(), in: NSRect(x: textX, y: top + titleHeight + CGFloat(m.space(2)),
                                              width: textWidth, height: statusHeight),
              font: .caption, colour: fg.withAlpha(0.7), bold: true, kern: 1.2, s)
+    }
+
+    /// The month grid: `W` and the weekday headings dim and bold across the top, the ISO week
+    /// numbers dimmer down the side, a hairline down the gutter, and the days — in-month
+    /// days in the foreground, weekends a shade down, the other months' days well down, and
+    /// today outlined rather than filled, "a lit-up block shouts over a grid this quiet".
+    private func drawCalendar(_ grid: ClockPanel.Grid, in row: Box, _ s: PanelSnapshot) {
+        let st = s.style, m = st.metrics, fg = st.foreground
+        draw("W", in: rect(PanelLayout.weekStartCell(inRow: row, m)), font: .caption,
+             colour: fg.withAlpha(0.53), bold: true, kern: 1, alignment: .center, s)
+        for (column, label) in grid.weekdays.enumerated() {
+            draw(label, in: rect(PanelLayout.weekdayHeading(column, inRow: row, m)), font: .caption,
+                 colour: fg.withAlpha(0.66), bold: true, kern: 1, alignment: .center, s)
+        }
+        NSColor(fg.withAlpha(0.1)).setFill()
+        rect(PanelLayout.calendarGutterLine(inRow: row, m)).fill()
+        for (w, week) in grid.weeks.enumerated() {
+            draw(String(week.number), in: rect(PanelLayout.weekNumberCell(w, inRow: row, m)), font: .caption,
+                 colour: fg.withAlpha(0.53), alignment: .center, s)
+            for (column, day) in week.days.enumerated() {
+                let cell = rect(PanelLayout.dayCell(week: w, column: column, inRow: row, m))
+                if day.today {
+                    let outline = NSBezierPath(rect: cell.insetBy(dx: 0.5, dy: 0.5))
+                    outline.lineWidth = 1
+                    NSColor(fg.withAlpha(0.4)).setStroke()
+                    outline.stroke()
+                }
+                let colour = day.inMonth ? (day.weekend ? fg.withAlpha(0.69) : fg) : fg.withAlpha(0.45)
+                draw(String(day.day), in: cell, font: .body, colour: colour, bold: day.today,
+                     alignment: .center, s)
+            }
+        }
     }
 
     /// `ToggleSwitch`, square because the menu's corners are: the track at the normal fill
