@@ -17,6 +17,10 @@ final class BarWindowSet {
     var enabled = false
     /// `bar hide`: the panels are off screen and the strip is the tiles' again, until `bar show`.
     var hidden = false
+    /// `[bar] menu_bar_peek`, handed to every panel — see `BarPanel.peekEnabled`.
+    var peekEnabled = true {
+        didSet { for panel in panels.values { panel.peekEnabled = peekEnabled } }
+    }
     /// The frame of the native-fullscreen window in front, if there is one, in Accessibility
     /// coordinates — `AX.frontmostFullscreenFrame`. A panel whose display it covers is hidden;
     /// the other displays keep theirs. Under *Displays have separate Spaces* — the default —
@@ -90,6 +94,10 @@ final class BarWindowSet {
                 panel.hide()
                 continue
             }
+            // A panel that has stepped aside for the menu bar stays aside until its own
+            // sampling ends the peek and says so through `onPeekChanged`; a redraw meanwhile
+            // — the clock ticking — must not bring it back over the menu the user is in.
+            if panel.isPeeking { continue }
             let height = height(on: screen, metrics: snapshot.metrics)
             if redraw || !panel.panel.isVisible {
                 panel.show(on: screen, height: height, centre: centre(on: screen), snapshot: snapshot)
@@ -102,6 +110,8 @@ final class BarWindowSet {
         let id = screen.displayID
         panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
         panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
+        panel.peekEnabled = peekEnabled
+        panel.onPeekChanged = { [weak self] in self?.refresh(redraw: false) }
         panels[id] = panel
         return panel
     }

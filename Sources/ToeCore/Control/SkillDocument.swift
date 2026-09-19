@@ -160,7 +160,8 @@ public enum SkillDocument {
         - **The bar is not the menu bar.** toe draws Omarchy's bar across the top of every display,
           over the macOS menu bar; the tiles start under the bar. `query state` reports it as
           `bar: visible`, `hidden` (`bar hide` took it away for this run, and the menu bar shows)
-          or `off` (switched off in the config). `bar show|hide|toggle` is the only verb
+          or `off` (switched off in the config). The user reaches the menu bar under it by
+          resting the pointer on the top edge; that peek is not a state the report shows. `bar show|hide|toggle` is the only verb
           for it; everything else on it is a click that opens a Settings pane, and there is no
           command for those.
         - **Never write to a window being dragged.** toe already refuses; a burst of commands

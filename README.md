@@ -114,8 +114,10 @@ right-click it to walk Omarchy's formats, and the one you land on is kept — wi
 layout beside it when you have more than one. On the right, the network, the sound, the displays and the
 battery, each a click away from its Settings pane; right-click the sound to mute, scroll it for
 the volume, right-click the battery for the percentage. The macOS menu bar is still there
-underneath: `SUPER` + `SHIFT` + `SPACE` takes the bar away to reach an application's menus, and
-again to bring it back. Setup › Menu bar in the quick menu switches the bar off for good and
+underneath: rest the pointer against the top edge for a moment and the bar on that display
+steps aside to show it — an application's own menus, by mouse — and comes back once you have
+left the strip and closed the menu (`[bar] menu_bar_peek = false` turns the gesture off).
+`SUPER` + `SHIFT` + `SPACE` takes the bar away outright, and again brings it back. Setup › Menu bar in the quick menu switches the bar off for good and
 puts the strip back in the menu bar as a menu bar item.
 
 **The quick menu** (`SUPER` + `SPACE`) mirrors Omarchy's: Apps, Learn, Style, Setup, Install,

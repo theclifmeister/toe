@@ -3313,6 +3313,45 @@ h.test("the centre section is built around the clock, so it never moves") { t in
             "without a clock the rest is centred as a group")
 }
 
+h.test("the bar steps aside for the menu bar when the pointer rests on the top edge") { t in
+    t.equal(MenuBarPeek.pointer(y: 0, height: 26), .edge, "against the edge")
+    t.equal(MenuBarPeek.pointer(y: 2, height: 26), .edge, "and a resting two points in")
+    t.equal(MenuBarPeek.pointer(y: 2.5, height: 26), .strip, "below that is the strip")
+    t.equal(MenuBarPeek.pointer(y: 25.9, height: 26), .strip, "to its last point")
+    t.equal(MenuBarPeek.pointer(y: 26, height: 26), .away, "then the tiles")
+    t.equal(MenuBarPeek.pointer(y: nil, height: 26), .away, "and another display is away")
+
+    // Sampled on the quarter second — a tick the floating point keeps exact — against a dwell
+    // of 0.3 and a linger of 0.4.
+    var peek = MenuBarPeek()
+    // A flick to the edge that does not stay does nothing.
+    t.equal(peek.sample(.edge, menuOpen: false, at: 0), false, "arriving is not a change")
+    t.equal(peek.sample(.strip, menuOpen: false, at: 0.25), false, "leaving the edge is not either")
+    t.equal(peek.sample(.edge, menuOpen: false, at: 1), false, "back on the edge, the clock restarts")
+    t.equal(peek.sample(.edge, menuOpen: false, at: 1.25), false, "a quarter second in is not the dwell")
+    t.equal(peek.isPeeking, false, "so the bar is still there")
+    // Resting for the dwell is the gesture.
+    t.equal(peek.sample(.edge, menuOpen: false, at: 1.5), true, "half a second in, the bar steps aside")
+    t.equal(peek.isPeeking, true, "peeking")
+    // On the menu bar now; moving along it — or straight down into a menu — keeps the peek.
+    t.equal(peek.sample(.strip, menuOpen: false, at: 2), false, "the pointer on the menu bar keeps it")
+    t.equal(peek.sample(.away, menuOpen: true, at: 2.5), false, "an open menu keeps it, wherever the pointer is")
+    t.equal(peek.sample(.away, menuOpen: true, at: 4), false, "for as long as the menu is open")
+    // The menu closes; the pointer is in the window. The linger, then the bar is back.
+    t.equal(peek.sample(.away, menuOpen: false, at: 4.25), false, "the menu gone, the linger starts")
+    t.equal(peek.sample(.strip, menuOpen: false, at: 4.5), false, "a return to the strip cancels it")
+    t.equal(peek.sample(.away, menuOpen: false, at: 5), false, "and away again starts it over")
+    t.equal(peek.sample(.away, menuOpen: false, at: 5.25), false, "a quarter second is not the linger")
+    t.equal(peek.sample(.away, menuOpen: false, at: 5.5), true, "half a second is")
+    t.equal(peek.isPeeking, false, "the bar is back")
+    // The pointer is at the edge again at once — the clock for the next peek starts fresh.
+    t.equal(peek.sample(.edge, menuOpen: false, at: 5.5), false, "the dwell starts from here")
+    t.equal(peek.sample(.edge, menuOpen: false, at: 6), true, "and lands half a second on")
+    peek.reset()
+    t.equal(peek.isPeeking, false, "reset is the bar showing")
+    t.equal(peek.sample(.edge, menuOpen: false, at: 6.25), false, "with nothing carried over")
+}
+
 h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
     let m = BarMetrics()
     let items = [BarItems.menu(markWidth: 7.2, metrics: m)]
@@ -3454,6 +3493,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(fresh.bar.active, "#f7768e", "and red")
     t.equal(fresh.bar.clockFormat, "dddd HH:mm", "Omarchy's clock format")
     t.equal(fresh.bar.batteryPercentage, false, "no percentage until asked")
+    t.equal(fresh.bar.menuBarPeek, true, "the top edge shows the menu bar")
     t.equal(fresh.bar.persistentWorkspaces, 5, "and the strip's floor is still five")
 
     let shipped = try Config.parse(Config.defaultTOML)
@@ -3472,6 +3512,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     active = "#ff000080"
     clock_format = "HH:mm"
     battery_percentage = true
+    menu_bar_peek = false
     persistent_workspaces = 3
     """)
     t.equal(set.bar.enabled, true, "enabled")
@@ -3482,6 +3523,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(set.bar.active, "#ff000080", "active, with an alpha")
     t.equal(set.bar.clockFormat, "HH:mm", "clock_format")
     t.equal(set.bar.batteryPercentage, true, "battery_percentage")
+    t.equal(set.bar.menuBarPeek, false, "menu_bar_peek")
     t.equal(set.bar.persistentWorkspaces, 3, "persistent_workspaces")
     t.equal(set.warnings, [], "all of it clean")
 
@@ -3494,6 +3536,7 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     background = "black"
     clock_format = 1405
     battery_percentage = 1
+    menu_bar_peek = "no"
     """)
     t.equal(bad.bar.enabled, false, "enabled in quotes is not on")
     t.equal(bad.bar.height, 26, "a height with no room for the type keeps the default")
@@ -3501,9 +3544,10 @@ h.test("[bar] is parsed, range-checked, and off by default") { t in
     t.equal(bad.bar.background, "#1a1b26", "a colour by name is not a colour")
     t.equal(bad.bar.clockFormat, "dddd HH:mm", "a number is not a format")
     t.equal(bad.bar.batteryPercentage, false, "1 is not true")
+    t.equal(bad.bar.menuBarPeek, true, "and a word is not false")
     t.equal(Set(bad.warnings.map { $0.split(separator: ":").first.map(String.init) ?? "" }),
             ["bar.enabled", "bar.height", "bar.font_size", "bar.background", "bar.clock_format",
-             "bar.battery_percentage"],
+             "bar.battery_percentage", "bar.menu_bar_peek"],
             "each named")
     t.expect(bad.warnings.contains("bar.enabled: must be true or false, using false"), "in the usual words")
     t.expect(bad.warnings.contains("bar.height: must be a number from 16 to 100, using 26"), "with the range")

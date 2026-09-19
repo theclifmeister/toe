@@ -201,6 +201,15 @@ Four things to keep straight:
   never learns of a hide made by its own process, so `visibleFrame` stayed stale for the rest
   of the run. Covering it at level 25 has neither problem, and no state that outlives toe.
   The bar is the taller of `[bar] height` and the menu bar's strip, so no line of it shows.
+- **The peek is how the menus are reached by mouse.** `MenuBarPeek` (ToeCore, in the
+  selftest) is auto-hide's gesture with a dwell: the pointer held against the top edge for
+  0.3 s orders that display's panel out, and it comes back 0.4 s after the pointer has left
+  the strip with no menu open. `BarPanel` drives it from a 50 ms timer that runs only while
+  the pointer is on the strip or a peek is on — never a global mouse monitor, which is the
+  cost sketchybar's maintainer measured and refused. "A menu is open" is an on-screen window
+  at `kCGPopUpMenuWindowLevel` (101) in the window list, checked only when the pointer has
+  left mid-peek. `BarWindowSet.refresh` leaves a peeking panel alone, so the clock ticking
+  does not bring the bar back over a menu the user is reading.
 - **The notch.** AppKit keeps every window out of a notched display's top safe area through
   `constrainFrameRect`; `TopStripPanel` overrides it. On that display the bar is the safe
   area's 32 pt tall and the centre section is centred on the right-hand gap beside the notch

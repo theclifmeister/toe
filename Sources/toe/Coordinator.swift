@@ -1101,6 +1101,7 @@ final class Coordinator: WindowTrackerDelegate {
             if status == nil { status = makeStatusItem() }
         }
         bar.enabled = wanted
+        bar.peekEnabled = config.bar.menuBarPeek
         // Told the panels now, not left to `refreshBar`: that returns before it reaches them
         // while the bar is off, which is exactly the moment they have to come down — the
         // first cut left every panel drawn under the menu bar it had just handed back.

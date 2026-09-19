@@ -45,6 +45,11 @@ public struct BarConfig: Equatable {
     /// Whether the power widget prints the percentage beside its glyph. Right-clicking it flips
     /// this and writes it back, as Omarchy's `togglePercentage` does.
     public var batteryPercentage: Bool = false
+    /// Whether holding the pointer against the top edge of a display shows the menu bar under
+    /// the bar there — `MenuBarPeek`. On, because the bar covers the menu bar and an
+    /// application's menus have to be reachable by mouse somehow; off for whoever finds the
+    /// gesture trips too easily and is content with `bar hide`.
+    public var menuBarPeek: Bool = true
     /// waybar's `persistent-workspaces`: how many workspaces keep a slot whether or not
     /// anything is on them. 0 shows only the ones in use.
     public var persistentWorkspaces: Int = WorkspaceStrip.defaultPersistent
@@ -542,15 +547,17 @@ public struct Config: Equatable {
             // Booleans told apart from absent, as `[misc]` does: `enabled = "false"` in quotes is
             // the difference between a bar and a menu bar, and silence about it reads as toe
             // ignoring the file.
-            for (key, path) in [("enabled", "bar.enabled"),
-                                ("battery_percentage", "bar.battery_percentage")] {
+            let flags: [(String, WritableKeyPath<BarConfig, Bool>)] = [
+                ("enabled", \.enabled), ("battery_percentage", \.batteryPercentage),
+                ("menu_bar_peek", \.menuBarPeek),
+            ]
+            for (key, path) in flags {
                 guard let raw = b[key] else { continue }
                 guard let value = raw.boolValue else {
-                    let current = key == "enabled" ? config.bar.enabled : config.bar.batteryPercentage
-                    config.warnings.append("\(path): must be true or false, using \(current)")
+                    config.warnings.append("bar.\(key): must be true or false, using \(config.bar[keyPath: path])")
                     continue
                 }
-                if key == "enabled" { config.bar.enabled = value } else { config.bar.batteryPercentage = value }
+                config.bar[keyPath: path] = value
             }
             // The floor is the bar's own use, not a style: below 16 the 12px body has no line to
             // sit on. The ceiling is generous because the height is what the slots scale with —
