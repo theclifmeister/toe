@@ -4223,6 +4223,50 @@ h.test("the audio panel is the hero's switch, two sliders and the devices") { t 
     t.equal(AudioPanel.volumeName(0.9, muted: true), "Muted", "muted trumps the number")
 }
 
+h.test("the network panel is the connection's switch and numbers, and never a name") { t in
+    let wifi = NetworkPanel.Link(connection: .wifi(strength: 92, restricted: false), wifiPower: true,
+                                 interfaceName: "en0", rssi: -54, noise: -96, band: .ghz5, channel: 48,
+                                 security: "WPA2 Personal", transmitRate: 516, address: "192.168.1.5")
+    let rows = NetworkPanel.rows(wifi)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.wifi[4], title: "Wi-Fi", status: "Connected",
+                                trailing: .toggle(on: true)), "the widget's glyph, the kind of link for a title")
+    t.equal(rows[0].action, .toggleWifi, "the switch is Wi-Fi power")
+    t.equal(rows[2].kind, .info([PanelRow.Info("Signal", "−54 dBm, 92%"), PanelRow.Info("Noise", "−96 dBm")]),
+            "signal and noise")
+    t.equal(rows[3].kind, .info([PanelRow.Info("Channel", "48, 5 GHz"), PanelRow.Info("Rate", "516 Mbit/s")]),
+            "channel with its band, the rate")
+    t.equal(rows[4].kind, .info([PanelRow.Info("Security", "WPA2 Personal"), PanelRow.Info("IP address", "192.168.1.5")]),
+            "security and the address")
+    t.equal(rows[6].kind, .note("Names need Location, which toe does not ask for."),
+            "why there is no name, said once")
+    t.equal(rows.last?.action, .openSettings(.wifi), "the door")
+    t.expect(!rows.contains { if case .pick = $0.kind { return true } else { return false } },
+             "no network list: a scan without Location has no names in it")
+
+    let off = NetworkPanel.Link(connection: .none, wifiPower: false)
+    t.equal(NetworkPanel.rows(off)[0].kind,
+            .hero(glyph: Glyphs.disconnected, title: "Wi-Fi off", status: "Turned off", trailing: .toggle(on: false)),
+            "off: the switch off")
+    t.equal(NetworkPanel.rows(off).count, 3, "hero, separator, door")
+    let searching = NetworkPanel.Link(connection: .none, wifiPower: true)
+    t.equal(NetworkPanel.title(searching), "Not connected", "on and unassociated")
+    let wired = NetworkPanel.Link(connection: .ethernet(restricted: false), wifiPower: true,
+                                  interfaceName: "en5", address: "10.0.0.7")
+    let wiredRows = NetworkPanel.rows(wired)
+    t.equal(wiredRows[0].kind, .hero(glyph: Glyphs.ethernet, title: "Ethernet", status: "Connected",
+                                     trailing: .toggle(on: true)), "wired")
+    t.equal(wiredRows[2].kind, .info([PanelRow.Info("Interface", "en5"), PanelRow.Info("IP address", "10.0.0.7")]),
+            "the interface and its address")
+    t.equal(NetworkPanel.status(NetworkPanel.Link(connection: .wifi(strength: 50, restricted: true), wifiPower: true)),
+            "Limited internet access", "restricted, in the words upstream uses")
+
+    t.equal(NetworkPanel.rateLabel(516), "516 Mbit/s", "megabits")
+    t.equal(NetworkPanel.rateLabel(1000), "1 Gbit/s", "a round gigabit")
+    t.equal(NetworkPanel.rateLabel(2500), "2.5 Gbit/s", "and a half")
+    t.equal(NetworkPanel.rateLabel(0), "—", "nothing")
+    t.equal(NetworkPanel.signalLabel(rssi: -75), "−75 dBm, 50%", "the RSSI and the widget's percentage")
+}
+
 // MARK: - The quick menu
 
 h.test("the filter ranks a prefix above a match buried in the middle") { t in

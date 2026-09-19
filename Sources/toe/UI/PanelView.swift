@@ -165,7 +165,8 @@ final class PanelView: NSView {
                 draw("›", in: box, font: .body, colour: colour, alignment: .right, s)
 
             case .note(let text):
-                draw(text, in: frame.insetBy(dx: CGFloat(m.sliderInset), dy: 0), font: .body,
+                // A hint, at the stats' size and their label's shade: it is context, not a row.
+                draw(text, in: frame.insetBy(dx: CGFloat(m.sliderInset), dy: 0), font: .bodySmall,
                      colour: fg.withAlpha(0.6), s)
 
             case .calendar(let grid):

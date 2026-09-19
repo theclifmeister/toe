@@ -70,20 +70,30 @@ public enum BarWidgets {
     /// the restricted glyphs in `active`, the wired glyph, and the crossed-out one for no
     /// connection at all.
     public static func network(_ connection: Connection, metrics: BarMetrics) -> BarItem {
+        let glyph = networkGlyph(connection)
         switch connection {
         case .wifi(let strength, let restricted):
-            let index = max(0, min(4, Int((Double(strength) / 20).rounded(.up)) - 1))
-            return BarItems.icon(.network, glyph: restricted ? Glyphs.wifiRestricted : Glyphs.wifi[index],
-                                 active: restricted,
+            return BarItems.icon(.network, glyph: glyph, active: restricted,
                                  tooltip: restricted ? "Wi-Fi, limited" : "Wi-Fi, \(strength)%",
                                  metrics: metrics)
         case .ethernet(let restricted):
-            return BarItems.icon(.network, glyph: restricted ? Glyphs.ethernetRestricted : Glyphs.ethernet,
-                                 active: restricted, tooltip: restricted ? "Wired, limited" : "Wired",
-                                 metrics: metrics)
+            return BarItems.icon(.network, glyph: glyph, active: restricted,
+                                 tooltip: restricted ? "Wired, limited" : "Wired", metrics: metrics)
         case .none:
-            return BarItems.icon(.network, glyph: Glyphs.disconnected, tooltip: "No network",
-                                 metrics: metrics)
+            return BarItems.icon(.network, glyph: glyph, tooltip: "No network", metrics: metrics)
+        }
+    }
+
+    /// The glyph alone, for the network panel's hero as well as the widget.
+    public static func networkGlyph(_ connection: Connection) -> String {
+        switch connection {
+        case .wifi(let strength, let restricted):
+            let index = max(0, min(4, Int((Double(strength) / 20).rounded(.up)) - 1))
+            return restricted ? Glyphs.wifiRestricted : Glyphs.wifi[index]
+        case .ethernet(let restricted):
+            return restricted ? Glyphs.ethernetRestricted : Glyphs.ethernet
+        case .none:
+            return Glyphs.disconnected
         }
     }
 

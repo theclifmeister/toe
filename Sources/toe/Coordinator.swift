@@ -1223,7 +1223,9 @@ final class Coordinator: WindowTrackerDelegate {
         case .audio:
             guard let state = audio.state else { return nil }
             return AudioPanel.rows(state)
-        case .network, .bluetooth:
+        case .network:
+            return NetworkPanel.rows(network.link)
+        case .bluetooth:
             // Each arrives with its own step of #177.
             return nil
         }
@@ -1323,7 +1325,9 @@ final class Coordinator: WindowTrackerDelegate {
             }, verify: { ClockPanel.weekdayNames[$0.bar.weekStart] == next })
         case .openCalendar:
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
-        case .toggleWifi, .toggleBluetooth, .connectBluetooth, .disconnectBluetooth:
+        case .toggleWifi:
+            network.toggleWifiPower()
+        case .toggleBluetooth, .connectBluetooth, .disconnectBluetooth:
             // Each arrives with its panel's step of #177.
             break
         }
@@ -1373,7 +1377,7 @@ final class Coordinator: WindowTrackerDelegate {
             // The Settings pane each widget used to open is the panel's last row.
             openPanel(.power, on: display)
         case (.network, .left):
-            SettingsPane.wifi.open()
+            openPanel(.network, on: display)
         case (.audio, .left):
             openPanel(.audio, on: display)
         case (.audio, .right):
