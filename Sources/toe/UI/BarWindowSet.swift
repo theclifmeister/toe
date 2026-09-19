@@ -7,8 +7,8 @@ import ToeCore
 /// Three things decide whether a panel shows, and they are kept apart because they change on
 /// different occasions. `enabled` is `[bar] enabled`, the config; `hidden` is `bar toggle`, the
 /// session; and a display with a native-fullscreen window in front has no bar on it whatever
-/// the other two say (that last one arrives in a later step of #171). `refresh` is the one
-/// place the three are combined.
+/// the other two say — `fullscreen`, per display, the way the border scopes it. `refresh` is
+/// the one place the three are combined.
 final class BarWindowSet {
 
     private var panels: [CGDirectDisplayID: BarPanel] = [:]
@@ -17,6 +17,13 @@ final class BarWindowSet {
     var enabled = false
     /// `bar hide`: the panels are off screen and the strip is the tiles' again, until `bar show`.
     var hidden = false
+    /// The frame of the native-fullscreen window in front, if there is one, in Accessibility
+    /// coordinates — `AX.frontmostFullscreenFrame`. A panel whose display it covers is hidden;
+    /// the other displays keep theirs. Under *Displays have separate Spaces* — the default —
+    /// each display shows its own Space, so "is anything fullscreen" is never the question,
+    /// and a fullscreen Safari on one display says nothing about the bar on another. The panel
+    /// is `.fullScreenAuxiliary` and would otherwise draw straight across the fullscreen Space.
+    var fullscreen: Box?
     /// Hands every panel's clicks to one handler, with the display they came from.
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
     /// The wheel, in whole notches — see `BarView.scrollWheel`.
@@ -82,6 +89,13 @@ final class BarWindowSet {
         }
         for (id, screen) in screens {
             let panel = panels[id] ?? make(for: screen)
+            // The same test the border makes, against the display's frame: a fullscreen window
+            // fills exactly one display, so overlapping its frame is sharing its display.
+            if BorderGeometry.isBehindFullscreen(window: Coordinates.toAX(screen.frame),
+                                                 fullscreen: fullscreen) {
+                panel.hide()
+                continue
+            }
             let height = height(on: screen, metrics: snapshot.metrics)
             if redraw || !panel.panel.isVisible {
                 panel.show(on: screen, height: height, centre: centre(on: screen), snapshot: snapshot)
