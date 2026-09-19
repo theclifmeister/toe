@@ -3974,7 +3974,6 @@ h.test("a card shorter than its rows scrolls to keep the cursor's row in view") 
 }
 
 h.test("the power panel says what the battery menu says") { t in
-    let m = PanelMetrics()
     let b = PowerPanel.Battery(fraction: 0.77, onMains: false, charging: false, charged: false,
                                minutesToEmpty: 134, health: "Good", cycleCount: 312, maximumCapacity: 89)
     let rows = PowerPanel.rows(b)
@@ -4023,7 +4022,6 @@ h.test("the power panel says what the battery menu says") { t in
             "dashes for what the Mac would not say")
     t.equal(PowerPanel.rows(lpm)[3].kind,
             .info([PanelRow.Info("Charge cycles", "—"), PanelRow.Info("Source", "Battery")]), "cycles too")
-    _ = m
 }
 
 h.test("the monitor panel lists the displays and leads to the Displays pane") { t in

@@ -106,10 +106,15 @@ final class AudioProvider: BarProvider {
         set(AudioObjectID(kAudioObjectSystemObject), Self.defaultInput, AudioObjectID(id))
     }
 
+    /// `T` is only ever a `Float32` or a `UInt32` — a plain number the HAL copies — which is
+    /// what the pointer needs and what the generic cannot promise, hence the trivial check.
     private func set<T>(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, _ value: T) {
+        precondition(_isPOD(T.self), "a CoreAudio property is a plain value")
         var value = value
         var address = address
-        AudioObjectSetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout<T>.size), &value)
+        withUnsafeMutablePointer(to: &value) { pointer in
+            _ = AudioObjectSetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout<T>.size), pointer)
+        }
     }
 
     // MARK: - Reading
@@ -234,10 +239,13 @@ final class AudioProvider: BarProvider {
 
     /// One property of a fixed size, or `fallback` when the object has not got it.
     private static func get<T>(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, _ fallback: T) -> T {
+        precondition(_isPOD(T.self), "a CoreAudio property is a plain value")
         var value = fallback
         var size = UInt32(MemoryLayout<T>.size)
         var address = address
-        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return fallback }
-        return value
+        let status = withUnsafeMutablePointer(to: &value) { pointer in
+            AudioObjectGetPropertyData(object, &address, 0, nil, &size, pointer)
+        }
+        return status == noErr ? value : fallback
     }
 }
