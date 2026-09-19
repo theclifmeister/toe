@@ -110,10 +110,17 @@ switch to it, or the `T` at the front to open the quick menu.
 turn it on with Setup › Menu bar in the quick menu, or `[bar] enabled = true`. On the left,
 toe's `T` and the same workspace strip: the workspace you are on as a filled square, every other
 workspace in use as its digit, and workspaces 1–5 always present. In the centre, the clock —
-right-click it to walk Omarchy's formats, and the one you land on is kept — with the keyboard
-layout beside it when you have more than one. On the right, the network, the sound, the displays and the
-battery, each a click away from its Settings pane; right-click the sound to mute, scroll it for
-the volume, right-click the battery for the percentage. The macOS menu bar is still there
+click it for Omarchy's calendar, with the ISO week numbers down the side and the month stepped
+under it; right-click it to walk Omarchy's formats, and the one you land on is kept — with the
+keyboard layout beside it when you have more than one. On the right, Bluetooth, the network,
+the sound, the displays and the battery, each opening Omarchy's panel under it: the sound's
+output and input sliders and device pickers, the paired Bluetooth devices to connect and
+disconnect, the Wi-Fi switch and the connection's numbers, the displays, the battery's time
+and health — and, as every panel's last row, the Mac's own Settings pane. Arrows move, Return
+chooses, Escape closes. Right-click the sound to mute, scroll it for the volume, right-click the
+battery for the percentage. Bluetooth is the one panel that asks for a permission, the first
+time it is opened and never at launch; the network panel does not ask for Location, so it
+shows your connection without its name. The macOS menu bar is still there
 underneath: rest the pointer against the top edge for a moment and the bar on that display
 steps aside to show it — an application's own menus, by mouse — and comes back once you have
 left the strip and closed the menu (`[bar] menu_bar_peek = false` turns the gesture off).
@@ -189,9 +196,10 @@ Other sections worth knowing about:
   default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
   menu flips it.
 - `[bar]` — the bar: whether it is drawn at all (off by default), its height and font, its three colours (the
-  theme's while one is set), the clock's format and whether the battery shows its percentage —
-  the last two are also what right-clicking those widgets writes — and `persistent_workspaces`,
-  how many workspaces always keep a slot on the strip.
+  theme's while one is set), the clock's format, whether the battery shows its percentage and
+  the day the calendar's weeks start on — those three are also what right-clicking the clock and
+  the battery and clicking the calendar's `W` write — and `persistent_workspaces`, how many
+  workspaces always keep a slot on the strip.
 - `[cli]` — the command line below: whether its socket is opened at all, and whether `exec` and
   `quit` may travel over it. Both are refused by default.
 
