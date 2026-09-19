@@ -20,6 +20,10 @@ public struct BarItem: Equatable, Sendable {
     public enum Kind: Hashable, Sendable {
         case menu
         case workspace(Int)
+        /// What stands where the workspaces go until Accessibility is granted: there is no
+        /// strip to draw without it, and no way to grant it from the bar but a click here —
+        /// the menu bar item's `toe !`, moved.
+        case accessibility
         case stayAwake
         case doNotDisturb
         case clock
@@ -171,10 +175,20 @@ public enum BarItems {
     }
 
     /// `menu/BarWidget.qml`: the mark, at a 7.5 margin. toe's T is a path rather than a glyph,
-    /// so `text` is a name the view's measurer answers for with the mark's width.
-    public static func menu(mark: String) -> BarItem {
-        BarItem(kind: .menu, section: .left, text: mark, font: .body,
-                slot: .padded(margin: 7.5), tooltip: "Menu")
+    /// so there is no label to measure: the view says how wide it draws the mark and the slot
+    /// is that plus the margins, which is what `WidgetButton` would have made of a label that
+    /// wide. `text` is empty, and the view draws the mark for the kind.
+    public static func menu(markWidth: Double, metrics: BarMetrics) -> BarItem {
+        BarItem(kind: .menu, section: .left, text: "", font: .body,
+                slot: .fixed(max(12, markWidth + metrics.spaceReal(7.5) * 2)), tooltip: "Menu")
+    }
+
+    /// `toe !` where the strip would be, in `active` — the one thing on the bar that is a
+    /// problem rather than a state, and the colour Omarchy gives a widget calling attention to
+    /// itself. The default margin, since it is a label like the clock.
+    public static func accessibility() -> BarItem {
+        BarItem(kind: .accessibility, section: .left, text: "toe !", font: .body,
+                active: true, tooltip: "toe needs Accessibility permission — click to grant it")
     }
 
     /// `panels/clock/BarWidget.qml`: the label at an 8.75 margin — upstream's number, a hair
