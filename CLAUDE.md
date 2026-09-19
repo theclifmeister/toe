@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A native macOS tiling window manager: a direct port of Hyprland's `CHyprDwindleLayout`, with
 Omarchy's defaults (`preserve_split = true`, `force_split = 2`). It runs as a background agent
-(`.accessory`) with no Dock icon and no main window — a menu bar item, key bindings and a
-gradient border around the focused window. Accessibility is the only permission it asks for by
-default; the opt-in `[animations] slide_on_swipe` is the one feature behind a second one (Screen
-Recording — see `ScreenSnapshot`).
+(`.accessory`) with no Dock icon and no main window — Omarchy's bar across the top of every
+display, key bindings and a gradient border around the focused window. Accessibility is the only
+permission it asks for by default; the opt-in `[animations] slide_on_swipe` is the one feature
+behind a second one (Screen Recording — see `ScreenSnapshot`).
 
 ## Commands
 
@@ -154,13 +154,14 @@ across a fullscreen Space unless something stops it. With *Displays have separat
 macOS default) "is anything fullscreen" is never the right question — scope it to a display.
 
 **State that outlives the process.** Symbolic hotkeys (`CGSSetSymbolicHotKeyEnabled`), the
-wallpaper-click and edge-tiling preferences and the Dock's auto-hide
-(`CoreDockSetAutoHideEnabled`) belong to the window server or the Dock, not to toe, so a `kill -9`
-during development would leave `Ctrl`+`↑` dead — or the Dock hiding itself — with nothing to
-explain why. All four are journalled to `~/.local/state/toe/` *before* the change is made and
-replayed in reverse at startup. If you add another such global toggle, follow that pattern:
-`Journal` is the file, `JournalFormat` its lines, and `StateDirectory.ensure` the only thing that
-makes the directory — and a record that could not be written is a change that is not made.
+wallpaper-click and edge-tiling preferences, the Dock's auto-hide (`CoreDockSetAutoHideEnabled`)
+and the menu bar's (`_HIHideMenuBar`) belong to the window server or the Dock, not to toe, so a
+`kill -9` during development would leave `Ctrl`+`↑` dead — or the Dock and the menu bar hiding
+themselves — with nothing to explain why. All five are journalled to `~/.local/state/toe/`
+*before* the change is made and replayed in reverse at startup. If you add another such global
+toggle, follow that pattern: `Journal` is the file, `JournalFormat` its lines, and
+`StateDirectory.ensure` the only thing that makes the directory — and a record that could not be
+written is a change that is not made.
 `CoreDock*` is also the one place toe reaches a symbol through `dlsym` instead of declaring it:
 unexported from every header, and a link-time dependency on it would turn its removal into a
 launch failure.
@@ -172,6 +173,42 @@ rather than expired by age.
 **AX calls are synchronous and on the main thread**, capped at 250 ms (`axMessagingTimeout`). They
 are not rare — `isManageable` alone is six round trips per candidate window. Adding one to a path
 that runs on every focus change or stack change is a real cost; put it after the cheap conditions.
+
+## The bar
+
+`BarWindowSet` is one `NSPanel` per `NSScreen` across the top of its frame, one level under the
+menu bar; `BarView` draws the items `BarLayout.place` positions, in `draw(_:)` like `MenuView`.
+Everything that can be a value is in `ToeCore/Bar/`: `BarItem` is Omarchy's `WidgetButton`,
+`BarMetrics` its `Style.bar` with `[bar] height` as the scale, `BarWidgets` the glyph rule of
+each widget from the numbers a Mac reports, `ClockFormat` the Qt-spelled formats and their
+`DateFormatter` translation, `Glyphs` the codepoints. The providers in `toe/Bar/Providers/`
+read the system and say when it changed — a listener where one exists, never a poll — and
+`Coordinator.refreshBar` assembles a `BarSnapshot` on every `refreshStatus`.
+
+Four things to keep straight:
+
+- **The exclusive zone is `usable`.** `refreshMonitors` reserves the bar's strip from the
+  display's *frame* (`Monitor.reserving(top:)`), and nothing downstream knows the bar exists.
+  `bar hide` gives the strip back by the same route.
+- **The menu bar's auto-hide is journalled** (`MenuBarAutoHide`, on `WallpaperClick`'s template)
+  and `NSScreen` never learns of a hide made by its own process: `visibleFrame` stayed 33
+  points short for the rest of the run, in both directions, while an external flip updated it.
+  So `refreshMonitors` puts the top edge where the *preference* says it is (`isHidden`,
+  `Monitor.settingTop`) and remembers the menu bar's strip per display for the flip back. Do
+  not go back to trusting `visibleFrame` there.
+- **The notch.** AppKit keeps every window out of a notched display's top safe area through
+  `constrainFrameRect`; `TopStripPanel` overrides it. On that display the bar is the safe
+  area's 32 pt tall and the centre section is centred on the right-hand gap beside the notch
+  (`BarWindowSet.centre(on:)`) — a clock under the camera housing is in the framebuffer and not
+  on the glass.
+- **Fullscreen is scoped per display**, as the border scopes it: `BarWindowSet.fullscreen` is
+  the frontmost fullscreen window's frame, and only the panel on the display it overlaps
+  hides. Read where `updateBorder` already reads it, and on its own at the start of a Space
+  change and the end of the settle.
+
+Two widgets wait on a permission toe does not ask for: Bluetooth needs the Bluetooth TCC grant
+through IOBluetooth, and the Focus state (Dnd) lives in a Full-Disk-Access-protected database.
+The glyph rule for the first is in `BarWidgets`; neither has a provider.
 
 ## The control socket
 
