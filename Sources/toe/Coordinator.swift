@@ -27,7 +27,8 @@ final class Coordinator: WindowTrackerDelegate {
     /// what it read changed; `refreshBar` draws the lot. See `BarProvider`.
     private let power = PowerProvider()
     private let audio = AudioProvider()
-    private var providers: [BarProvider] { [audio, power] }
+    private let network = NetworkProvider()
+    private var providers: [BarProvider] { [network, audio, power] }
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and `usable` reaches the top again, until `bar show` or a relaunch.
     private var barHidden = false
@@ -1165,6 +1166,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         // The right section, in Omarchy's order: tray and agents are not portable and are left
         // out; bluetooth, network, audio, monitor, power follow.
+        items.append(BarWidgets.network(network.connection, metrics: metrics))
         if let output = audio.state {
             items.append(BarWidgets.audio(volume: output.volume, muted: output.muted,
                                           headphones: output.headphones, metrics: metrics))
@@ -1211,6 +1213,8 @@ final class Coordinator: WindowTrackerDelegate {
             dispatch(.workspace(.index(index)))
         case (.accessibility, _):
             Self.openAccessibilitySettings()
+        case (.network, .left):
+            SettingsPane.wifi.open()
         case (.audio, .left):
             SettingsPane.sound.open()
         case (.audio, .right):
