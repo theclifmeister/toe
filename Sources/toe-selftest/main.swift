@@ -3219,7 +3219,7 @@ h.test("the bar's slots and margins are Omarchy's, and scale with the height") {
 h.test("the bar lays its three sections out the way Bar.qml does") { t in
     let m = BarMetrics()
     let items: [BarItem] = [
-        BarItems.menu(mark: "T"),
+        BarItems.menu(markWidth: 7.2, metrics: m),
     ] + BarItems.workspaces(WorkspaceStrip.items(for: [
         WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
         WorkspaceStrip.State(index: 2, isFocused: false, isVisible: false, isEmpty: true),
@@ -3233,7 +3233,8 @@ h.test("the bar lays its three sections out the way Bar.qml does") { t in
 
     // Left: 8 in, then the mark's slot (7.2 + 2 × 7.5 = 22.2), then 20-wide workspaces 1 apart.
     t.equal(at(.menu)?.x, 8, "the left row starts at the edge margin")
-    t.equal(at(.menu)?.width, 22.2, "the mark at a 7.5 margin")
+    t.near(at(.menu)?.width, 22.2, "the mark at a 7.5 margin")
+    t.equal(at(.menu)?.labelWidth, 0, "with nothing to measure — the view draws the mark")
     t.equal(at(.workspace(1))?.x, 30.2, "the strip follows the mark with no spacing")
     t.equal(at(.workspace(1))?.width, 20, "in 20 slots")
     t.equal(at(.workspace(2))?.x, 51.2, "one apart")
@@ -3309,7 +3310,7 @@ h.test("the centre section is built around the clock, so it never moves") { t in
 
 h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
     let m = BarMetrics()
-    let items = [BarItems.menu(mark: "T")]
+    let items = [BarItems.menu(markWidth: 7.2, metrics: m)]
         + BarItems.workspaces(WorkspaceStrip.items(for: [
             WorkspaceStrip.State(index: 1, isFocused: true, isVisible: true, isEmpty: false),
             WorkspaceStrip.State(index: 2, isFocused: false, isVisible: false, isEmpty: true),
@@ -3324,7 +3325,7 @@ h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
     t.equal(hit(4), nil, "the edge margin is bare bar")
     t.equal(hit(8), .menu, "the mark, from its first point")
     t.equal(hit(30.1), .menu, "to its last")
-    t.equal(hit(30.2), .workspace(1), "then the first workspace")
+    t.equal(hit(30.3), .workspace(1), "then the first workspace")
     t.equal(hit(50.5), nil, "the one-point gap between workspaces is dead, as upstream's is")
     t.equal(hit(60), .workspace(2), "the second")
     t.equal(hit(200), .clock, "the clock in the middle")
@@ -3555,6 +3556,12 @@ h.test("a monitor reserves the bar's strip from the top of its frame") { t in
     // A second display to the right, at its own origin.
     let right = Monitor(id: 2, frame: box(1512, -100, 1920, 1080), usable: box(1512, -100, 1920, 1080))
     t.equalBox(right.reserving(top: 26).usable, box(1512, -74, 1920, 1054), "from that display's own top")
+
+    // `settingTop` is the other half: the caller putting the top edge where it knows it is.
+    t.equalBox(menuBar.settingTop(0).usable, box(0, 0, 1512, 982), "the menu bar's strip handed back")
+    t.equalBox(menuBar.settingTop(0).reserving(top: 26).usable, box(0, 26, 1512, 956), "and then the bar's taken")
+    t.equalBox(dock.settingTop(32).usable, box(0, 32, 1512, 868), "the bottom edge stays the Dock's")
+    t.equalBox(full.settingTop(5000).usable, box(0, 5000, 1512, 0), "and below the bottom is nothing, not less")
 
     t.equal(full.reserving(top: 0), full, "nothing reserved is the same monitor")
     t.equal(full.reserving(top: -5), full, "and a negative strip is not a bigger screen")

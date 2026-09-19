@@ -27,6 +27,17 @@ public struct Monitor: Equatable, Sendable {
     /// downstream changes: the layout, the floats, the stash corner and the quick menu all key
     /// off `usable` already, which is the whole reason the zone is expressed here.
     ///
+    /// The same display with `usable` starting at `y`, whatever it started at before — the
+    /// bottom edge stays where it is. For the caller that knows better than `visibleFrame`
+    /// where the top strip ends: `NSScreen` does not learn that its own process hid the menu
+    /// bar, so with the menu bar hidden the strip it keeps reserving is put back by hand, and
+    /// then the bar's own strip is taken with `reserving(top:)`. A `y` below the bottom leaves
+    /// a zero-height `usable`.
+    public func settingTop(_ y: Double) -> Monitor {
+        let bottom = max(y, usable.maxY)
+        return Monitor(id: id, frame: frame, usable: Box(x: usable.x, y: y, w: usable.w, h: bottom - y))
+    }
+
     /// A strip taller than the display leaves a zero-height `usable` rather than a negative one.
     public func reserving(top height: Double) -> Monitor {
         guard height > 0 else { return self }
