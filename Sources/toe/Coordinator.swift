@@ -3042,6 +3042,31 @@ final class Coordinator: WindowTrackerDelegate {
             workspaces.workspaces[index]?.layout.swapSplit(id)
             apply(refocus: false)
 
+        case .fullscreen:
+            // The window in front is asked first, and not `workspaces.focusedWindow`. While a
+            // fullscreen window holds the focus the tree's focus names a tile *behind* it — the
+            // trap `suspendedByFullscreen` exists for — and the window the user is actually
+            // looking at is on no workspace at all: `isManageable` turned it away or `Presence`
+            // suspended it. The frontmost application's focused window is the one the green
+            // button would act on, and when it is fullscreen this press is the way out of it.
+            // Two Accessibility round trips on a keypress, which is what a keypress may cost.
+            //
+            // Read at the press and never remembered: a fullscreen transition reads as both on
+            // the way through (`Presence.Watch`), and a second press during the animation has
+            // to write the opposite of what the window says *now*, not of what the last press
+            // asked for — or the two presses agree and the window ends up where it started.
+            if let front = AX.frontmostFocusedWindow, front.isFullscreen {
+                setFullscreen(false, on: front, id: front.windowID)
+                return
+            }
+            // Otherwise the tile the border is round. Not the frontmost application's window
+            // again: with the Finder in front and no window open, or an accessory in front, the
+            // window with the border is still the one `SUPER`+`F` means. A float goes the same
+            // way and comes back a float, at its frame — `Presence` assesses tiles only, so it
+            // never leaves the workspace and nothing tiles it on the way back.
+            guard let id = workspaces.focusedWindow, let window = tracker.window(id) else { return }
+            setFullscreen(!window.element.isFullscreen, on: window.element, id: id)
+
         case .resizeActive(let dx, let dy), .growActive(let dx, let dy):
             // A float grows in place and `apply` writes the new frame the way it writes any
             // floating one — on a real difference, outside `desired`.
@@ -3362,9 +3387,35 @@ extension Coordinator {
         case .resizeActive(let dx, let dy):
             if workspaces.resizeWindow(id, dx: dx, dy: dy) { apply(refocus: false) }
 
+        case .fullscreen:
+            // By id there is no "window in front" question: the tracker keeps a suspended window
+            // — `suspend` takes it out of the tree, not out of `tracker.windows` — so a caller
+            // that read a window as `hidden` in `query state` can name it here and bring it back.
+            guard let window = tracker.window(id) else { return }
+            setFullscreen(!window.element.isFullscreen, on: window.element, id: id)
+
         default:
             break
         }
+    }
+
+    /// Writes `AXFullScreen` on a window, or says in the log why it did not. Everything after
+    /// the write is #147's: the window leaving for its own Space is what `checkPresence` reads
+    /// as away and `WorkspaceManager.suspend` answers, and its return is `resume`. There is
+    /// deliberately nothing here about the tile — no `desired` entry dropped, no `apply` — so
+    /// that the key does exactly what the green button does and the one machinery covers both.
+    private func setFullscreen(_ on: Bool, on element: AXUIElement, id: WindowID?) {
+        // Never a window the user has hold of, like every other write toe makes. A fullscreen
+        // window cannot be dragged, so in practice this guards the way in.
+        if let id, id == draggedWindow { return }
+        let name = id.map { "window \($0)" } ?? "the window in front"
+        guard element.setFullscreen(on) else {
+            // A sheet, a palette, an application that opted out — nothing to fall back to. The
+            // maximise-in-the-gaps that Omarchy puts on SUPER+ALT+F is a different feature.
+            Log.info("fullscreen: \(name) will not \(on ? "enter" : "leave") fullscreen — AXFullScreen is not settable on it")
+            return
+        }
+        Log.info("fullscreen: \(name) \(on ? "is going fullscreen — its tile goes to its neighbours until it is back" : "is coming back from fullscreen")")
     }
 
     private func focus(selector: String?) -> Data {

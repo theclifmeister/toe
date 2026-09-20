@@ -96,6 +96,7 @@ leaves ⌘S, ⌘F, ⌘T, ⌘W, ⌘1-9 and ⌘Tab untouched.
 | `SUPER` + `-` / `=` | Make the window 100 pt narrower / wider |
 | `SUPER` + `SHIFT` + `-` / `=` | Make it 100 pt shorter / taller |
 | `SUPER` + `T` | Cycle floating: 70×80% of the display, 80×90%, back to tiling |
+| `SUPER` + `F` | Native fullscreen — its neighbours take the tile; again to come back |
 | `SUPER` + `SPACE` | The quick menu |
 | `SUPER` + `SHIFT` + `SPACE` | Hide the bar to see the Mac's menu bar; again to bring it back |
 | `SUPER` + `CTRL` + `SPACE` | The background picker, when the theme has pictures |

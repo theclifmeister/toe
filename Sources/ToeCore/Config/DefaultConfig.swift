@@ -370,9 +370,14 @@ font_size  = 18
 "super-ctrl-shift-right" = "swapworkspace right"
 
 # ── Windows ───────────────────────────────────────────────────────────────────
+# fullscreen is the green button: the window takes a Space of its own and its tile goes to its
+# neighbours until it is back. The same key on a fullscreen window brings it back to that tile.
+# Omarchy's fullscreen, 0; there is no fullscreen, 1 — that is macOS's zoom, and a tile has no
+# use for it.
 "super-w"       = "killactive"
 "super-j"       = "togglesplit"
 "super-t"       = "togglefloating"
+"super-f"       = "fullscreen"
 
 # ── Resize — SUPER + - / =, SHIFT for the vertical axis ───────────────────────
 # growactive: the number is how much the focused window grows, whichever side of its split it

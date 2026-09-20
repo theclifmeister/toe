@@ -60,12 +60,19 @@ enum AX {
     /// `frame` is only read once `isFullscreen` says yes, so the common answer still costs the
     /// two Accessibility round trips it always did rather than four.
     static var frontmostFullscreenFrame: Box? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let element = application(app.processIdentifier)
-        guard let focused = element.elementValue(kAXFocusedWindowAttribute),
-              focused.isFullscreen
-        else { return nil }
+        guard let focused = frontmostFocusedWindow, focused.isFullscreen else { return nil }
         return focused.frame
+    }
+
+    /// The frontmost application's focused window, whatever it is — one round trip, and the
+    /// element rather than an answer about it, so the caller can read what it needs and no
+    /// more. The route `frontmostFullscreenFrame` takes to the fullscreen window the tracker
+    /// does not hold, opened up for `fullscreen`, which has to *write* to that same window: a
+    /// `SUPER`+`F` on a fullscreen window is the way out of it, and `workspaces.focusedWindow`
+    /// names a tile behind it that must not be touched.
+    static var frontmostFocusedWindow: AXUIElement? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        return application(app.processIdentifier).elementValue(kAXFocusedWindowAttribute)
     }
 }
 
@@ -177,6 +184,21 @@ extension AXUIElement {
 
     var isMinimized: Bool { bool(kAXMinimizedAttribute) ?? false }
     var isFullscreen: Bool { bool("AXFullScreen") ?? false }
+
+    /// The green button, from the outside: writes `AXFullScreen`, and macOS does the rest — the
+    /// window takes a Space of its own, or gives it back — exactly as if the button had been
+    /// clicked, which is why nothing else in toe has to be told. False when the window will not
+    /// take it: a sheet, a palette, an application that opted out of fullscreen, and — the case
+    /// worth naming — a window whose application answers `AXUIElementSetAttributeValue` with
+    /// success and then does nothing, which is why the attribute is asked whether it is settable
+    /// first rather than the write's return trusted on its own.
+    ///
+    /// Not `kAXFullScreenAttribute`: there is no such constant in the headers. The string is the
+    /// one AppKit registers for `NSWindow`, and it is the one `isFullscreen` has read all along.
+    func setFullscreen(_ on: Bool) -> Bool {
+        guard isSettable("AXFullScreen") else { return false }
+        return set("AXFullScreen", on ? kCFBooleanTrue : kCFBooleanFalse)
+    }
 }
 
 /// AX (top-left origin, y down) ↔ Cocoa (bottom-left origin, y up).

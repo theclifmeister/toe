@@ -2427,7 +2427,7 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     let shipped = try Config.parse(Config.defaultTOML)
     for command in [Command.quit, .reload, .menu(.background), .menu(.theme),
                     .growActive(dx: 100, dy: 0), .growActive(dx: 0, dy: 100),
-                    .swapWorkspace(-1), .swapWorkspace(1)] {
+                    .swapWorkspace(-1), .swapWorkspace(1), .fullscreen] {
         t.equal(shipped.bindings.filter { $0.command == command }.count, 1,
                 "the shipped config binds \(command) exactly once")
     }
@@ -2494,6 +2494,20 @@ h.test("the escape hatches are bound even when the config forgets them") { t in
     let window = try Config.parse("[binds]\n\"super-shift-left\" = \"swapwindow l\"\n")
     t.equal(binding(window, .swapWorkspace(-1))?.source, "super-ctrl-shift-left",
             "swapwindow is not swapworkspace and does not stand it aside")
+
+    // `fullscreen`, on the same reachability bar: the menu does not carry it and there was no
+    // verb before it, so a config written before it had no route to the feature. Omarchy's key.
+    t.equal(binding(old, .fullscreen)?.source, "super-f",
+            "a config written before the verb existed still gets SUPER+F")
+    // Plain equality stands it aside — the verb takes no argument, so there is nothing to widen.
+    let elsewhere = try Config.parse("[binds]\n\"super-shift-f\" = \"fullscreen\"\n")
+    t.equal(binding(elsewhere, .fullscreen)?.source, "super-shift-f", "bound elsewhere, your key wins")
+    t.equal(elsewhere.bindings.filter { $0.command == .fullscreen }.count, 1, "and it is not bound twice")
+    // A SUPER+F already doing something else keeps doing it, and the fallback is dropped rather
+    // than registered on top.
+    let claimed = try Config.parse("[binds]\n\"super-f\" = \"togglefloating\"\n")
+    t.equal(binding(claimed, .toggleFloating)?.source, "super-f", "SUPER+F stays yours")
+    t.equal(binding(claimed, .fullscreen), nil, "and is not given fullscreen on top")
 }
 
 h.test("nan and infinity are refused rather than reaching the layout") { t in
@@ -5147,6 +5161,21 @@ h.test("the keybindings page is every binding, in the config's own order") { t i
     let launch = firstRow { $0.hasPrefix("Run ") }
     t.expect(workspace ?? 0 < quit ?? 0, "the workspaces come before what toe does to itself")
     t.expect(quit ?? 0 < launch ?? 0, "and the exec bindings are last, being the ones you replace")
+    // `fullscreen` is a window verb and sits with them: after the workspaces, in the same rank
+    // as SUPER+W and SUPER+T, before what toe does to itself. Inside the rank the order is the
+    // parser's, which is the binding string's — so F lands before J, T and W, and the test asks
+    // for the rank rather than a place in it.
+    let fullscreen = firstRow { $0 == "Fullscreen" }
+    t.expect(fullscreen != nil, "the shipped SUPER+F is on the page")
+    t.expect(workspace ?? 0 < fullscreen ?? 0, "after the workspaces, with the window verbs")
+    t.expect(fullscreen ?? 0 < quit ?? 0, "not down with what toe does to itself")
+    let windowRows = rows.indices.filter { i in
+        ["Close window", "Cycle floating", "Toggle split orientation", "Fullscreen"].contains(rows[i].value ?? "")
+            || (rows[i].value ?? "").hasPrefix("Make the window")
+    }
+    t.equal(windowRows.count, 8, "the eight shipped window keys — W, J, T, F and the four resizes")
+    t.equal(windowRows.last! - windowRows.first! + 1, windowRows.count,
+            "are one unbroken run: fullscreen is in the rank, not ranked on its own")
 
     let again = MenuModel.keybindings(c.bindings, superKey: c.superKey)
     t.equal(again.map(\.title), rows.map(\.title), "the order is the same twice running")
@@ -5170,7 +5199,7 @@ h.test("every command has a label a reader could use") { t in
         .workspace(.index(3)), .workspace(.next), .workspace(.previous), .workspace(.former),
         .moveToWorkspace(5, follow: true), .moveToWorkspace(5, follow: false),
         .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive(dx: 100, dy: 0),
-        .growActive(dx: 100, dy: 0),
+        .growActive(dx: 100, dy: 0), .fullscreen,
         .exec("open -a Safari"), .reload, .quit,
         .menu(.root), .menu(.keybindings), .menu(.theme), .menu(.background),
         .theme("gruvbox"), .theme(""), .removeTheme("gruvbox"),
@@ -5402,6 +5431,27 @@ h.test("swapworkspace parses the strip's own two directions") { t in
     t.expect((try? CommandParser.parse("swapworkspace up")) == nil, "the strip has no up")
     t.equal(CommandLabel.describe(.swapWorkspace(-1)),
             "Swap this workspace with the one to its left", "and the keybindings page says so")
+}
+
+h.test("fullscreen is one verb both ways, and Omarchy's mode 0") { t in
+    t.equal(try CommandParser.parse("fullscreen"), .fullscreen, "the bare word")
+    t.equal(try CommandParser.parse("fullscreen, 0"), .fullscreen,
+            "and Hyprland's `fullscreen, 0`, so an Omarchy binding reads across unchanged")
+    t.equal(try CommandParser.parse("fullscreen 0"), .fullscreen, "with or without the comma")
+    t.expect((try? CommandParser.parse("fullscreen 1")) == nil,
+             "mode 1 is maximise, which toe has not got — a bad argument, not silently the wrong thing")
+    t.expect((try? CommandParser.parse("fullscreen on")) == nil, "and it is not a switch: the window decides which way")
+    t.equal(CommandLabel.describe(.fullscreen), "Fullscreen", "the keybindings row")
+    t.equal(Command.fullscreen.suspendedByFullscreen, false,
+            "a fullscreen window does not suspend it — it is the way out")
+    t.equal(Command.fullscreen.acceptsTarget, true,
+            "and it means the same thing pointed at any window, so --window may name one")
+    t.equal(Command.fullscreen.keepsMenuOpen, false, "the menu closes on it")
+    t.equal(CommandCatalogue.gate(.fullscreen), nil, "and the socket lets it through")
+    let row = CommandCatalogue.entries.first { $0.verb == "fullscreen" }
+    t.expect(row != nil, "it is catalogued")
+    t.equal(row?.takesWindow, true, "with the --window column computed from acceptsTarget")
+    t.equal(row?.argument, nil, "and no argument to type")
 }
 
 h.test("resizeactive takes Hyprland's two numbers and nothing else") { t in
