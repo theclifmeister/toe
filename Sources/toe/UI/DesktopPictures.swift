@@ -20,10 +20,32 @@ import ToeCore
 /// `CGImageSourceCreateThumbnailAtIndex` at half the display's pixels, for `wallpaperScale`'s
 /// reason exactly: it is a backdrop under moving cards, `contentsGravity` stretches it back up
 /// for free, and half the pixels is a quarter of the memory — about 7 MB per display.
+///
+/// The file is not always there. With one of macOS's own desktops — which is every Mac before
+/// a toe theme is installed — `NSWorkspace` answers a path under
+/// `~/Library/Application Support/com.apple.mobileAssetDesktop/` that WallpaperAgent fetches on
+/// demand and may never have written, and a theme whose backgrounds are still downloading
+/// names a file that is not on disk yet. macOS ships a thumbnail of every desktop it offers,
+/// though — `/System/Library/Desktop Pictures/.thumbnails/<name>.heic`, 214 × 130, and the
+/// aerials keep theirs under `com.apple.wallpaper/aerials/thumbnails/` — so when the picture
+/// itself will not decode, the thumbnail with the same name is the backdrop: soft, but the
+/// right colours in the right places, and under cards that then dissolve into the sharp real
+/// thing that reads as a focus pull rather than a mistake. A miss is retried on the next
+/// swipe, because the file that was not there may be by then, and is logged once.
 final class DesktopPictures {
 
     private var images: [URL: CGImage] = [:]
     private var decoding: Set<URL> = []
+    private var reported: Set<URL> = []
+
+    /// Where macOS keeps a small picture of each desktop it ships, and of each aerial it has
+    /// fetched, under the desktop's own file name.
+    private static let thumbnailFolders: [URL] = [
+        URL(fileURLWithPath: "/System/Library/Desktop Pictures/.thumbnails", isDirectory: true),
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/aerials/thumbnails",
+                                    isDirectory: true),
+    ]
 
     /// The picture on `screen` if it is decoded, else nil and a decode under way.
     func image(for screen: NSScreen) -> CGImage? {
@@ -43,24 +65,41 @@ final class DesktopPictures {
         decoding.insert(url)
         let pixels = max(screen.frame.width, screen.frame.height) * screen.backingScaleFactor / 2
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let image = Self.thumbnail(of: url, maxPixels: Int(pixels))
+            let decoded = Self.decode(url, maxPixels: Int(pixels))
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.decoding.remove(url)
-                if let image {
-                    // One picture per URL, and the URLs that are no longer anyone's desktop go
-                    // with the next `prepare`; a desktop changed ten times is not ten pictures.
-                    self.images = self.images.filter { held in
-                        NSScreen.screens.contains { NSWorkspace.shared.desktopImageURL(for: $0) == held.key }
+                guard let decoded else {
+                    if self.reported.insert(url).inserted {
+                        Log.info("slide: desktop picture at \(url.path) could not be decoded and has no"
+                                 + " thumbnail; the cards slide over the theme colour until it can")
                     }
-                    self.images[url] = image
-                    Log.info("slide: desktop picture decoded — \(image.width)×\(image.height),"
-                             + " \(image.width * image.height * 4 / 1_048_576) MB")
-                } else {
-                    Log.info("slide: desktop picture at \(url.path) could not be decoded; the cards slide over the theme colour")
+                    return
                 }
+                // One picture per URL, and the URLs that are no longer anyone's desktop go
+                // with the next `prepare`; a desktop changed ten times is not ten pictures.
+                self.images = self.images.filter { held in
+                    NSScreen.screens.contains { NSWorkspace.shared.desktopImageURL(for: $0) == held.key }
+                }
+                self.images[url] = decoded.image
+                Log.info("slide: desktop picture decoded — \(decoded.image.width)×\(decoded.image.height),"
+                         + " \(decoded.image.width * decoded.image.height * 4 / 1_048_576) MB"
+                         + (decoded.fromThumbnail ? " — macOS's thumbnail of it; the picture itself is not on disk" : ""))
             }
         }
+    }
+
+    /// The picture at `url`, or failing that macOS's thumbnail of the desktop with that name.
+    private static func decode(_ url: URL, maxPixels: Int) -> (image: CGImage, fromThumbnail: Bool)? {
+        if let image = thumbnail(of: url, maxPixels: maxPixels) { return (image, false) }
+        let stem = url.deletingPathExtension().lastPathComponent
+        for folder in thumbnailFolders {
+            for ext in ["heic", "png", "jpg"] {
+                let candidate = folder.appendingPathComponent(stem).appendingPathExtension(ext)
+                if let image = thumbnail(of: candidate, maxPixels: maxPixels) { return (image, true) }
+            }
+        }
+        return nil
     }
 
     private static func thumbnail(of url: URL, maxPixels: Int) -> CGImage? {
