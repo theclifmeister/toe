@@ -26,6 +26,10 @@ public enum CommandLabel {
         case .toggleFloating:       return "Cycle floating"
         case .toggleSplit:          return "Toggle split orientation"
         case .swapSplit:            return "Swap the split"
+        // Omarchy's row reads "Force full screen"; the rest of this list is toe's own phrasing
+        // ("Cycle floating") rather than upstream's, and one word says what the key does both
+        // ways, which "Force" would not.
+        case .fullscreen:           return "Fullscreen"
         case .resizeActive(let dx, let dy): return resize(dx: dx, dy: dy)
         case .growActive(let dx, let dy):   return grow(dx: dx, dy: dy)
         case .exec(let line):

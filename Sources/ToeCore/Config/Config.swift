@@ -382,6 +382,13 @@ public struct Config: Equatable {
         // any swap on any key, in any direction, and both of these stay away.
         ("super-ctrl-shift-left", .swapWorkspace(-1)),
         ("super-ctrl-shift-right", .swapWorkspace(1)),
+        // `fullscreen`, on the `swapworkspace` bar exactly: the quick menu does not carry it and
+        // there was no verb before it, so a config written before it can reach the feature by
+        // no route at all — the green button is the window's, not toe's. Omarchy's key, which
+        // is the other argument the pair above could not make. Stands aside for `fullscreen` on
+        // any key, by plain equality: the verb takes no argument, so there is nothing for
+        // `bound(_:in:)` to widen.
+        ("super-f", .fullscreen),
     ]
 
     /// Whether a binding already answers for a fallback's command. Equality, except that any

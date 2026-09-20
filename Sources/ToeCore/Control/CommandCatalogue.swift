@@ -105,6 +105,11 @@ public enum CommandCatalogue {
         CommandDescriptor(verb: "swapsplit",
                           summary: "Swap the two halves of the focused window's split.",
                           sample: "swapsplit"),
+        CommandDescriptor(verb: "fullscreen",
+                          summary: "Take the window into native macOS fullscreen, or bring a "
+                                 + "fullscreen window back to its tile. Its neighbours hold the "
+                                 + "tile meanwhile.",
+                          sample: "fullscreen"),
         CommandDescriptor(verb: "growactive", argument: "<dx> <dy>",
                           summary: "Grow the window by that many points; negative shrinks it.",
                           sample: "growactive 100 0"),

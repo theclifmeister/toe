@@ -144,7 +144,10 @@ public enum SkillDocument {
           workspace behind a screen the user cannot see. Check `query state` if a dispatch appears
           to have done nothing. The window itself leaves the layout for as long as it is
           fullscreen — its neighbours take its tile, and it is reported `hidden` on the workspace
-          it will go back to — and takes a tile again when it returns.
+          it will go back to — and takes a tile again when it returns. `fullscreen` is the way in
+          and the way out: on a tiled window it goes fullscreen, on a fullscreen one (by focus, or
+          `--window` by id) it comes back. It is the one verb that still works while a fullscreen
+          window holds the focus.
         - **A tabbed window is one tile.** Terminal, Ghostty, Safari and anything else with native
           window tabs shows one tab at a time, and every tab is a window with an id of its own.
           The tab in front holds the tile; the others are reported `hidden` on the same workspace,

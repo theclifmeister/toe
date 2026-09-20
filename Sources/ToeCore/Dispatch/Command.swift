@@ -30,6 +30,19 @@ public enum Command: Equatable {
     case toggleFloating
     case toggleSplit
     case swapSplit
+    /// `fullscreen` — Omarchy's `SUPER`+`F` (`fullscreen, 0`): the focused window into native
+    /// macOS fullscreen, and pressed on a fullscreen window, back out of it. A toggle rather than
+    /// two verbs because the key is one key, and which way it goes is read off the window at the
+    /// moment of the press (`AXFullScreen`), never off anything toe remembers — a transition in
+    /// flight reads as both on the way through, and a second press during the animation must
+    /// write the opposite of what the window says, not of what the last press asked for.
+    ///
+    /// Nothing in the layout model: going fullscreen is the window leaving for a Space of its
+    /// own, which is what #147 built the `Presence` machinery to notice — the tile goes to its
+    /// neighbours (`WorkspaceManager.suspend`) and comes back (`resume`) when the window does.
+    /// Omarchy's `fullscreen, 1` — the window filling the display inside the gaps without
+    /// leaving the Space — is a different feature and is not this verb.
+    case fullscreen
     /// `resizeactive <dx> <dy>`: how far the focused window's splits move, in points, right and
     /// down when positive. Hyprland's numbers and Hyprland's meaning — see
     /// `DwindleLayout.resizeActive` for why the split moves rather than the window growing.
@@ -134,7 +147,10 @@ public extension Command {
     /// at and say nothing about it.
     ///
     /// The way out is the way in: leave fullscreen, or click a window on another display, and
-    /// the keys work again with nothing to put back.
+    /// the keys work again with nothing to put back. `fullscreen` itself is the one verb that
+    /// must never be here for that reason — pressed on the fullscreen window it *is* the way
+    /// out, and its dispatcher reads the window in front rather than `focusedWindow`, so the
+    /// trap above does not catch it.
     var suspendedByFullscreen: Bool {
         switch self {
         case .moveFocus, .swapWindow, .moveWindow, .workspace, .moveToWorkspace, .killActive,
@@ -151,16 +167,20 @@ public extension Command {
     /// key pressed by somebody looking at the screen. A caller on the socket is not, so it may
     /// name a window instead — but only for the verbs whose meaning survives the substitution.
     ///
-    /// These four do, and they are exactly the ones the layout can already carry out on a window
-    /// by id rather than by focus. The directional verbs deliberately do not: `movefocus l` is
-    /// "the window left of *here*", and here is where the focus is — pointed at somebody else's
-    /// window it would mean walking a tree from a place the user is not standing, which is a
-    /// different command wearing the same name. `workspace` and the theme verbs take no window at
-    /// all. A caller that wants a directional verb somewhere else moves the focus there first,
+    /// These do, and they are exactly the ones the layout — or, for `fullscreen`, the window's
+    /// own Accessibility element — can already carry out on a window by id rather than by focus.
+    /// The directional verbs deliberately do not: `movefocus l` is "the window left of *here*",
+    /// and here is where the focus is — pointed at somebody else's window it would mean walking a
+    /// tree from a place the user is not standing, which is a different command wearing the same
+    /// name. `workspace` and the theme verbs take no window at all. A caller that wants a directional verb somewhere else moves the focus there first,
     /// which is a thing it can say and a thing the user can see happening.
     var acceptsTarget: Bool {
         switch self {
         case .killActive, .toggleFloating, .moveToWorkspace, .growActive, .resizeActive:
+            return true
+        // "Take this window fullscreen" means the same thing whichever window it is aimed at,
+        // and a caller on the socket can point it at a fullscreen one by id to bring it back.
+        case .fullscreen:
             return true
         default:
             return false
@@ -254,6 +274,15 @@ public enum CommandParser {
         case "togglefloating", "float":     return .toggleFloating
         case "togglesplit":                 return .toggleSplit
         case "swapsplit":                   return .swapSplit
+        // Hyprland's `fullscreen` takes a mode — `0` is real fullscreen, `1` is maximise — and
+        // toe has only the first, so an argument is neither required nor refused: `fullscreen,
+        // 0` copied out of an Omarchy config is this verb, and `fullscreen, 1` is a bad argument
+        // rather than silently the wrong feature.
+        case "fullscreen":
+            switch argument {
+            case "", "0": return .fullscreen
+            default:      throw CommandError.badArgument(name, argument)
+            }
         case "resizeactive", "growactive":
             // Two numbers, and only two: Hyprland's `exact` and percentage forms are not ported,
             // because a tile's size is the tree's to decide and an exact size has no meaning in

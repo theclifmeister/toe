@@ -696,7 +696,10 @@ public enum MenuModel {
         // Last of the workspace verbs: it is the one that acts on a workspace as a whole rather
         // than on where you are or what is on it.
         case .swapWorkspace:    return 6
-        case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive: return 7
+        // The window verbs, `fullscreen` among them: it is done to the window under the focus,
+        // as closing and floating are, and sits in the README's table beside SUPER+T.
+        case .killActive, .toggleFloating, .toggleSplit, .swapSplit, .resizeActive, .growActive,
+             .fullscreen: return 7
         // With the look-and-feel rows: the bar is chrome, and hiding it is a thing done to how
         // the screen looks, not to a window or to toe.
         case .theme, .removeTheme, .background, .nextBackground, .bar: return 8
