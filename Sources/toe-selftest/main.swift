@@ -4318,13 +4318,14 @@ h.test("the network panel is the connection's switch and numbers, and never a na
     t.equal(rows[0].kind, .hero(glyph: Glyphs.wifi[4], title: "Wi-Fi", status: "Connected",
                                 trailing: .toggle(on: true)), "the widget's glyph, the kind of link for a title")
     t.equal(rows[0].action, .toggleWifi, "the switch is Wi-Fi power")
-    t.equal(rows[2].kind, .info([PanelRow.Info("Signal", "−54 dBm, 92%"), PanelRow.Info("Noise", "−96 dBm")]),
+    t.equal(rows[2].kind, .graph(NetworkTraffic.Window()), "the traffic graph under the hero, empty on open")
+    t.equal(rows[4].kind, .info([PanelRow.Info("Signal", "−54 dBm, 92%"), PanelRow.Info("Noise", "−96 dBm")]),
             "signal and noise")
-    t.equal(rows[3].kind, .info([PanelRow.Info("Channel", "48, 5 GHz"), PanelRow.Info("Rate", "516 Mbit/s")]),
+    t.equal(rows[5].kind, .info([PanelRow.Info("Channel", "48, 5 GHz"), PanelRow.Info("Rate", "516 Mbit/s")]),
             "channel with its band, the rate")
-    t.equal(rows[4].kind, .info([PanelRow.Info("Security", "WPA2 Personal"), PanelRow.Info("IP address", "192.168.1.5")]),
+    t.equal(rows[6].kind, .info([PanelRow.Info("Security", "WPA2 Personal"), PanelRow.Info("IP address", "192.168.1.5")]),
             "security and the address")
-    t.equal(rows[6].kind, .note("Names need Location, which toe does not ask for."),
+    t.equal(rows[8].kind, .note("Names need Location, which toe does not ask for."),
             "why there is no name, said once")
     t.equal(rows.last?.action, .openSettings(.wifi), "the door")
     t.expect(!rows.contains { if case .pick = $0.kind { return true } else { return false } },
@@ -4342,8 +4343,12 @@ h.test("the network panel is the connection's switch and numbers, and never a na
     let wiredRows = NetworkPanel.rows(wired)
     t.equal(wiredRows[0].kind, .hero(glyph: Glyphs.ethernet, title: "Ethernet", status: "Connected",
                                      trailing: .toggle(on: true)), "wired")
-    t.equal(wiredRows[2].kind, .info([PanelRow.Info("Interface", "en5"), PanelRow.Info("IP address", "10.0.0.7")]),
+    let minute = NetworkTraffic.Window(samples: [NetworkTraffic.Sample(down: 1_300_000, up: 48_000)])
+    t.equal(NetworkPanel.rows(wired, traffic: minute)[2].kind, .graph(minute), "Ethernet has the graph too, carrying the window")
+    t.equal(wiredRows[4].kind, .info([PanelRow.Info("Interface", "en5"), PanelRow.Info("IP address", "10.0.0.7")]),
             "the interface and its address")
+    t.expect(!NetworkPanel.rows(off, traffic: minute).contains { if case .graph = $0.kind { return true } else { return false } },
+             "no link, no graph: there is no interface to count")
     t.equal(NetworkPanel.status(NetworkPanel.Link(connection: .wifi(strength: 50, restricted: true), wifiPower: true)),
             "Limited internet access", "restricted, in the words upstream uses")
 
@@ -4352,6 +4357,122 @@ h.test("the network panel is the connection's switch and numbers, and never a na
     t.equal(NetworkPanel.rateLabel(2500), "2.5 Gbit/s", "and a half")
     t.equal(NetworkPanel.rateLabel(0), "—", "nothing")
     t.equal(NetworkPanel.signalLabel(rssi: -75), "−75 dBm, 50%", "the RSSI and the widget's percentage")
+}
+
+h.test("the traffic model turns counter readings into per-second rates, sixty of them") { t in
+    var traffic = NetworkTraffic()
+    func read(_ i: UInt64, _ o: UInt64, at: Double, on interface: String = "en0") {
+        traffic.push(NetworkTraffic.Reading(interface: interface, inBytes: i, outBytes: o, at: at))
+    }
+    read(1_000, 500, at: 10)
+    t.equal(traffic.window.samples, [], "the first reading has nothing to compare with")
+    t.equal(traffic.window.current, nil, "so nothing is current")
+    t.equal(traffic.window.label, "↓ — ↑ —", "and the label says so rather than claiming idle")
+    read(1_000 + 1_300_000, 500 + 48_000, at: 11)
+    t.equal(traffic.window.samples, [NetworkTraffic.Sample(down: 1_300_000, up: 48_000)], "the delta, per second")
+    t.equal(traffic.window.label, "↓ 1.3 MB/s ↑ 48 kB/s", "what the caption says")
+    read(1_000 + 1_300_000 + 200_000, 500 + 48_000 + 1_000, at: 13)
+    t.equal(traffic.window.current, NetworkTraffic.Sample(down: 100_000, up: 500),
+            "two seconds between readings is halved: the rate is per second, not per reading")
+    let before = traffic
+    read(1_000 + 1_300_000 + 200_000, 500 + 48_000 + 1_000, at: 13)
+    t.equal(traffic, before, "the same instant again adds nothing")
+
+    // A counter that goes backwards is an interface that came back up, not a negative rate.
+    read(50, 40, at: 14)
+    t.equal(traffic.window.current, NetworkTraffic.Sample(down: 0, up: 0), "a reset is a zero second")
+    t.equal(traffic.window.samples.count, 3, "and the ring is kept")
+    read(50 + 812, 40 + 10, at: 15)
+    t.equal(traffic.window.current, NetworkTraffic.Sample(down: 812, up: 10), "counting on from the new base")
+    read(50 + 812, 20, at: 16)
+    t.equal(traffic.window.current, NetworkTraffic.Sample(down: 0, up: 0), "one direction going back zeroes that second")
+
+    // Another interface is another link: its lifetime bytes against the last one's are a spike
+    // from nowhere, and the minute before was not on it.
+    read(9_000_000_000, 7_000_000_000, at: 17, on: "en5")
+    t.equal(traffic.window.samples, [], "a new interface starts a fresh ring")
+    read(9_000_000_000 + 2_000, 7_000_000_000 + 1_000, at: 18, on: "en5")
+    t.equal(traffic.window.samples, [NetworkTraffic.Sample(down: 2_000, up: 1_000)], "and counts from its own first reading")
+
+    // Sixty seconds, whatever comes in.
+    var long = NetworkTraffic()
+    for second in 0...100 {
+        long.push(NetworkTraffic.Reading(interface: "en0", inBytes: UInt64(second) * 1_000, outBytes: 0, at: Double(second)))
+    }
+    t.equal(long.window.samples.count, NetworkTraffic.Window.capacity, "capped at sixty")
+    t.equal(NetworkTraffic.Window.capacity, 60, "which is a minute")
+    t.equal(NetworkTraffic.Window(samples: Array(repeating: NetworkTraffic.Sample(down: 1, up: 1), count: 70)).samples.count,
+            60, "a window built by hand is cut to the same")
+
+    // The scale: the window's own maximum, never under the floor.
+    t.equal(NetworkTraffic.Window().peak, 0, "nothing measured")
+    t.equal(NetworkTraffic.Window().scale, 10_000, "the floor: an idle link is a flat line, not noise blown up")
+    let busy = NetworkTraffic.Window(samples: [NetworkTraffic.Sample(down: 300, up: 25_000),
+                                               NetworkTraffic.Sample(down: 2_000_000, up: 900)])
+    t.equal(busy.peak, 2_000_000, "the busiest second in either direction")
+    t.equal(busy.scale, 2_000_000, "is the top of the graph")
+    t.equal(NetworkTraffic.Window(samples: [NetworkTraffic.Sample(down: 812, up: 4_000)]).scale, 10_000,
+            "under the floor, the floor")
+
+    // The label at each unit boundary: decimal units, one decimal from a megabyte up.
+    t.equal(NetworkTraffic.rateLabel(0), "0 B/s", "idle")
+    t.equal(NetworkTraffic.rateLabel(812), "812 B/s", "bytes")
+    t.equal(NetworkTraffic.rateLabel(999.4), "999 B/s", "rounded, still bytes")
+    t.equal(NetworkTraffic.rateLabel(1000), "1 kB/s", "kilo at a thousand")
+    t.equal(NetworkTraffic.rateLabel(48_000), "48 kB/s", "no decimal below a megabyte")
+    t.equal(NetworkTraffic.rateLabel(48_600), "49 kB/s", "rounded")
+    t.equal(NetworkTraffic.rateLabel(999_600), "1.0 MB/s", "rounding up to a thousand kilobytes moves up a unit")
+    t.equal(NetworkTraffic.rateLabel(1_300_000), "1.3 MB/s", "mega, one decimal")
+    t.equal(NetworkTraffic.rateLabel(1_000_000_000), "1.0 GB/s", "giga, one decimal")
+    t.equal(NetworkTraffic.rateLabel(999_960_000), "1.0 GB/s", "and the same promotion at the top")
+    t.equal(NetworkTraffic.rateLabel(-5), "0 B/s", "nothing negative gets printed")
+}
+
+h.test("the graph row is looked at, not landed on, and is laid out as a caption over a plot") { t in
+    let window = NetworkTraffic.Window(samples: [NetworkTraffic.Sample(down: 100, up: 50)])
+    let graph = PanelRow.graph(window)
+    t.expect(!graph.isSelectable, "no action, no cursor")
+    t.equal(graph.identity, nil, "and nothing for the cursor to follow")
+    var s = PanelState(rows: [
+        .hero(glyph: "x", title: "Wi-Fi", status: "Connected", trailing: .toggle(on: true), action: .toggleWifi),
+        .separator, graph, .separator, .settings(.wifi),
+    ])
+    s.move(by: 1)
+    t.equal(s.selection, 0, "the hero")
+    s.move(by: 1)
+    t.equal(s.selection, 4, "the next ↓ steps over the graph to the door")
+    s.move(by: -1)
+    t.equal(s.selection, 0, "and ↑ back over it")
+    s.select(row: 2)
+    t.equal(s.selection, 0, "hovering the graph moves nothing")
+
+    let m = PanelMetrics()
+    // The caption's line (14) + 4 + 48.
+    t.equal(PanelLayout.rowHeight(graph, m), 66, "a caption line, the gap, the plot")
+    let row = Box(x: 16, y: 100, w: 348, h: 66)
+    t.equalBox(PanelLayout.graphLabel(inRow: row, m), box(22, 100, 336, 14), "the caption on the top line, inset")
+    t.equalBox(PanelLayout.graphPlot(inRow: row, m), box(22, 118, 336, 48), "the plot on the bottom 48, inset the same")
+    t.equal(PanelLayout.gap(after: .separator, before: graph, m), 14, "a block, like the stats")
+
+    // Where a sample stands: the newest at the right edge once its second is up, a width per
+    // second, and the whole trace a fraction of a width to the right while the second runs.
+    let plot = Box(x: 0, y: 0, w: 300, h: 48)
+    t.equal(PanelLayout.graphX(sample: 59, of: 60, glide: 1, inPlot: plot), 300, "the newest at the edge")
+    t.equal(PanelLayout.graphX(sample: 58, of: 60, glide: 1, inPlot: plot), 295, "the one before it a width in")
+    t.equal(PanelLayout.graphX(sample: 0, of: 60, glide: 1, inPlot: plot), 5, "the oldest a width from the left")
+    t.equal(PanelLayout.graphX(sample: 59, of: 60, glide: 0, inPlot: plot), 305, "just landed: a width off the right")
+    t.equal(PanelLayout.graphX(sample: 58, of: 60, glide: 0, inPlot: plot), 300,
+            "and the previous newest still at the edge, where it was — no jump")
+    t.equal(PanelLayout.graphX(sample: 59, of: 60, glide: 0.5, inPlot: plot), 302.5, "halfway through the second")
+    t.equal(PanelLayout.graphX(sample: 2, of: 3, glide: 1, inPlot: plot), 300, "three samples: the newest still at the edge")
+    t.equal(PanelLayout.graphX(sample: 0, of: 3, glide: 1, inPlot: plot), 290, "and the trace fills from the right")
+    t.equal(PanelLayout.graphX(sample: 59, of: 60, glide: 7, inPlot: plot), 300, "the glide is clamped")
+
+    let scaled = NetworkTraffic.Window(samples: [NetworkTraffic.Sample(down: 200_000, up: 50_000)])
+    t.equal(PanelLayout.graphY(rate: 200_000, in: scaled, inPlot: plot), 0, "the peak touches the top")
+    t.equal(PanelLayout.graphY(rate: 50_000, in: scaled, inPlot: plot), 36, "a quarter of it a quarter up")
+    t.equal(PanelLayout.graphY(rate: 0, in: scaled, inPlot: plot), 48, "nothing is the baseline")
+    t.equal(PanelLayout.graphY(rate: 5_000, in: NetworkTraffic.Window(), inPlot: plot), 24, "against the floor when nothing is over it")
 }
 
 h.test("the Bluetooth panel says where the grant stands, then lists the devices") { t in

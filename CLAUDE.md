@@ -256,6 +256,13 @@ confirmed. Four rules:
   hide`, fullscreen on that display — closes it.
 - **Bold is a stroke.** The bundled face is Regular only; the panels' headers and titles are
   drawn with a negative `strokeWidth` rather than 2.6 MB of Bold in the bundle.
+- **The network panel's traffic graph is the one poll** (#189), and it runs only while that
+  panel is up: a byte counter has no listener, so `NetworkProvider.startTraffic` samples
+  `sysctl NET_RT_IFLIST2` once a second from `openPanel(.network)` until `BarPanelWindow`'s
+  `onClose` or a swap to another widget. `NetworkTraffic` (ToeCore) turns the readings into
+  the ring the `.graph` row carries; the glide between samples is `BarPanelWindow`'s timer,
+  alive only while a sample is sliding in. If `log stream` shows `network: traffic` lines with
+  no panel open, something has grown a third way out of the panel.
 
 The Focus state (Dnd) still waits on a permission toe does not ask for — it lives in a
 Full-Disk-Access-protected database — and has no provider.

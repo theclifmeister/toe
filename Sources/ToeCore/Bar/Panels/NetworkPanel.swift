@@ -94,11 +94,20 @@ public enum NetworkPanel {
         "\u{2212}\(abs(rssi)) dBm, \(BarWidgets.wifiStrength(rssi: rssi))%"
     }
 
-    public static func rows(_ l: Link) -> [PanelRow] {
+    /// The rows: the hero, the last minute of traffic on the link, the connection's numbers,
+    /// and the door. `traffic` is what `NetworkProvider` has sampled since the panel opened —
+    /// empty on the first frame, and empty again on every open, since the sampling runs only
+    /// while the panel is up (#189). The graph goes with a link and not with the panel: with
+    /// no interface there is nothing to count, and a flat line under "Wi-Fi off" would be a
+    /// graph of nothing.
+    public static func rows(_ l: Link, traffic: NetworkTraffic.Window = NetworkTraffic.Window()) -> [PanelRow] {
         var rows: [PanelRow] = [
             .hero(glyph: BarWidgets.networkGlyph(l.connection), title: title(l), status: status(l),
                   trailing: .toggle(on: l.wifiPower), action: .toggleWifi),
         ]
+        if l.connection != .none {
+            rows += [.separator, .graph(traffic)]
+        }
         if case .wifi = l.connection {
             var stats: [PanelRow.Info] = []
             if let rssi = l.rssi { stats.append(PanelRow.Info("Signal", signalLabel(rssi: rssi))) }

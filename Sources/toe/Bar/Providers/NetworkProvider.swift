@@ -11,6 +11,13 @@ import ToeCore
 /// which is the RSSI the signal glyph is drawn from. Both deliver off the main thread and are
 /// hopped onto it here.
 ///
+/// One exception, for the panel and only while it is open: the traffic graph (#189) needs the
+/// interface's byte counters once a second, and a byte counter has no listener — nothing in
+/// the system says "the number went up". So `startTraffic` is the `MenuBarPeek` shape, a timer
+/// that runs only while there is something to show it to: `Coordinator.openPanel(.network)`
+/// starts it, closing the panel or switching it to another widget stops it, and `start` —
+/// what the bar needs — never touches it. The glyph does not need the counters.
+///
 /// What a Mac will not say without a permission it is not asked for: the network's name. SSID
 /// reads return nil without Location Services from macOS 14 on, and a name is not what the
 /// glyph needs. RSSI, power and the link state are given freely, and so — for the panel —
@@ -28,6 +35,12 @@ final class NetworkProvider: NSObject, BarProvider, CWEventDelegate {
     private var monitor: NWPathMonitor?
     private var path: NWPath?
     private var rssi: Int?
+
+    /// The last minute on the link, sampled while the panel is open; `traffic.window` is what
+    /// the graph row carries. Fresh on every `startTraffic`, so a panel opens on an empty
+    /// graph that fills, not on the minute before it was last closed.
+    private(set) var traffic = NetworkTraffic()
+    private var trafficTimer: Timer?
 
     func start() {
         guard monitor == nil else { return }
@@ -55,6 +68,7 @@ final class NetworkProvider: NSObject, BarProvider, CWEventDelegate {
     }
 
     func stop() {
+        stopTraffic()
         monitor?.cancel()
         monitor = nil
         let client = CWWiFiClient.shared()
@@ -63,6 +77,84 @@ final class NetworkProvider: NSObject, BarProvider, CWEventDelegate {
         path = nil
         rssi = nil
         link = NetworkPanel.Link(connection: .none, wifiPower: false)
+    }
+
+    // MARK: - Traffic
+
+    /// Begins sampling the link's counters once a second, with the first reading taken now so
+    /// the first delta is a second away rather than two. Idempotent: the panel switching from
+    /// the network panel to itself does not restart the ring.
+    func startTraffic() {
+        guard trafficTimer == nil else { return }
+        traffic = NetworkTraffic()
+        sampleTraffic()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.sampleTraffic() }
+        // `.common`, as the clock's: the panel stays live while a menu is being tracked.
+        RunLoop.main.add(timer, forMode: .common)
+        trafficTimer = timer
+    }
+
+    /// Stops the sampling and forgets the minute. Every way the panel goes — Escape, a click
+    /// elsewhere, `bar hide`, a screen change, fullscreen on its display, a switch to another
+    /// widget — comes through here, since `BarPanelWindow.close` is the one door out and the
+    /// Coordinator watches it; `log stream` should show nothing ticking once the panel is gone.
+    func stopTraffic() {
+        trafficTimer?.invalidate()
+        trafficTimer = nil
+        traffic = NetworkTraffic()
+    }
+
+    private func sampleTraffic() {
+        // No interface, nothing to count: the ring keeps what it has, and the panel is showing
+        // no graph for a `.none` link anyway. The next link's first reading starts it fresh —
+        // `NetworkTraffic.push` sees a new interface name.
+        guard let name = link.interfaceName, let counters = Self.readCounters(for: name) else { return }
+        traffic.push(NetworkTraffic.Reading(interface: name, inBytes: counters.inBytes, outBytes: counters.outBytes,
+                                            at: ProcessInfo.processInfo.systemUptime))
+        if let current = traffic.window.current {
+            Log.info("network: traffic on \(name) \(NetworkTraffic.rateLabel(current.down)) down, \(NetworkTraffic.rateLabel(current.up)) up")
+        }
+        onChange?()
+    }
+
+    /// The interface's lifetime bytes in and out, from `sysctl NET_RT_IFLIST2`.
+    ///
+    /// Not `getifaddrs`: its `ifa_data` is an `if_data` whose counters are 32-bit and wrap at
+    /// 4 GiB, which on a link doing a hundred megabytes a second is every forty seconds — a
+    /// wrap the ring would read as a reset and draw as a zero. `RTM_IFINFO2` carries
+    /// `if_data64`, and the same route socket dump is what `netstat -ib` reads. Public, and
+    /// no permission: the panel rule from #180 holds.
+    ///
+    /// The dump is one message per interface, each an `if_msghdr2` followed by its addresses,
+    /// and each `ifm_msglen` long; the interface is found by index rather than by name because
+    /// the name is not in the message — it is in the `sockaddr_dl` after it — and
+    /// `if_nametoindex` is the cheaper lookup. `loadUnaligned`, because a message's offset is
+    /// whatever the previous lengths add up to and `if_data64` wants eight-byte alignment.
+    static func readCounters(for interface: String) -> (inBytes: UInt64, outBytes: UInt64)? {
+        let index = if_nametoindex(interface)
+        guard index != 0 else { return nil }
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
+        var length = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &length, nil, 0) == 0, length > 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: length)
+        guard sysctl(&mib, UInt32(mib.count), &buffer, &length, nil, 0) == 0 else { return nil }
+        return buffer.withUnsafeBytes { raw -> (inBytes: UInt64, outBytes: UInt64)? in
+            var offset = 0
+            while offset + MemoryLayout<if_msghdr>.size <= length {
+                let header = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
+                // A zero length would loop here forever; the kernel does not write one, but
+                // the loop's exit should not depend on that.
+                guard header.ifm_msglen > 0 else { return nil }
+                if Int32(header.ifm_type) == RTM_IFINFO2, offset + MemoryLayout<if_msghdr2>.size <= length {
+                    let message = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
+                    if message.ifm_index == UInt16(index) {
+                        return (message.ifm_data.ifi_ibytes, message.ifm_data.ifi_obytes)
+                    }
+                }
+                offset += Int(header.ifm_msglen)
+            }
+            return nil
+        }
     }
 
     // MARK: - Writing

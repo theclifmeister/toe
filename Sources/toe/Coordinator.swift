@@ -325,6 +325,11 @@ final class Coordinator: WindowTrackerDelegate {
         barPanel.onAction = { [weak self] action in self?.panelAction(action) }
         barPanel.onSlide = { [weak self] slider, value in self?.panelSlide(slider, to: value) }
         barPanel.onSwitch = { [weak self] delta in self?.switchPanel(by: delta) }
+        // The traffic poll lives exactly as long as the network panel (#189), and every way
+        // the panel goes — Escape, a click elsewhere, `bar hide`, a screen change, fullscreen
+        // on its display, losing key — ends in `BarPanelWindow.close`, so this is the one
+        // place that needs to stop it. Stopping it for any other panel is a no-op.
+        barPanel.onClose = { [weak self] in self?.network.stopTraffic() }
 
         installSignalHandlers()
         // Before the four repairs below, because the copy this replaces writes those journals on
@@ -1259,7 +1264,7 @@ final class Coordinator: WindowTrackerDelegate {
             guard let state = audio.state else { return nil }
             return AudioPanel.rows(state)
         case .network:
-            return NetworkPanel.rows(network.link)
+            return NetworkPanel.rows(network.link, traffic: network.traffic.window)
         case .bluetooth:
             return BluetoothPanel.rows(bluetooth.state)
         }
@@ -1300,6 +1305,11 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
         barPanel.open(kind, rows: rows, style: panelStyle, anchor: anchor)
+        // The one poll the panels run, and only while the network panel is up: a switch to
+        // another widget's panel does not close the window (see `BarPanelWindow.open`), so it
+        // is stopped here as well as in `onClose`. Started after `open`, so the first sample's
+        // `onChange` lands on a panel that is showing.
+        if kind == .network { network.startTraffic() } else { network.stopTraffic() }
     }
 
     /// Tab: the panel one widget over, in the bar's order, skipping widgets that have none

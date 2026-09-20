@@ -19,6 +19,10 @@ struct PanelSnapshot: Equatable {
     /// How far the content is scrolled up, for a card cut to the screen.
     var offset: Double
     var style: PanelStyle
+    /// How far through the second since the traffic graph's newest sample the frame is, 0…1
+    /// — the view's interpolation, see `PanelLayout.graphX`. 1 when there is no graph or the
+    /// second is up, which is the still picture.
+    var glide: Double = 1
 }
 
 /// Where a panel hangs: the widget's slot on its display, and the bar it hangs from.
@@ -52,6 +56,9 @@ final class BarPanelWindow {
     var onSlide: ((PanelSlider, Double) -> Void)?
     /// Tab and Shift-Tab: the panel one widget over, upstream's `switchPanel`.
     var onSwitch: ((Int) -> Void)?
+    /// The panel has gone, by whichever door — Escape, a click elsewhere, losing key, a screen
+    /// change, the Coordinator's own `close`. The one place to stop what ran only for it.
+    var onClose: (() -> Void)?
 
     private let panel: MenuPanel
     private let view = PanelView()
@@ -66,6 +73,18 @@ final class BarPanelWindow {
     private var clickMonitor: Any?
     private var isClosing = false
     private var frontmostAtOpen: pid_t?
+
+    /// The traffic graph's glide (#189): when the graph row's window changes under `update`,
+    /// the newest sample has just landed and the trace has a second to slide one width left.
+    /// `glideTimer` redraws at display rate until it has, then stops — it is alive only while
+    /// a graph row is on screen *and* moving, so an open panel with its minute already still
+    /// costs nothing, and a closed one nothing at all. Timer rather than `CVDisplayLink`: the
+    /// panel is one small card, 60 Hz is what the eye asked for, and a display link wants a
+    /// thread the rest of this window does not have.
+    private var glideTimer: Timer?
+    private var glideStarted: TimeInterval?
+    private var lastGraph: NetworkTraffic.Window?
+    private static let glideFrame: TimeInterval = 1.0 / 60
 
     var isVisible: Bool { panel.isVisible }
     /// The display the open panel is on, so a fullscreen window there — and only there —
@@ -112,6 +131,9 @@ final class BarPanelWindow {
         // A switch keeps nothing of the old panel's cursor: it is a different list.
         state = PanelState(rows: rows)
         offset = 0
+        // Nor of the old panel's graph: the network panel's first frame is a still one.
+        stopGlide()
+        lastGraph = graphWindow(in: rows)
         if !switching {
             frontmostAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
             observe()
@@ -129,6 +151,12 @@ final class BarPanelWindow {
         guard isVisible, state != nil else { return }
         self.style = style
         state?.replace(rows: rows)
+        // A new sample in the graph row starts a glide; the same window again — the provider
+        // reporting something else, the RSSI say — leaves whatever glide is running alone.
+        let graph = graphWindow(in: rows)
+        if let graph, graph != lastGraph, lastGraph != nil { startGlide() }
+        if graph == nil { stopGlide() }
+        lastGraph = graph
         layoutAndRender()
     }
 
@@ -137,9 +165,12 @@ final class BarPanelWindow {
         isClosing = true
         panel.orderOut(nil)
         stopObserving()
+        stopGlide()
+        lastGraph = nil
         state = nil
         kind = nil
         isClosing = false
+        onClose?()
         // The same care `QuickMenu.close` takes: if toe somehow came forward, put back who was.
         if NSWorkspace.shared.frontmostApplication?.processIdentifier
             == ProcessInfo.processInfo.processIdentifier,
@@ -321,8 +352,44 @@ final class BarPanelWindow {
         offset = PanelLayout.scroll(offset: offset, cursor: cursor, viewport: Double(panel.frame.height),
                                     content: contentHeight, style.metrics)
         view.snapshot = PanelSnapshot(rows: state.rows, frames: frames, selection: state.selection,
-                                      offset: offset, style: style)
+                                      offset: offset, style: style, glide: glide)
         view.setAccessibilityLabel(accessibilityLabel(state))
+    }
+
+    // MARK: - The graph's glide
+
+    private func graphWindow(in rows: [PanelRow]) -> NetworkTraffic.Window? {
+        for row in rows {
+            if case .graph(let window) = row.kind { return window }
+        }
+        return nil
+    }
+
+    /// 0…1 through the second since the newest sample; 1 with no glide running.
+    private var glide: Double {
+        guard let glideStarted else { return 1 }
+        return max(0, min(1, (ProcessInfo.processInfo.systemUptime - glideStarted) / 1))
+    }
+
+    private func startGlide() {
+        glideStarted = ProcessInfo.processInfo.systemUptime
+        guard glideTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.glideFrame, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // The second is up: this frame is the still picture, and the next sample's
+            // `update` starts the timer again.
+            if glide >= 1 { stopGlide() }
+            render()
+        }
+        // `.common`, so the trace keeps moving while a menu is being tracked, as the clock ticks.
+        RunLoop.main.add(timer, forMode: .common)
+        glideTimer = timer
+    }
+
+    private func stopGlide() {
+        glideTimer?.invalidate()
+        glideTimer = nil
+        glideStarted = nil
     }
 
     private func accessibilityLabel(_ state: PanelState) -> String {

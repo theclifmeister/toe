@@ -181,6 +181,9 @@ final class PanelView: NSView {
             case .calendar(let grid):
                 drawCalendar(grid, in: s.frames[index], s)
 
+            case .graph(let window):
+                drawGraph(window, in: s.frames[index], s)
+
             case .monthNav(let label):
                 // The label centred and fixed-width, so the chevrons hold still between a
                 // "MAY 2026" and a "SEPTEMBER 2026"; the chevrons at the row's ends.
@@ -273,6 +276,75 @@ final class PanelView: NSView {
                      alignment: .center, s)
             }
         }
+    }
+
+    /// The traffic graph (#189): the rates in a caption over a plot of the last minute, down as
+    /// a filled trace in the accent and up as one in the foreground at a lower alpha — the
+    /// split the border and the slider already make between the two colours — with the caption
+    /// coloured the same way, so it is the legend. Drawn here and nowhere else: no layer, no
+    /// path kept between frames, one `draw(_:)` over the card like every other row. The glide
+    /// is `s.glide`, the fraction of the second since the newest sample that has passed, and
+    /// `PanelLayout.graphX` is where that puts each point; this only joins them up.
+    ///
+    /// Two choices in the drawing. The trace is a line through the samples with the area under
+    /// it filled, not sixty bars: a bar chart being rebuilt is the thing the glide exists to not
+    /// look like. And when the ring is full, the oldest point is carried flat to the left edge:
+    /// sixty points span fifty-nine widths, and during the glide the sample that has just left
+    /// the ring would otherwise leave a gap a width wide at the left that opens and shuts once a
+    /// second. The value it stands in for is a minute old and just off the edge.
+    private func drawGraph(_ window: NetworkTraffic.Window, in row: Box, _ s: PanelSnapshot) {
+        let st = s.style, m = st.metrics, fg = st.foreground
+        let label = rect(PanelLayout.graphLabel(inRow: row, m))
+        // Not upper-cased as the hero's status is: "MB/S" is not a unit. The caption's weight
+        // and tracking are the status line's, so it reads as the same kind of thing.
+        let down = attributed(window.downLabel, font: .caption, colour: st.accent, bold: true, kern: 1.2, s)
+        let downSize = down.size()
+        down.draw(in: NSRect(x: label.minX, y: label.midY - downSize.height / 2, width: label.width, height: downSize.height))
+        let upBox = NSRect(x: label.minX + downSize.width + CGFloat(m.space(12)), y: label.minY,
+                           width: max(0, label.width - downSize.width - CGFloat(m.space(12))), height: label.height)
+        draw(window.upLabel, in: upBox, font: .caption, colour: fg.withAlpha(0.7), bold: true, kern: 1.2, s)
+
+        let plot = PanelLayout.graphPlot(inRow: row, m)
+        let box = rect(plot)
+        // The baseline: the foreground at the separator's shade, so an idle link still has a
+        // graph rather than an empty patch of card.
+        NSColor(fg.withAlpha(0.12)).setFill()
+        NSRect(x: box.minX, y: box.maxY - 1, width: box.width, height: 1).fill()
+        let samples = window.samples
+        guard !samples.isEmpty else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: box).addClip()
+        let full = samples.count == NetworkTraffic.Window.capacity
+        for (rate, fill, line) in [(\NetworkTraffic.Sample.down, st.accent.withAlpha(0.3), st.accent),
+                                   (\NetworkTraffic.Sample.up, fg.withAlpha(0.14), fg.withAlpha(0.6))] {
+            let trace = NSBezierPath()
+            var first = true
+            for (index, sample) in samples.enumerated() {
+                let x = CGFloat(PanelLayout.graphX(sample: index, of: samples.count, glide: s.glide, inPlot: plot))
+                let y = CGFloat(PanelLayout.graphY(rate: sample[keyPath: rate], in: window, inPlot: plot))
+                if first {
+                    trace.move(to: NSPoint(x: full ? box.minX : x, y: y))
+                    if full { trace.line(to: NSPoint(x: x, y: y)) }
+                    first = false
+                } else {
+                    trace.line(to: NSPoint(x: x, y: y))
+                }
+            }
+            let area = trace.copy() as! NSBezierPath
+            area.line(to: NSPoint(x: area.currentPoint.x, y: box.maxY))
+            area.line(to: NSPoint(x: full ? box.minX : CGFloat(PanelLayout.graphX(sample: 0, of: samples.count,
+                                                                                    glide: s.glide, inPlot: plot)),
+                                  y: box.maxY))
+            area.close()
+            NSColor(fill).setFill()
+            area.fill()
+            trace.lineWidth = 1
+            trace.lineJoinStyle = .round
+            NSColor(line).setStroke()
+            trace.stroke()
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// `ToggleSwitch`, square because the menu's corners are: the track at the normal fill
