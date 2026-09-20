@@ -102,6 +102,10 @@ public struct PanelMetrics: Equatable, Sendable {
     public var calendarHeadingGap: Double { space(3) }
     /// A chevron's hit zone at either end of the month line.
     public var monthChevronZone: Double { space(40) }
+    /// The traffic graph's plot: `space(48)` tall, under its caption line and `space(4)`
+    /// below it — the `labelGap` the stats keep between their lines.
+    public var graphHeight: Double { space(48) }
+    public var graphLabelGap: Double { space(4) }
 }
 
 /// Where everything in a panel sits: the card's own coordinates, origin top-left, y downward,
@@ -154,6 +158,9 @@ public enum PanelLayout {
         case .monthNav:
             // `monthNav.height`: the label's line plus `space(10)`.
             return m.lineHeight(.body) + m.rowPadding
+        case .graph:
+            // The rates' caption line, the gap, the plot.
+            return m.lineHeight(.caption) + m.graphLabelGap + m.graphHeight
         }
     }
 
@@ -304,6 +311,39 @@ public enum PanelLayout {
         if x < row.x + m.monthChevronZone { return -1 }
         if x >= row.maxX - m.monthChevronZone { return 1 }
         return 0
+    }
+
+    // MARK: - The traffic graph
+
+    /// The caption over the plot: the top line of the row, inset as the stats are.
+    public static func graphLabel(inRow row: Box, _ m: PanelMetrics) -> Box {
+        Box(x: row.x + m.sliderInset, y: row.y, w: max(0, row.w - m.sliderInset * 2), h: m.lineHeight(.caption))
+    }
+
+    /// The plot itself: the bottom `graphHeight` of the row, inset like the label so the
+    /// trace's right edge — now — lines up with the numbers above it.
+    public static func graphPlot(inRow row: Box, _ m: PanelMetrics) -> Box {
+        Box(x: row.x + m.sliderInset, y: row.maxY - m.graphHeight,
+            w: max(0, row.w - m.sliderInset * 2), h: m.graphHeight)
+    }
+
+    /// Where sample `index` of `count` stands along the plot, `glide` of the way through the
+    /// second since the newest arrived. A sample is `plot.w / capacity` wide whatever the
+    /// panel's width — sixty seconds is the window, the width is the width — and the newest
+    /// stands at the right edge once its second is up. Until then it is that fraction of a
+    /// width *past* the edge, and every older sample with it, so the trace slides left by one
+    /// width over the second rather than jumping when the sample lands: at `glide` 0 the new
+    /// sample is a width off the right and the previous newest is where it already was, and
+    /// at 1 the new one has taken its place. The clip does the rest.
+    public static func graphX(sample index: Int, of count: Int, glide: Double, inPlot plot: Box) -> Double {
+        let width = plot.w / Double(NetworkTraffic.Window.capacity)
+        let offset = (1 - max(0, min(1, glide))) * width
+        return plot.maxX + offset - Double(count - 1 - index) * width
+    }
+
+    /// The height of a rate on the plot, against the window's scale.
+    public static func graphY(rate: Double, in window: NetworkTraffic.Window, inPlot plot: Box) -> Double {
+        plot.maxY - max(0, min(1, rate / window.scale)) * plot.h
     }
 
     // MARK: - Scrolling

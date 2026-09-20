@@ -147,6 +147,11 @@ public struct PanelRow: Equatable, Sendable {
         case calendar(ClockPanel.Grid)
         /// The month and year under the grid, with a chevron at each end that steps it.
         case monthNav(String)
+        /// The network panel's last minute of traffic — toe's own row, see `NetworkTraffic` —
+        /// with the current rates in a caption over it. Looked at, not landed on: it has no
+        /// action, so `isSelectable` and `identity` both say no and the arrows step over it
+        /// as they step over an `info` row.
+        case graph(NetworkTraffic.Window)
     }
 
     public let kind: Kind
@@ -230,6 +235,10 @@ public struct PanelRow: Equatable, Sendable {
 
     public static func note(_ text: String) -> PanelRow {
         PanelRow(.note(text))
+    }
+
+    public static func graph(_ window: NetworkTraffic.Window) -> PanelRow {
+        PanelRow(.graph(window))
     }
 
     /// The row every panel ends on: the Mac's own window for the same thing. The label names
