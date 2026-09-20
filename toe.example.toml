@@ -111,17 +111,26 @@ swallow_dock_swipes = true
 # Slide the screen sideways on a dock swipe, the way Spaces does: the workspace you are leaving
 # is pushed off one edge by the one arriving. toe cannot move other apps' windows at animation
 # speed — every move is a round trip into the app, and the app repaints when it likes — so the
-# slide is two screenshots on a panel over the screen, with the real switch made underneath.
-# A screenshot needs Screen Recording, a second permission on top of Accessibility, which is
-# why this is off. Turning it on asks for the grant; relaunch toe once it is given. Until then
-# the swipe switches instantly, as it does now. macOS 15 reminds you now and then that toe can
-# record the screen — it captures for the moment of a swipe and keeps nothing. The swipe only:
-# it is the gesture the Spaces slide belongs to. SUPER+1…0 and SUPER+TAB stay instant.
+# slide is a panel over the screen with the real switch made underneath, and what moves on the
+# panel is the style below. The swipe only: it is the gesture the Spaces slide belongs to.
+# SUPER+1…0 and SUPER+TAB stay instant.
 #
 # SUPER+SPACE > Setup has this switch, and throwing it there rewrites this line — the menu and
-# this file are the same setting, so there is nothing to keep in step. It is also where the
-# permission prompt comes from, with the row you pressed still on screen to explain it.
-slide_on_swipe = false
+# this file are the same setting, so there is nothing to keep in step.
+slide_on_swipe = true
+# What slides.
+#   "cards"     A card per window — its frame as a rounded rectangle in the theme's colour,
+#               the border ring around the focused one — sliding over your desktop picture,
+#               then dissolving into the real windows. Drawn from what toe already knows, so
+#               it asks for nothing and starts the moment you swipe.
+#   "pictures"  Photographs of the two workspaces, the real content, as Spaces shows it. A
+#               photograph of the screen needs Screen Recording, a second permission on top of
+#               Accessibility: turning this on asks for the grant, relaunch toe once it is
+#               given, and macOS 15 reminds you now and then that toe can record the screen —
+#               it captures for the moment of a swipe and keeps a few pictures between swipes.
+#               The Setup row is also where that prompt comes from, with the row you pressed
+#               still on screen to explain it.
+slide_style = "cards"
 # Seconds. Spaces takes about a third of one.
 slide_duration = 0.3
 

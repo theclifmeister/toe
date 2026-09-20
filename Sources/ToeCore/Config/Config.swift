@@ -102,14 +102,31 @@ public struct GestureConfig: Equatable {
 /// What moves on screen when a workspace changes.
 public struct AnimationConfig: Equatable {
     /// Slide the display sideways on a dock swipe, the way Spaces does: the outgoing workspace
-    /// pushed off one edge by the incoming one. Off by default because it is the one setting in
-    /// toe that needs a second permission — the slide is two screenshots on a panel, and a
-    /// screenshot needs Screen Recording. The swipe only, deliberately: it is the gesture the
-    /// Spaces slide answers, and a key binding is a jump, not a swipe.
-    public var slideOnSwipe: Bool = false
+    /// pushed off one edge by the incoming one. The swipe only, deliberately: it is the gesture
+    /// the Spaces slide answers, and a key binding is a jump, not a swipe. On by default since
+    /// the cards: it was off for as long as the only slide was a photograph and so a permission,
+    /// and the cards ask for nothing.
+    public var slideOnSwipe: Bool = true
+    /// What slides — see `SlideStyle`.
+    public var slideStyle: SlideStyle = .cards
     /// How long the slide takes, in seconds.
     public var slideDuration: Double = 0.3
     public init() {}
+}
+
+/// What the slide moves across the screen, since it cannot move the windows themselves.
+public enum SlideStyle: String, Equatable, Sendable, CaseIterable {
+    /// A card per window — the window's frame as a rounded rectangle in the theme's colour,
+    /// the border ring around the focused one — sliding over the desktop picture, and
+    /// dissolving into the real windows at the end. Drawn from what toe already knows, so it
+    /// asks for nothing: no permission, no capture, and the motion starts the moment the
+    /// swipe does.
+    case cards
+    /// Photographs of the two workspaces: the real content, as Spaces shows it. A photograph
+    /// of the screen needs Screen Recording, a second permission on top of Accessibility,
+    /// which macOS 15 reminds you about now and then; and it has to be taken before anything
+    /// can move, which is the better part of a tenth of a second on a swipe.
+    case pictures
 }
 
 /// Which theme is in effect, by name.
@@ -668,6 +685,15 @@ public struct Config: Equatable {
                     config.animations.slideOnSwipe = v
                 } else {
                     config.warnings.append("animations.slide_on_swipe: must be true or false, using \(config.animations.slideOnSwipe)")
+                }
+            }
+            if let raw = a["slide_style"]?.stringValue {
+                if let style = SlideStyle(rawValue: raw) {
+                    config.animations.slideStyle = style
+                } else {
+                    config.warnings.append("animations.slide_style: '\(raw)' is not one of "
+                                           + SlideStyle.allCases.map(\.rawValue).joined(separator: ", ")
+                                           + ", using \(config.animations.slideStyle.rawValue)")
                 }
             }
             // Bounded like every other number, and this one for a reason of its own: the value
