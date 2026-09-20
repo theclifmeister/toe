@@ -99,7 +99,11 @@ public enum NetworkPanel {
     /// empty on the first frame, and empty again on every open, since the sampling runs only
     /// while the panel is up (#189). The graph goes with a link and not with the panel: with
     /// no interface there is nothing to count, and a flat line under "Wi-Fi off" would be a
-    /// graph of nothing.
+    /// graph of nothing. Nothing on the card says why there is no name: the first cut carried
+    /// a note row explaining Location, and #193 took it off — the reasoning is the comment at
+    /// the top of this file, for whoever asks, and the panel is the numbers. The Wi-Fi door is
+    /// the one row with its own separator, so a link with none of the numbers is hero,
+    /// separator, graph, separator, door and never two separators in a row.
     public static func rows(_ l: Link, traffic: NetworkTraffic.Window = NetworkTraffic.Window()) -> [PanelRow] {
         var rows: [PanelRow] = [
             .hero(glyph: BarWidgets.networkGlyph(l.connection), title: title(l), status: status(l),
@@ -124,8 +128,6 @@ public enum NetworkPanel {
                     rows.append(.info(Array(stats[pair..<min(pair + 2, stats.count)])))
                 }
             }
-            // Said once, quietly, so the missing name reads as a choice and not a bug.
-            rows += [.separator, .note("Names need Location, which toe does not ask for.")]
         } else if case .ethernet = l.connection {
             var stats: [PanelRow.Info] = []
             if let name = l.interfaceName { stats.append(PanelRow.Info("Interface", name)) }

@@ -4339,11 +4339,18 @@ h.test("the network panel is the connection's switch and numbers, and never a na
             "channel with its band, the rate")
     t.equal(rows[6].kind, .info([PanelRow.Info("Security", "WPA2 Personal"), PanelRow.Info("IP address", "192.168.1.5")]),
             "security and the address")
-    t.equal(rows[8].kind, .note("Names need Location, which toe does not ask for."),
-            "why there is no name, said once")
-    t.equal(rows.last?.action, .openSettings(.wifi), "the door")
+    t.equal(rows.count, 9, "hero, separator, graph, separator, three pairs of numbers, separator, door")
+    t.equal(rows[7].kind, .separator, "the door's own separator, straight after the numbers")
+    t.equal(rows[8].action, .openSettings(.wifi), "the door")
+    t.expect(!rows.contains { if case .note = $0.kind { return true } else { return false } },
+             "nothing on the card about the missing name: the reasoning is in the code, not the panel (#193)")
     t.expect(!rows.contains { if case .pick = $0.kind { return true } else { return false } },
              "no network list: a scan without Location has no names in it")
+    // With the note gone the door's separator is the only one after the numbers, so a Wi-Fi
+    // link that gives none of them must not end up with two in a row.
+    let bare = NetworkPanel.rows(NetworkPanel.Link(connection: .wifi(strength: 92, restricted: false), wifiPower: true))
+    t.equal(bare.map(\.kind), [rows[0].kind, .separator, .graph(NetworkTraffic.Window()), .separator, rows[8].kind],
+            "no numbers: hero, separator, graph, separator, door")
 
     let off = NetworkPanel.Link(connection: .none, wifiPower: false)
     t.equal(NetworkPanel.rows(off)[0].kind,
