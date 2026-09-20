@@ -44,12 +44,14 @@ On first launch, grant **System Settings → Privacy & Security → Accessibilit
 is the only permission toe needs.
 
 There is one optional extra. The workspace slide — the screen sliding sideways under a dock
-swipe, the way Spaces does — is drawn from a picture of the display, and taking that picture is
-**Screen Recording**, a second permission. It is off by default, and it is a gimmick: toe tiles,
-focuses and switches exactly the same without it. Turn it on from the quick menu under
-**Trigger › Toggle › Workspace slide** (or `slide_on_swipe = true` under `[animations]`) and macOS
-asks for the grant then, not before. If you would rather not give it, leave the slide off and
-nothing else changes.
+swipe, the way Spaces does — is drawn by default from what toe already knows: a card where each
+window is, in the theme's colour, sliding over your desktop picture and dissolving into the real
+windows. That asks for nothing. If you would rather see the real content slide, as Spaces shows
+it, `slide_style = "pictures"` under `[animations]` takes a picture of the display instead, and
+taking that picture is **Screen Recording**, a second permission: macOS asks for the grant then,
+not before, and reminds you now and then that toe holds it. The slide is a gimmick either way —
+toe tiles, focuses and switches exactly the same without it — and **Setup › Workspace slide** in
+the quick menu (or `slide_on_swipe = false`) turns it off.
 
 ### What the defaults assume
 
@@ -201,9 +203,10 @@ Other sections worth knowing about:
   layout across restarts. `[misc] cycle_empty_workspaces = false` makes `SUPER` + `TAB` skip the
   empty slots on the bar and go straight to the next workspace with windows on it — Setup in the
   quick menu has the same switch.
-- `[animations] slide_on_swipe` — slide the screen on a swipe the way Spaces does. Off by
-  default because it needs Screen Recording, a second permission; Trigger › Toggle in the quick
-  menu flips it.
+- `[animations] slide_on_swipe` — slide the screen on a swipe the way Spaces does; Setup in the
+  quick menu flips it. `slide_style` is what slides: `"cards"` (the default) drawn from the
+  layout and asking for nothing, or `"pictures"` of the real content, which needs Screen
+  Recording.
 - `[bar]` — the bar: whether it is drawn at all (off by default), its height and font, its three colours (the
   theme's while one is set), the clock's format, whether the battery shows its percentage and
   the day the calendar's weeks start on — those three are also what right-clicking the clock and

@@ -16,6 +16,8 @@ final class Coordinator: WindowTrackerDelegate {
     private let dockSwipes = DockSwipeTap()
     private let snapshot = ScreenSnapshot()
     private let slide = SlideOverlay()
+    private let pictures = WorkspacePictures()
+    private let desktopPictures = DesktopPictures()
     private let hideBlocker = HideBlocker()
     /// The menu bar item, which is only there while the bar is off: the two are one strip drawn
     /// in two places, and `applyBarSetting` makes and removes this as the config says.
@@ -259,7 +261,11 @@ final class Coordinator: WindowTrackerDelegate {
         /// The picture is up and the switch has been made under it. Waiting for the picture of
         /// the result.
         case switching
-        /// Both pictures are moving.
+        /// Both pictures are moving and the switch has not been made yet: a kept picture of
+        /// the arriving workspace let the motion start first. The render that comes next is
+        /// the swipe's own switch and must not be taken for a change under the pictures.
+        case slidingBeforeSwitch
+        /// Both pictures are moving over the switched screen.
         case sliding
     }
     private var slidePhase = SlidePhase.idle
@@ -295,6 +301,10 @@ final class Coordinator: WindowTrackerDelegate {
     /// this the switch showed through for a frame and the picture snapped back over it — a
     /// flash before the slide, which is worse than no slide.
     private static let slidePanelLatency: TimeInterval = 0.035
+    /// How long the cards take to melt into the windows under them once the slide has stopped.
+    /// Long enough to read as a fade and not a flicker, short enough that a card is not sitting
+    /// over a window the user has already started reading. Half of the slide itself.
+    private static let slideDissolveTime: TimeInterval = 0.15
     private var signalSources: [any DispatchSourceSignal] = []
 
     // MARK: - Start-up
@@ -993,13 +1003,23 @@ final class Coordinator: WindowTrackerDelegate {
         }
     }
 
-    /// The slide's permission and its picture of the displays, when `animations.slide_on_swipe`
-    /// asks for them. After `applyDockSwipeSetting`, which starts `setupWarnings` afresh, and
-    /// gated on `isManaging` like it: a swipe cannot arrive before the tap exists, so neither
-    /// can the need for a picture. With the setting off nothing here runs — no prompt, no
-    /// ScreenCaptureKit, no reminder from macOS 15 that toe can record the screen.
+    /// What the slide needs ahead of a swipe, when `animations.slide_on_swipe` asks for one:
+    /// the desktop picture decoded for the cards, or the permission and a picture of the
+    /// displays for the photographs. After `applyDockSwipeSetting`, which starts `setupWarnings`
+    /// afresh, and gated on `isManaging` like it: a swipe cannot arrive before the tap exists,
+    /// so neither can the need for either. With the setting off, or with the cards, nothing
+    /// here goes near ScreenCaptureKit — no prompt, no reminder from macOS 15 that toe can
+    /// record the screen.
     private func applyAnimationSetting() {
+        // A reload may have changed the border's colour or width, the gaps, or the slide
+        // itself, and a kept picture carries the first of those without its fingerprint
+        // knowing. Cheap to forget: the next swipe takes them again.
+        pictures.forgetAll()
         guard isManaging, config.animations.slideOnSwipe else { return }
+        if config.animations.slideStyle == .cards {
+            desktopPictures.prepare()
+            return
+        }
         guard ScreenSnapshot.isGranted else {
             setupWarnings.append("the slide needs Screen Recording — grant it in System Settings "
                                  + "› Privacy & Security, then relaunch toe")
@@ -1600,13 +1620,20 @@ final class Coordinator: WindowTrackerDelegate {
         let monitorID = workspaces.focusedMonitorID
         let before = workspaces.activeWorkspace[monitorID]
         // Where the windows are *now*, and which of them wears the border, for the mask on the
-        // outgoing picture. After the switch the model has forgotten both. Only with the slide
+        // outgoing picture — and as the fingerprint the picture is kept under, for the day the
+        // user swipes back. After the switch the model has forgotten both. Only with the slide
         // on: this is a render and a corner-radius query per window, on every swipe.
-        let leaving = config.animations.slideOnSwipe
-            ? workspaces.monitor(id: monitorID).map {
-                slideCutouts(workspaces.render(), on: $0, border: workspaces.focusedWindow)
-            } ?? []
-            : []
+        let style = config.animations.slideStyle
+        let leaving: SlideSide? = config.animations.slideOnSwipe && style == .pictures
+            ? workspaces.monitor(id: monitorID).flatMap { monitor in
+                before.map { slideSide(of: $0, on: monitor, border: true) }
+            }
+            : nil
+        let leavingCards: [WorkspaceSlide.Card]? = config.animations.slideOnSwipe && style == .cards
+            ? workspaces.monitor(id: monitorID).flatMap { monitor in
+                before.map { cardSide(of: $0, on: monitor) }
+            }
+            : nil
         switchWorkspace(target)
         let after = workspaces.activeWorkspace[monitorID]
 
@@ -1639,6 +1666,14 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
 
+        // The cards need nothing from anyone: both sides are drawn from the model, and the
+        // slide starts now.
+        if let leavingCards, let after {
+            beginCardSlide(direction, on: monitor, leaving: leavingCards,
+                           arriving: cardSide(of: after, on: monitor))
+            return
+        }
+
         // The grant may have landed since the config was applied — read it now, and if the
         // displays have not been listed since, list them for the next swipe. This one switches
         // the plain way rather than wait on an enumeration of every window on the system.
@@ -1658,7 +1693,72 @@ final class Coordinator: WindowTrackerDelegate {
             return
         }
 
-        beginSlide(direction, on: monitor, leaving: leaving)
+        // What the arriving workspace looks like now, to be checked against the picture kept of
+        // it — the check is the fingerprint's, and a picture that fails it is not used.
+        guard let leaving, let before, let after else {
+            Log.info("slide: skipped — nothing to slide from")
+            apply(refocus: true)
+            return
+        }
+        let arriving = slideSide(of: after, on: monitor, border: true)
+        let kept = pictures.picture(of: after, on: monitor.id, fingerprint: arriving.fingerprint,
+                                    area: monitor.usable,
+                                    desktopPicture: ScreenSnapshot.desktopPicture(of: monitor.id))
+        beginSlide(direction, on: monitor, leaving: leaving, workspace: before, arriving: kept)
+    }
+
+    /// One side of a slide: a workspace's windows as the mask on a picture of it, and the
+    /// fingerprint that says which windows those were.
+    private struct SlideSide {
+        var cutouts: [WorkspaceSlide.Cutout]
+        var fingerprint: WorkspaceSlide.Fingerprint
+    }
+
+    /// The mask and fingerprint of `workspace` as the model has it now, on `monitor`. `border`
+    /// says whether the focused window's cutout is grown for the ring — true for a picture of
+    /// the whole screen, which has the ring in it.
+    private func slideSide(of workspace: Int, on monitor: Monitor, border: Bool) -> SlideSide {
+        let plan = workspaces.render()
+        let focused = workspaces.focusedWindow
+        let windows = workspaces.workspaces[workspace]?.windows ?? []
+        return SlideSide(cutouts: slideCutouts(plan, on: monitor, border: border ? focused : nil),
+                         fingerprint: WorkspaceSlide.Fingerprint(plan: plan, of: windows, focused: focused))
+    }
+
+    /// The cards of `workspace` as the model has it now, on `monitor`, the focused one last so
+    /// that it draws on top — its ring lies outside its frame, over its neighbours' gaps.
+    private func cardSide(of workspace: Int, on monitor: Monitor) -> [WorkspaceSlide.Card] {
+        let plan = workspaces.render()
+        let focused = workspaces.focusedWindow
+        let windows = workspaces.workspaces[workspace]?.windows ?? []
+        var placed: [(id: WindowID, box: Box, radius: Double, focused: Bool)] = []
+        for (id, box) in plan.frames.merging(plan.floating, uniquingKeysWith: { _, floating in floating })
+        where windows.contains(id) {
+            let radius = Double(WindowCornerRadius.points(for: id) ?? SystemCornerRadius.points)
+            placed.append((id, box, radius, id == focused))
+        }
+        placed.sort { !$0.focused && $1.focused }
+        return WorkspaceSlide.cards(placed, in: monitor.usable)
+    }
+
+    /// The theme as the cards wear it: the quick menu's background for the face, the border's
+    /// gradient for the ring.
+    private var cardStyle: SlideOverlay.CardStyle {
+        let menu = config.menu
+        let base = Colors.rgba(menu.background, or: RGBA(r: 0.10, g: 0.11, b: 0.15, a: 1))
+        // The menu's own translucency, so the desktop shows through the cards as it shows
+        // through the menu. A card is not a window; it should not pretend to be opaque.
+        let fill = RGBA(r: base.r, g: base.g, b: base.b, a: menu.opacity)
+        let border = config.border
+        let radians = border.angle * .pi / 180
+        let dx = cos(radians) / 2, dy = sin(radians) / 2
+        return SlideOverlay.CardStyle(
+            fill: Colors.cgColor(fill), backdrop: Colors.cgColor(base),
+            borderWidth: border.enabled ? border.width : 0,
+            borderColors: [border.activeStart, border.activeEnd].map {
+                Colors.cgColor(Colors.rgba($0, or: RGBA(r: 0.2, g: 0.8, b: 1, a: 0.93)))
+            },
+            borderStart: CGPoint(x: 0.5 - dx, y: 0.5 - dy), borderEnd: CGPoint(x: 0.5 + dx, y: 0.5 + dy))
     }
 
     /// The windows on `monitor` in `plan`, as the mask for a picture of it — each at the radius
@@ -1686,12 +1786,22 @@ final class Coordinator: WindowTrackerDelegate {
     /// because every step is asynchronous and a second swipe, a render from elsewhere or a
     /// display change can have moved on without it. The model is already switched when this is
     /// called; what is owed is the `apply`, and every path out of here makes it exactly once.
+    ///
+    /// With `arriving` — a picture kept from the last time the user left that workspace, still
+    /// true to its shape (`WorkspacePictures`) — the middle of the sequence goes: panel up
+    /// showing the first picture → both pictures slide at once → the real switch, made under
+    /// the moving pictures → panel down onto the result. The apps get the whole slide to paint
+    /// in rather than a beat, and the motion starts as soon as the first picture is in, which
+    /// is the one capture left on the critical path. Either way the picture of the screen as
+    /// it is goes into the store, as the picture of the workspace being left.
     private func beginSlide(_ direction: WorkspaceSlide.Direction, on monitor: Monitor,
-                            leaving outgoingCutouts: [WorkspaceSlide.Cutout]) {
+                            leaving: SlideSide, workspace leavingIndex: Int,
+                            arriving: WorkspacePictures.Picture?) {
         slideGeneration += 1
         let mine = slideGeneration
         let started = Date()
         func ms() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
+        let outgoingCutouts = leaving.cutouts
 
         slidePhase = .awaitingPicture
 
@@ -1722,10 +1832,32 @@ final class Coordinator: WindowTrackerDelegate {
             Log.info("slide: outgoing picture after \(ms()) ms"
                      + " (screen \(screenMs) ms, wallpaper \(wallpaperMs) ms)"
                      + (wallpaper == nil ? " — no wallpaper picture, sliding the whole screen" : ""))
-            self.slidePhase = .switching
+            // Kept before it is shown, and whatever happens next: this is the picture of the
+            // workspace being left, and the next swipe back is what it is for.
+            self.pictures.keep(WorkspacePictures.Picture(image: image, cutouts: outgoingCutouts,
+                                                         fingerprint: leaving.fingerprint,
+                                                         area: monitor.usable,
+                                                         desktopPicture: ScreenSnapshot.desktopPicture(of: monitor.id),
+                                                         taken: Date()),
+                               of: leavingIndex, on: monitor.id)
             self.slide.begin(showing: image, over: monitor.usable, wallpaper: wallpaper,
                              cutouts: outgoingCutouts)
 
+            if let arriving {
+                // Both pictures are in hand, so the motion starts now and the switch is made
+                // under it, as the cards always do.
+                Log.info("slide: pushing the picture kept of workspace \(self.workspaces.activeWorkspace[monitor.id] ?? 0)"
+                         + " \(Int(-arriving.taken.timeIntervalSinceNow)) s ago")
+                self.slidePhase = .slidingBeforeSwitch
+                self.slide.push(arriving.image, cutouts: arriving.cutouts, direction: direction,
+                                duration: self.config.animations.slideDuration) { [weak self] in
+                    self?.slideEnded(mine, ms: ms)
+                }
+                self.switchUnderSlide(mine, ms: ms)
+                return
+            }
+
+            self.slidePhase = .switching
             // The switch itself, once the panel is on screen. Still `.switching` if it runs: a
             // cancel in the meantime came from a caller that renders next itself.
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.slidePanelLatency) { [weak self] in
@@ -1769,6 +1901,70 @@ final class Coordinator: WindowTrackerDelegate {
             wallpaperMs = ms()
             wallpaper = .some(image)
             proceed()
+        }
+    }
+
+    /// The cards' slide: stand-ins for the windows of both workspaces, drawn from the model,
+    /// moving at once, with the real switch made under them and the cards dissolving into the
+    /// windows at the end. Nothing is photographed and nothing is waited for, which is the
+    /// point of it — see `SlideStyle`. The phases are the pictures' hit path's: `sliding
+    /// BeforeSwitch` until the switch, `sliding` after, idle when the dissolve is done.
+    private func beginCardSlide(_ direction: WorkspaceSlide.Direction, on monitor: Monitor,
+                                leaving: [WorkspaceSlide.Card], arriving: [WorkspaceSlide.Card]) {
+        slideGeneration += 1
+        let mine = slideGeneration
+        let started = Date()
+        func ms() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
+
+        let screen = NSScreen.screens.first { $0.displayID == monitor.id }
+        let desktop = screen.flatMap { desktopPictures.image(for: $0) }
+        let style = cardStyle
+        slide.begin(cards: leaving, over: monitor.usable, display: monitor.frame,
+                    desktop: desktop, style: style)
+        slidePhase = .slidingBeforeSwitch
+        slide.push(cards: arriving, style: style, direction: direction,
+                   duration: config.animations.slideDuration, dissolve: Self.slideDissolveTime) { [weak self] in
+            self?.slideEnded(mine, ms: ms)
+        }
+        Log.info("slide: \(leaving.count) card(s) out, \(arriving.count) in, after \(ms()) ms"
+                 + (desktop == nil ? " — no desktop picture yet, over the theme colour" : ""))
+        switchUnderSlide(mine, ms: ms)
+    }
+
+    /// The real switch, made under pictures that are already moving. The same two refreshes
+    /// as the pictures' `switching` path before anything real moves — the panel has to be
+    /// composited before the windows under it are — but the slide does not wait for them.
+    ///
+    /// Still `.slidingBeforeSwitch` if it runs: a cancel in the meantime came from a caller
+    /// that renders next itself. `apply` reads the phase to know that this render is the
+    /// swipe's own and leaves the slide up; it is moved on afterwards, so that a render from
+    /// anywhere else for the rest of the slide takes the panel down as it always has.
+    private func switchUnderSlide(_ mine: Int, ms: @escaping () -> Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.slidePanelLatency) { [weak self] in
+            guard let self, self.slideIs(.slidingBeforeSwitch, mine) else { return }
+            self.apply(refocus: true)
+            if self.slideIs(.slidingBeforeSwitch, mine) { self.slidePhase = .sliding }
+            Log.info("slide: switched after \(ms()) ms, under the slide")
+        }
+    }
+
+    /// The end of a slide that started before its switch — the panel is down, and what is
+    /// owed is only to notice.
+    private func slideEnded(_ mine: Int, ms: () -> Int) {
+        guard slideGeneration == mine else { return }
+        switch slidePhase {
+        case .slidingBeforeSwitch:
+            // The slide is at least 50 ms and the switch comes at 35, so this should not
+            // happen — but a switch owed is a switch owed, and a screen left showing the old
+            // workspace under a model that has moved on is the one outcome not allowed.
+            slidePhase = .idle
+            apply(refocus: true)
+            Log.info("slide: done after \(ms()) ms — and switched, late")
+        case .sliding:
+            slidePhase = .idle
+            Log.info("slide: done after \(ms()) ms")
+        case .idle, .awaitingPicture, .switching:
+            break
         }
     }
 
@@ -2155,6 +2351,7 @@ final class Coordinator: WindowTrackerDelegate {
         // the back of the new list, since `refreshMonitors` has already run and the rects are
         // current.
         snapshot.forgetWallpapers()
+        pictures.forgetAll()
         snapshot.refresh { [weak self] in self?.warmSlide() }
         desired.removeAll()
         corrections.removeAll()
@@ -2350,10 +2547,12 @@ final class Coordinator: WindowTrackerDelegate {
         // the instant way. A render during the slide itself means the screen has changed under
         // the pictures, and the honest thing is to show it. In between, while the pictures are
         // being made, a render is part of the end state the second picture will show — the
-        // swipe's own switch above all — and is left alone.
+        // swipe's own switch above all — and is left alone. With a kept picture the pictures
+        // are already moving when that switch arrives, and it is told apart from a change
+        // under them by its phase: `slidingBeforeSwitch` is the swipe's own render, once.
         switch slidePhase {
         case .awaitingPicture, .sliding: cancelSlide()
-        case .idle, .switching: break
+        case .idle, .switching, .slidingBeforeSwitch: break
         }
 
         let plan = workspaces.render()

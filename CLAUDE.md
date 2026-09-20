@@ -9,9 +9,10 @@ Omarchy's defaults (`preserve_split = true`, `force_split = 2`). It runs as a ba
 (`.accessory`) with no Dock icon and no main window — a menu bar item or, with `[bar] enabled`,
 Omarchy's bar across the top of every display, key bindings and a gradient border around the
 focused window. Accessibility is the only
-permission it asks for by default; the opt-in `[animations] slide_on_swipe` is the one feature
-behind a second one (Screen Recording — see `ScreenSnapshot`), and the bar's Bluetooth panel
-the one behind a third, asked the first time that panel is opened (see "The bar").
+permission it asks for by default; the opt-in `[animations] slide_style = "pictures"` is the one
+feature behind a second one (Screen Recording — see `ScreenSnapshot`; the default `"cards"` style
+draws the slide from the model and asks for nothing), and the bar's Bluetooth panel the one
+behind a third, asked the first time that panel is opened (see "The bar").
 
 ## Commands
 

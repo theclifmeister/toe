@@ -21,10 +21,19 @@ final class ScreenSnapshot {
     private var displays: [CGDirectDisplayID: SCDisplay] = [:]
     /// toe itself, for the picture that must not contain toe's own panel.
     private var toe: SCRunningApplication?
-    /// The Dock, which is the process that draws the desktop picture — `Wallpaper-` is one of
-    /// its windows, at the desktop level — and so the one to ask for a picture of the wallpaper
-    /// alone.
-    private var dock: SCRunningApplication?
+    /// Whoever draws the desktop picture, and the windows of theirs that are not it.
+    ///
+    /// Found by the window rather than by name, because the name changed: the Dock drew the
+    /// wallpaper through macOS 15 and `WindowManager` draws it on macOS 26, and a filter on the
+    /// Dock's bundle identifier asked for nothing and got a refusal — see
+    /// `WorkspaceSlide.isDesktopPicture`. The filter still names the *application* rather than
+    /// the window, deliberately: an application filter survives the window being torn down and
+    /// made again, which a wallpaper change may do, where a window filter would go stale until
+    /// the next `refresh` (a display change or a reload) and fail every swipe in between. The
+    /// price is that the owner's other windows would be in the picture too — the Dock's own
+    /// strip, WindowManager's Stage Manager shelf — so those are listed here and excepted.
+    private var wallpaperOwner: SCRunningApplication?
+    private var wallpaperOwnersOtherWindows: [SCWindow] = []
     private var requested = false
     /// The picture of the desktop behind each display, kept between swipes.
     ///
@@ -44,8 +53,10 @@ final class ScreenSnapshot {
     /// unchanged, because during a slide this is one of those three anyway; what grows is the
     /// steady state, between swipes. `wallpaperScale` is what keeps that number small enough to
     /// be worth it: 7.4 MB per display on a 5120×1440 screen rather than 29.5. Bounded by the
-    /// number of displays and by nothing the user does — but it is still why nothing else here
-    /// is cached, and why a fourth picture should not be.
+    /// number of displays and by nothing the user does — and it is why nothing else is cached
+    /// *here*. The pictures of the workspaces themselves are kept too, since v0.30.0, but by
+    /// `WorkspacePictures`, under a count and a fingerprint of their own; that file carries the
+    /// reasoning for them, and this one stays the one place the wallpaper is.
     private var wallpapers: [CGDirectDisplayID: CachedWallpaper] = [:]
 
     /// A cached desktop picture, with everything a swipe has to agree with before it may use it.
@@ -131,8 +142,17 @@ final class ScreenSnapshot {
                 }
                 self.displays = Dictionary(uniqueKeysWithValues: content.displays.map { ($0.displayID, $0) })
                 self.toe = content.applications.first { $0.processID == getpid() }
-                self.dock = content.applications.first { $0.bundleIdentifier == "com.apple.dock" }
-                Log.info("slide: \(self.displays.count) display(s) can be pictured")
+                let desktop = content.windows.first {
+                    WorkspaceSlide.isDesktopPicture(title: $0.title, layer: $0.windowLayer)
+                }
+                self.wallpaperOwner = desktop?.owningApplication
+                self.wallpaperOwnersOtherWindows = content.windows.filter {
+                    $0.owningApplication?.processID == self.wallpaperOwner?.processID
+                        && !WorkspaceSlide.isDesktopPicture(title: $0.title, layer: $0.windowLayer)
+                }
+                Log.info("slide: \(self.displays.count) display(s) can be pictured"
+                         + (self.wallpaperOwner.map { "; the desktop picture is \($0.bundleIdentifier)'s" }
+                            ?? "; no desktop picture window — the whole screen will slide"))
                 then?()
             }
         }
@@ -167,7 +187,7 @@ final class ScreenSnapshot {
 
     /// The desktop picture `NSWorkspace` currently has on `id`, or nil if that display is not
     /// one AppKit is listing — which is not a failure worth logging, only a cache that misses.
-    private static func desktopPicture(of id: CGDirectDisplayID) -> URL? {
+    static func desktopPicture(of id: CGDirectDisplayID) -> URL? {
         NSScreen.screens.first { $0.displayID == id }
             .flatMap { NSWorkspace.shared.desktopImageURL(for: $0) }
     }
@@ -190,9 +210,9 @@ final class ScreenSnapshot {
         /// panel already covering the screen, and a picture of the panel showing the last
         /// picture is a hall of mirrors.
         case everythingButToe
-        /// The desktop picture alone: the Dock's windows and nothing else. What the windows
-        /// slide over. (Finder's desktop icons are a Finder window, so they are not in it and
-        /// sit the slide out.)
+        /// The desktop picture alone: its owner's windows, less any that are not it, and
+        /// nothing else. What the windows slide over. (Finder's desktop icons are a Finder
+        /// window, so they are not in it and sit the slide out.)
         case wallpaper
     }
 
@@ -227,8 +247,9 @@ final class ScreenSnapshot {
             filter = SCContentFilter(display: display, excludingApplications: [toe].compactMap { $0 },
                                      exceptingWindows: [])
         case .wallpaper:
-            guard let dock else { completion(nil); return }
-            filter = SCContentFilter(display: display, including: [dock], exceptingWindows: [])
+            guard let wallpaperOwner else { completion(nil); return }
+            filter = SCContentFilter(display: display, including: [wallpaperOwner],
+                                     exceptingWindows: wallpaperOwnersOtherWindows)
         }
 
         let config = SCStreamConfiguration()

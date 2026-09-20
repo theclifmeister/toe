@@ -254,8 +254,8 @@ public struct StyleMenu: Equatable {
 /// count. That is the bar to clear: `restore_session` shows nothing until the next launch, and
 /// is not here.
 public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
-    /// `[animations] slide_on_swipe`. The one that can ask for a permission — see
-    /// `Coordinator.toggle` on why the flip goes through the file.
+    /// `[animations] slide_on_swipe`. The one that can ask for a permission, with
+    /// `slide_style = "pictures"` — see `Coordinator.toggle` on why the flip goes through the file.
     case slide
     /// `[border] enabled`. The gradient around the focused window.
     case border

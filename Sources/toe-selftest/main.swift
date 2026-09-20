@@ -2209,18 +2209,18 @@ h.test("an accessory is observed when it is a running application's helper") { t
     t.equal(asked, true, "and now it was")
 }
 
-h.test("the slide on a swipe is configurable and off by default") { t in
+h.test("the slide on a swipe is configurable and on by default") { t in
     let c = Config.makeDefault()
-    t.equal(c.animations.slideOnSwipe, false, "off until asked for: it needs Screen Recording")
+    t.equal(c.animations.slideOnSwipe, true, "on: the cards ask for nothing")
     t.equal(c.animations.slideDuration, 0.3, "about what Spaces takes")
 
-    let on = try Config.parse("[animations]\nslide_on_swipe = true\nslide_duration = 0.5\n")
-    t.equal(on.animations.slideOnSwipe, true, "on")
-    t.equal(on.animations.slideDuration, 0.5, "duration")
-    t.equal(on.warnings, [], "no warnings")
+    let off = try Config.parse("[animations]\nslide_on_swipe = false\nslide_duration = 0.5\n")
+    t.equal(off.animations.slideOnSwipe, false, "off")
+    t.equal(off.animations.slideDuration, 0.5, "duration")
+    t.equal(off.warnings, [], "no warnings")
 
     let bad = try Config.parse("[animations]\nslide_on_swipe = \"yes\"\nslide_duration = nan\n")
-    t.equal(bad.animations.slideOnSwipe, false, "a non-boolean keeps the default")
+    t.equal(bad.animations.slideOnSwipe, true, "a non-boolean keeps the default")
     t.equal(bad.animations.slideDuration, 0.3, "a NaN never reaches Core Animation")
     t.equal(bad.warnings.contains { $0.contains("animations.slide_on_swipe") }, true, "the boolean is named")
     t.equal(bad.warnings.contains { $0.contains("animations.slide_duration") }, true, "and the duration")
@@ -2241,6 +2241,93 @@ h.test("the slide follows the target, not the fingers") { t in
         t.equal(WorkspaceSlide.direction(for: target), natural ? .left : .right,
                 "fingers left, natural scrolling \(natural ? "on" : "off")")
     }
+}
+
+h.test("the desktop picture is known by what it is, not by who draws it") { t in
+    let desktop = -2147483623
+    t.equal(WorkspaceSlide.isDesktopPicture(title: "Wallpaper", layer: desktop - 1), true,
+            "WindowManager's, on macOS 26")
+    t.equal(WorkspaceSlide.isDesktopPicture(title: "Wallpaper-Sonoma Horizon", layer: desktop), true,
+            "the Dock's, through macOS 15")
+    t.equal(WorkspaceSlide.isDesktopPicture(title: "", layer: desktop + 20), false,
+            "Finder's desktop icons sit below zero and are not it")
+    t.equal(WorkspaceSlide.isDesktopPicture(title: "Display 1 Backstop", layer: desktop - 3), false,
+            "nor the window server's backstop")
+    t.equal(WorkspaceSlide.isDesktopPicture(title: "Wallpaper", layer: 0), false,
+            "a window at an ordinary level with the same title is somebody's document")
+    t.equal(WorkspaceSlide.isDesktopPicture(title: nil, layer: desktop), false, "no title, no match")
+}
+
+h.test("the slide's style is a word, and cards is the one that asks for nothing") { t in
+    t.equal(Config().animations.slideStyle, .cards, "the default needs no permission")
+    t.equal(try Config.parse("[animations]\nslide_style = \"pictures\"\n").animations.slideStyle,
+            .pictures, "pictures is the opt-in")
+    let bad = try Config.parse("[animations]\nslide_style = \"video\"\n")
+    t.equal(bad.animations.slideStyle, .cards, "a word it does not know keeps the default")
+    t.equal(bad.warnings.contains { $0.contains("animations.slide_style") && $0.contains("cards, pictures") },
+            true, "and is told the words it does know")
+}
+
+h.test("a card is the window's frame on the area, unclipped, and only if it is on the area") { t in
+    let area = box(0, 40, 1440, 860)
+    let cards = WorkspaceSlide.cards([(1, box(10, 50, 700, 400), 12, true),
+                                      (2, box(1400, 800, 200, 200), 8, false),   // half off
+                                      (3, box(1500, 40, 100, 100), 8, false)],   // elsewhere
+                                     in: area)
+    t.equal(cards.map(\.id), [1, 2], "the ones on the area, in the order given")
+    t.equalBox(cards[0].box, box(10, 10, 700, 400), "relative to the area's top-left")
+    t.equal(cards[0].focused, true, "and it knows which wears the border")
+    t.equalBox(cards[1].box, box(1400, 760, 200, 200), "not clipped: the corners stay round")
+}
+
+h.test("a kept picture of a workspace is only as good as its fingerprint") { t in
+    var plan = RenderPlan()
+    plan.frames = [1: box(0, 40, 720, 860), 2: box(720, 40, 720, 860), 9: box(1440, 0, 500, 500)]
+    plan.floating = [3: box(100, 100, 300, 200)]
+    let mine: Set<WindowID> = [1, 2, 3]                    // 9 is on the other display
+    let taken = WorkspaceSlide.Fingerprint(plan: plan, of: mine, focused: 1)
+    t.equal(taken.windows.count, 3, "the workspace's windows, tiled and floating")
+    t.equal(taken.windows[9], nil, "and nobody else's")
+    t.equal(taken.focused, 1, "with the border where it was")
+
+    t.equal(WorkspaceSlide.Fingerprint(plan: plan, of: mine, focused: 1), taken,
+            "the same shape again is the same fingerprint")
+    t.equal(WorkspaceSlide.Fingerprint(plan: plan, of: mine, focused: 2) == taken, false,
+            "the border on another window is not — the ring is in the picture")
+    t.equal(WorkspaceSlide.Fingerprint(plan: plan, of: mine, focused: 9).focused, nil,
+            "a focus on the other display is nobody's here")
+
+    var moved = plan
+    moved.frames[2] = box(720, 40, 700, 860)
+    t.equal(WorkspaceSlide.Fingerprint(plan: moved, of: mine, focused: 1) == taken, false,
+            "a window resized by a point is a different picture")
+    var closed = mine
+    closed.remove(3)
+    t.equal(WorkspaceSlide.Fingerprint(plan: plan, of: closed, focused: 1) == taken, false,
+            "a window that closed while the workspace was away")
+    t.equal(WorkspaceSlide.Fingerprint(plan: plan, of: mine.union([4]), focused: 1), taken,
+            "a window the plan does not place is not in the picture either way")
+}
+
+h.test("the slide keeps the pictures used most recently and no more") { t in
+    var kept = RecentCache<Int, String>(limit: 3)
+    for (n, name) in [(1, "one"), (2, "two"), (3, "three")] { kept.insert(name, for: n) }
+    t.equal(kept.count, 3, "three fit")
+    t.equal(kept.lookup(1), "one", "and the oldest is still there")
+    kept.insert("four", for: 4)
+    t.equal(kept.count, 3, "a fourth pushes one out")
+    t.equal(kept.peek(2), nil, "the least recently used, not the oldest — one was just looked up")
+    t.equal(kept.keys, [3, 1, 4], "least recent first")
+    kept.insert("three again", for: 3)
+    t.equal(kept.keys, [1, 4, 3], "re-inserting a key makes it the most recent without growing")
+    t.equal(kept.peek(3), "three again", "and replaces its value")
+    kept.remove(4)
+    t.equal(kept.keys, [1, 3], "a removed key is gone from the order too")
+    kept.removeAll()
+    t.equal(kept.count, 0, "and so is everything on removeAll")
+    var none = RecentCache<Int, String>(limit: 0)
+    none.insert("x", for: 1)
+    t.equal(none.count, 0, "a limit of zero keeps nothing")
 }
 
 h.test("a slide's mask is the windows on the picture, clipped to it") { t in
@@ -5769,15 +5856,15 @@ h.test("setting a theme moves one line and leaves every other byte") { t in
 
 h.test("a boolean is written back the way a theme is") { t in
     let before = Config.defaultTOML
-    let after = ConfigWriter.setting("slide_on_swipe", to: "true", inTable: "animations", of: before)
+    let after = ConfigWriter.setting("slide_on_swipe", to: "false", inTable: "animations", of: before)
     let a = before.components(separatedBy: "\n"), b = after.components(separatedBy: "\n")
     t.equal(a.count, b.count, "no line is added or removed")
     t.equal(zip(a, b).filter { $0 != $1 }.count, 1, "and exactly one is different")
     guard let c = try? Config.parse(after) else { return t.expect(false, "the result parses") }
-    t.equal(c.animations.slideOnSwipe, true, "the slide is on")
+    t.equal(c.animations.slideOnSwipe, false, "the slide is off")
     t.equal(c.warnings, [], "with nothing to warn about")
-    t.equal(ConfigWriter.setting("slide_on_swipe", to: "false", inTable: "animations", of: after),
-            before, "and off again is the shipped file, byte for byte")
+    t.equal(ConfigWriter.setting("slide_on_swipe", to: "true", inTable: "animations", of: after),
+            before, "and on again is the shipped file, byte for byte")
 
     let bare = ConfigWriter.setting("slide_on_swipe", to: "true", inTable: "animations",
                                     of: "[general]\ngaps_in = 5\n")
