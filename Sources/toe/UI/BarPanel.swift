@@ -49,6 +49,9 @@ final class BarPanel {
     private var sampler: Timer?
     /// Where the strip is, in Cocoa coordinates, kept while the panel is ordered out.
     private var stripRect: NSRect = .zero
+    /// The whole display the strip is on, in Cocoa coordinates — where a menu from its menu
+    /// bar would drop down, for `isMenuOpen`.
+    private var displayFrame: NSRect = .zero
 
     init(screen: NSScreen) {
         displayID = screen.displayID
@@ -89,6 +92,7 @@ final class BarPanel {
         let rect = NSRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height)
         if panel.frame != rect { panel.setFrame(rect, display: false) }
         stripRect = rect
+        displayFrame = frame
         panel.backgroundColor = NSColor(snapshot.background)
         view.centre = centre
         view.snapshot = snapshot
@@ -127,7 +131,7 @@ final class BarPanel {
                                           height: Double(stripRect.height))
         // The window list is asked only when the answer can matter — the pointer has left the
         // strip mid-peek — so a pointer resting on a widget costs no window-server round trip.
-        let menuOpen = isPeeking && pointer == .away && Self.isMenuOpen()
+        let menuOpen = isPeeking && pointer == .away && isMenuOpen()
         guard peek.sample(pointer, menuOpen: menuOpen, at: ProcessInfo.processInfo.systemUptime) else {
             // Nothing pending and the pointer gone: the tracking area will start this again.
             if !peek.isPeeking, pointer == .away { stopSampling() }
@@ -142,16 +146,26 @@ final class BarPanel {
         onPeekChanged?()
     }
 
-    /// Whether an application has a menu dropped down. Measured for this: a menu bar's menu is
-    /// an on-screen window at `kCGPopUpMenuWindowLevel`, 101, owned by the application, sitting
-    /// just under the menu bar's strip — the window list is the one place outside that
-    /// application it can be seen from. Context menus are at the same level and keep the peek
-    /// too, which is harmless: they close, and the linger runs from there.
-    private static func isMenuOpen() -> Bool {
+    /// Whether an application has a menu dropped down on this panel's display. Measured for
+    /// this: a menu bar's menu is an on-screen window at `kCGPopUpMenuWindowLevel`, 101, owned
+    /// by the application, sitting just under the menu bar's strip — the window list is the one
+    /// place outside that application it can be seen from. Context menus are at the same level
+    /// and keep the peek too, which is harmless: they close, and the linger runs from there.
+    /// Which of the level's windows count is `MenuBarPeek.isMenuOpen` — not all of them do, and
+    /// the one that does not is why the bar once never came back.
+    private func isMenuOpen() -> Bool {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
                 as? [[String: Any]] else { return false }
-        let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
-        return list.contains { ($0[kCGWindowLayer as String] as? Int) == menuLevel }
+        let windows = list.compactMap { info -> MenuBarPeek.Window? in
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary) else { return nil }
+            return MenuBarPeek.Window(layer: layer, alpha: info[kCGWindowAlpha as String] as? Double ?? 1,
+                                      bounds: Box(x: bounds.minX, y: bounds.minY,
+                                                  w: bounds.width, h: bounds.height))
+        }
+        return MenuBarPeek.isMenuOpen(windows, menuLevel: Int(CGWindowLevelForKey(.popUpMenuWindow)),
+                                      on: Coordinates.toAX(displayFrame))
     }
 
     /// Where a widget's slot is, for the panel that hangs under it — see `BarView.slotMidX`.

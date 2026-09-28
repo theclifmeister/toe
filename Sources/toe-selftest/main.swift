@@ -3453,6 +3453,42 @@ h.test("the bar steps aside for the menu bar when the pointer rests on the top e
     t.equal(peek.sample(.edge, menuOpen: false, at: 6.25), false, "with nothing carried over")
 }
 
+h.test("only a menu someone could see keeps the bar aside") { t in
+    // Two displays side by side, in Accessibility coordinates: the primary 2560 wide, the
+    // second to its right.
+    let primary = Box(x: 0, y: 0, w: 2560, h: 1440)
+    let second = Box(x: 2560, y: 0, w: 2560, h: 1440)
+    func open(_ windows: [MenuBarPeek.Window], on display: Box = primary) -> Bool {
+        MenuBarPeek.isMenuOpen(windows, menuLevel: 101, on: display)
+    }
+    let menu = MenuBarPeek.Window(layer: 101, alpha: 1, bounds: Box(x: 300, y: 30, w: 240, h: 380))
+    t.equal(open([menu]), true, "a menu dropped down under the strip")
+    t.equal(open([]), false, "nothing at all")
+    // What held the bar aside for ever: Cloudflare WARP's window at level 101, on screen,
+    // 20 × 1 at alpha 0 in the primary display's bottom-left corner — as the window list
+    // reported it on the machine the bug was found on.
+    let warp = MenuBarPeek.Window(layer: 101, alpha: 0, bounds: Box(x: 0, y: 1439, w: 20, h: 1))
+    t.equal(open([warp]), false, "an invisible sliver at the menu level is not a menu")
+    t.equal(open([warp, menu]), true, "and does not hide a real one beside it")
+    t.equal(open([MenuBarPeek.Window(layer: 101, alpha: 1, bounds: Box(x: 0, y: 1439, w: 20, h: 1))]),
+            false, "a sliver that is opaque is still no menu")
+    t.equal(open([MenuBarPeek.Window(layer: 101, alpha: 0, bounds: menu.bounds)]),
+            false, "nor is a menu-sized window nobody can see")
+    t.equal(open([MenuBarPeek.Window(layer: 25, alpha: 1, bounds: menu.bounds)]),
+            false, "the status items' level is not the menu level")
+    t.equal(open([menu], on: second), false, "a menu on another display is that display's")
+    t.equal(open([MenuBarPeek.Window(layer: 101, alpha: 1, bounds: Box(x: 2900, y: 30, w: 240, h: 380))],
+                 on: second), true, "and counts there")
+
+    // The peek, fed what the old test answered with WARP running and what the new one does.
+    var peek = MenuBarPeek()
+    peek.sample(.edge, menuOpen: false, at: 0)
+    t.equal(peek.sample(.edge, menuOpen: false, at: 0.5), true, "the bar steps aside")
+    t.equal(peek.sample(.away, menuOpen: open([warp]), at: 1), false, "the pointer leaves the strip")
+    t.equal(peek.sample(.away, menuOpen: open([warp]), at: 1.5), true, "and the bar comes back over the menu bar")
+    t.equal(peek.isPeeking, false, "on top again")
+}
+
 h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
     let m = BarMetrics()
     let items = [BarItems.menu(markWidth: 7.2, metrics: m)]
