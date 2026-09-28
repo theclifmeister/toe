@@ -82,4 +82,46 @@ public struct MenuBarPeek: Equatable, Sendable {
         isPeeking = false
         since = nil
     }
+
+    // MARK: Is a menu open
+
+    /// One on-screen window from `CGWindowListCopyWindowInfo`, cut to what `isMenuOpen` reads:
+    /// `kCGWindowLayer`, `kCGWindowAlpha` and `kCGWindowBounds` — the last already in
+    /// Accessibility coordinates, as the window list reports it.
+    public struct Window: Equatable, Sendable {
+        public var layer: Int
+        public var alpha: Double
+        public var bounds: Box
+
+        public init(layer: Int, alpha: Double, bounds: Box) {
+            self.layer = layer; self.alpha = alpha; self.bounds = bounds
+        }
+    }
+
+    /// The smallest a menu can be on either side and still be one. A menu of a single item is
+    /// some twenty points tall and far wider; nothing that could hold a row of text is under
+    /// this.
+    public static let menuMinimumSide: Double = 8
+
+    /// Whether the window list shows a menu dropped down on `display` — a window at the
+    /// pop-up-menu level (`menuLevel`, `kCGPopUpMenuWindowLevel`, 101) that can actually be
+    /// seen: some alpha, a size a menu could have, and on this display.
+    ///
+    /// The level alone was the first cut, and it held the bar aside for ever on a machine with
+    /// Cloudflare WARP on it: WARP keeps a 20 × 1 window at level 101 on screen at all times,
+    /// at alpha 0, in the bottom-left corner of the primary display. The window server lists
+    /// it as on screen, so every sample mid-peek read "a menu is open", the linger never
+    /// started, and the bar never came back once the pointer had left the strip. Any agent that
+    /// parks an invisible window at that level does the same, so the test is what a menu *is*
+    /// — visible, big enough to hold a row, on the display whose menu bar it came from — and
+    /// not whose it is.
+    public static func isMenuOpen(_ windows: [Window], menuLevel: Int, on display: Box) -> Bool {
+        windows.contains { window in
+            guard window.layer == menuLevel, window.alpha > 0,
+                  window.bounds.w >= menuMinimumSide, window.bounds.h >= menuMinimumSide
+            else { return false }
+            let overlap = window.bounds.intersection(display)
+            return overlap.w > 0 && overlap.h > 0
+        }
+    }
 }
