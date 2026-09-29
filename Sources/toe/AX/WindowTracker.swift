@@ -111,6 +111,9 @@ final class WindowTracker {
     /// Helpers found before they finished launching, each watched until it has — see
     /// `observeIfHelper`.
     private var pendingHelpers: [pid_t: NSKeyValueObservation] = [:]
+    /// Applications that are not regular yet, each watched until it becomes one — see
+    /// `watchForRegular`.
+    private var notYetRegular: [pid_t: NSKeyValueObservation] = [:]
     private var runningApplications: NSKeyValueObservation?
     private let ownPID = ProcessInfo.processInfo.processIdentifier
 
@@ -227,6 +230,7 @@ final class WindowTracker {
     }
 
     private func forgetApplication(_ pid: pid_t) {
+        notYetRegular.removeValue(forKey: pid)
         stopObserving(pid)
         for (id, window) in windows where window.pid == pid {
             windows.removeValue(forKey: id)
@@ -313,10 +317,36 @@ final class WindowTracker {
         let alive = Set(running.map(\.processIdentifier))
         for pid in owners.keys where !alive.contains(pid) { forgetApplication(pid) }
         for pid in pendingHelpers.keys where !alive.contains(pid) { pendingHelpers.removeValue(forKey: pid) }
+        for pid in notYetRegular.keys where !alive.contains(pid) { notYetRegular.removeValue(forKey: pid) }
         let regular = Set(running.lazy.filter { $0.activationPolicy == .regular }
                                       .compactMap(\.bundleIdentifier))
         for app in running where app.activationPolicy == .accessory {
             observeIfHelper(app, regular: regular, among: running)
+        }
+        for app in running where app.activationPolicy != .regular { watchForRegular(app) }
+    }
+
+    /// An application that launches as an accessory and becomes a regular one later is
+    /// observed from the moment it does. Docker Desktop is the case that found this: started
+    /// from its tray (`--reason=open-tray`) it is a menu-bar accessory, so `appLaunched`
+    /// turned it away, and opening the dashboard is Electron's `app.dock.show()` — a policy
+    /// change, which posts no launch notification and does not change `runningApplications`.
+    /// Its window was never adopted, so never tiled and never bordered. Any Electron app
+    /// with a tray and a hidden Dock icon does the same.
+    ///
+    /// `activationPolicy` is key-value observable, so this is a listener, not a poll: one
+    /// observation per non-regular application (about a hundred on a working Mac), dropped
+    /// when it turns regular, when it quits, or when the sweep no longer lists it. A helper
+    /// already under observation through `observeIfHelper` is skipped by `observe`'s own
+    /// guard if it ever turns regular.
+    private func watchForRegular(_ app: NSRunningApplication) {
+        let pid = app.processIdentifier
+        guard pid > 0, pid != ownPID, observers[pid] == nil, notYetRegular[pid] == nil else { return }
+        notYetRegular[pid] = app.observe(\.activationPolicy, options: [.new]) { [weak self] app, _ in
+            guard let self, app.activationPolicy == .regular else { return }
+            self.notYetRegular.removeValue(forKey: pid)
+            Log.info("observing \(app.bundleIdentifier ?? "?") (pid \(pid)): it has become a regular application")
+            self.observe(app)
         }
     }
 
