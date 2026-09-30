@@ -1209,7 +1209,8 @@ final class Coordinator: WindowTrackerDelegate {
         items.append(BarWidgets.network(network.connection, metrics: metrics))
         if let output = audio.state {
             items.append(BarWidgets.audio(volume: output.volume, muted: output.muted,
-                                          headphones: output.headphones, metrics: metrics))
+                                          headphones: output.headphones, fixed: output.fixedVolume,
+                                          metrics: metrics))
         }
         items.append(BarWidgets.monitor(count: NSScreen.screens.count, metrics: metrics))
         if let battery = power.state {

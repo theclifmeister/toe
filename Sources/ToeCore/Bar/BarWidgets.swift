@@ -38,23 +38,28 @@ public enum BarWidgets {
     /// `panels/audio/Panel.qml`, `outputIcon`: headphones before anything, then muted, then
     /// the three levels at 0.34 and 0.67, and the muted glyph again for a volume of nothing —
     /// "the old Waybar pulseaudio glyph set".
-    public static func audio(volume: Double, muted: Bool, headphones: Bool,
+    ///
+    /// `fixed` is toe's own: a device with no volume to set (a Focusrite Scarlett, most USB
+    /// interfaces) has no level to draw, and reading one gave 0, which drew it as muted while
+    /// it played. It draws the plain speaker instead — a device, not a level — unless it is
+    /// genuinely muted, which a fixed device with a mute of its own can still be.
+    public static func audio(volume: Double, muted: Bool, headphones: Bool, fixed: Bool = false,
                              metrics: BarMetrics) -> BarItem {
-        let glyph: String
-        if headphones {
-            glyph = Glyphs.headphones
-        } else if muted || volume <= 0 {
-            glyph = Glyphs.muted
-        } else if volume >= 0.67 {
-            glyph = Glyphs.volume[2]
-        } else if volume >= 0.34 {
-            glyph = Glyphs.volume[1]
-        } else {
-            glyph = Glyphs.volume[0]
-        }
+        let glyph = audioGlyph(volume: volume, muted: muted, headphones: headphones, fixed: fixed)
         let percent = Int((max(0, min(1, volume)) * 100).rounded())
-        return BarItems.icon(.audio, glyph: glyph,
-                             tooltip: muted ? "Muted" : "Volume \(percent)%", metrics: metrics)
+        let tooltip = muted ? "Muted" : fixed ? "Fixed volume" : "Volume \(percent)%"
+        return BarItems.icon(.audio, glyph: glyph, tooltip: tooltip, metrics: metrics)
+    }
+
+    /// The glyph alone — the widget and the audio panel's hero draw the same one.
+    public static func audioGlyph(volume: Double, muted: Bool, headphones: Bool, fixed: Bool = false) -> String {
+        if headphones { return Glyphs.headphones }
+        if muted { return Glyphs.muted }
+        if fixed { return Glyphs.speaker }
+        if volume <= 0 { return Glyphs.muted }
+        if volume >= 0.67 { return Glyphs.volume[2] }
+        if volume >= 0.34 { return Glyphs.volume[1] }
+        return Glyphs.volume[0]
     }
 
     /// How the machine is on the network, as `panels/network/Model.js` tells them apart.
