@@ -65,6 +65,12 @@ public enum Glyphs {
     /// `nf-md-battery_charging_100`: full, and still plugged in.
     public static let batteryFull = "\u{F0085}"
 
+    // MARK: Agents — `plugins/agents/Panel.qml`
+
+    /// The `"󱚣"` on the agents widget and its panel's hero — one glyph whatever the numbers,
+    /// as upstream draws it; the alarm is the colour, not the shape.
+    public static let agents = "\u{F16A3}"
+
     // MARK: Panels — `panels/*/Panel.qml`
 
     /// `nf-md-calendar`: the clock panel's hero.
@@ -89,6 +95,7 @@ public enum Glyphs {
             volume, [muted, headphones, monitor, monitors],
             battery, charging, [batteryFull],
             [calendar, chevronLeft, chevronRight, speaker, microphone, camera],
+            [agents],
         ]
         return Array(rows.joined())
     }()

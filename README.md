@@ -130,7 +130,11 @@ output and input sliders and device pickers, the paired Bluetooth devices to con
 disconnect, the Wi-Fi switch and the connection's numbers, the displays, the battery's time
 and health — and, as every panel's last row, the Mac's own Settings pane. Arrows move, Return
 chooses, Escape closes. Right-click the sound to mute, scroll it for the volume, right-click the
-battery for the percentage. Bluetooth is the one panel that asks for a permission, the first
+battery for the percentage. With `[bar] agents = ["claude"]`, Omarchy's agents widget joins
+them: Claude Code's session and weekly limits with when each resets, and the tokens it has
+spent by day and by model — the glyph turns the active colour when any limit passes 90%, and
+right-clicking it asks again now. It reads Claude Code's saved sign-in from the Keychain and
+asks Anthropic's usage endpoint every 15 minutes; it is off until you list it. Bluetooth is the one panel that asks for a permission, the first
 time it is opened and never at launch; the network panel does not ask for Location, so it
 shows your connection without its name. The macOS menu bar is still there
 underneath: rest the pointer against the top edge for a moment and the bar on that display

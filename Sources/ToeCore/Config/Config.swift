@@ -58,7 +58,16 @@ public struct BarConfig: Equatable {
     /// waybar's `persistent-workspaces`: how many workspaces keep a slot whether or not
     /// anything is on them. 0 shows only the ones in use.
     public var persistentWorkspaces: Int = WorkspaceStrip.defaultPersistent
+    /// Which coding agents the agents widget reads — Omarchy's `plugins/agents`. Empty, the
+    /// default, is no widget and nothing read: no Keychain, no transcripts, no request to
+    /// Anthropic. `"claude"` is the only agent toe knows.
+    public var agents: [String] = []
+    /// Seconds between two checks of the agents' limits — upstream's `refreshIntervalSec`, 900.
+    public var agentsRefresh: Double = 900
     public init() {}
+
+    /// The agents toe can read, by the name `[bar] agents` lists them under.
+    public static let knownAgents = ["claude"]
 }
 
 /// How big a window is when it leaves the tiling tree.
@@ -633,6 +642,34 @@ public struct Config: Equatable {
                     config.warnings.append("bar.week_start: must be a day's name in quotes, using "
                                            + "\"\(ClockPanel.weekdayNames[config.bar.weekStart])\"")
                 }
+            }
+            if let raw = b["agents"] {
+                // Named rather than dropped, like every other key here: `agents = "claude"` without
+                // the brackets, or a vendor toe does not read, would otherwise be a widget that
+                // never appears with nothing to say why.
+                if let list = raw.arrayValue?.map({ $0.stringValue }), !list.contains(where: { $0 == nil }) {
+                    let names = list.compactMap { $0?.lowercased() }
+                    let unknown = names.filter { !BarConfig.knownAgents.contains($0) }
+                    if !unknown.isEmpty {
+                        config.warnings.append("bar.agents: toe reads only "
+                            + BarConfig.knownAgents.map { "\"\($0)\"" }.joined(separator: ", ")
+                            + ", ignoring " + unknown.map { "\"\($0)\"" }.joined(separator: ", "))
+                    }
+                    var kept: [String] = []
+                    for name in names where BarConfig.knownAgents.contains(name) && !kept.contains(name) {
+                        kept.append(name)
+                    }
+                    config.bar.agents = kept
+                } else {
+                    config.warnings.append("bar.agents: must be a list of names in quotes, like [\"claude\"]")
+                }
+            }
+            // A minute at the least: the endpoint is Anthropic's, undocumented, and answers a
+            // question whose answer moves by the hour. A day at the most, past which the limits
+            // shown are older than the session window they describe.
+            if let v = number(b["agents_refresh"], "bar.agents_refresh", in: 60...86_400,
+                              keeping: config.bar.agentsRefresh, warnings: &config.warnings) {
+                config.bar.agentsRefresh = v
             }
             if let v = choice(b["persistent_workspaces"], "bar.persistent_workspaces",
                               among: 0...WorkspaceManager.workspaceCount,

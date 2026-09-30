@@ -8,8 +8,10 @@ import Foundation
 /// then draws is `BarWidgets`' decision from the numbers, in ToeCore. The rule for the event
 /// source, from #171: a listener where one exists, and no polling where one does — CoreAudio
 /// property listeners, IOKit's power-source run loop source, CoreWLAN's event delegate, the
-/// Text Input Services notifications, and Darwin notify for power assertions. The clock is the
-/// one on a timer, and only because time has no listener.
+/// Text Input Services notifications, and Darwin notify for power assertions. The clock is on a
+/// timer because time has no listener, and so is `AgentUsageProvider`, because a number on
+/// Anthropic's servers has none either — its comment argues the case, and it runs only while
+/// `[bar] agents` asks for it.
 protocol BarProvider: AnyObject {
     /// Called on the main queue whenever what the provider would draw may have changed.
     var onChange: (() -> Void)? { get set }

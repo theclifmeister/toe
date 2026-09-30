@@ -3550,7 +3550,7 @@ h.test("the glyphs are the codepoints Omarchy's widgets carry") { t in
     t.equal(Glyphs.charging.last, Glyphs.batteryFull, "the last charging step is full")
     t.equal(Glyphs.volume.map { $0.unicodeScalars.first!.value }, [0xF026, 0xF027, 0xF028],
             "the old waybar pulseaudio set")
-    t.equal(Glyphs.all.count, 48, "the coverage list has them all: 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 6")
+    t.equal(Glyphs.all.count, 49, "the coverage list has them all: 5 + 5 + 4 + 3 + 4 + 10 + 10 + 1 + 6 + 1")
     t.equal(Glyphs.calendar.unicodeScalars.first!.value, 0xF00ED, "nf-md-calendar, the clock panel's hero")
     for glyph in Glyphs.all {
         t.equal(glyph.unicodeScalars.count, 1, "\(glyph.unicodeScalars.first!.value): one scalar each")
@@ -7016,5 +7016,7 @@ h.test("the skill document is generated from the verb table") { t in
         t.expect(text.contains(note), "it still says the thing about \(note)")
     }
 }
+
+agentsTests(h)
 
 exit(h.report())

@@ -275,6 +275,15 @@ week_start = "monday"
 # workspaces are in use the padding has nothing left to do, and an empty 4 between a busy 3 and
 # 5 is not drawn. 0 shows only the workspaces in use; 10 always shows all ten.
 persistent_workspaces = 5
+# Omarchy's agents widget: a glyph that turns the active colour when any of Claude Code's
+# rate-limit windows passes 90%, and a panel with the plan, each window's use and when it
+# resets, and the tokens Claude Code has spent by day and by model. Off until "claude" is
+# listed: nothing is read before then. On, toe reads Claude Code's saved sign-in from the
+# login Keychain, asks Anthropic's usage endpoint every agents_refresh seconds (undocumented;
+# it may change without notice), and counts tokens from ~/.claude/projects. It never
+# refreshes the sign-in itself: when it has expired, the panel says so until Claude Code runs.
+agents = []
+agents_refresh = 900
 
 [menu]
 # SUPER+SPACE opens the quick menu, styled after Omarchy's — the one walker draws for
