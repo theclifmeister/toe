@@ -27,6 +27,9 @@ public struct BarItem: Equatable, Sendable {
         case doNotDisturb
         case clock
         case keyboardLayout
+        /// Omarchy's `plugins/agents`: Claude Code's rate limits. Only on the bar while
+        /// `[bar] agents` lists an agent.
+        case agents
         case bluetooth
         case network
         case audio

@@ -230,9 +230,9 @@ door), `PanelState` (the cursor — hidden until the first arrow, clamped, stepp
 cannot be chosen, following a device by identity when the list is rebuilt under it),
 `PanelLayout` (the rows' frames at Omarchy's `Style` tokens, the card anchored under its
 widget inside the display) and one model per panel (`PowerPanel`, `MonitorPanel`,
-`ClockPanel`, `AudioPanel`, `NetworkPanel`, `BluetoothPanel`) — a pure function from what the
-provider read to rows, all in the selftest. `toe/UI/BarPanelWindow.swift` is the one popover
-for all six (`PanelView` draws), `Coordinator.openPanel` fills it, and `refreshBar` pushes new
+`ClockPanel`, `AudioPanel`, `NetworkPanel`, `BluetoothPanel`, `AgentsPanel`) — a pure function
+from what the provider read to rows, all in the selftest. `toe/UI/BarPanelWindow.swift` is the one
+popover for all seven (`PanelView` draws), `Coordinator.openPanel` fills it, and `refreshBar` pushes new
 rows into it on every provider change so a slider you are holding shows the volume the device
 confirmed. Four rules:
 
@@ -263,6 +263,15 @@ confirmed. Four rules:
   the ring the `.graph` row carries; the glide between samples is `BarPanelWindow`'s timer,
   alive only while a sample is sliding in. If `log stream` shows `network: traffic` lines with
   no panel open, something has grown a third way out of the panel.
+- **The agents widget is the bar's one always-on poll** (#203), and it is opt-in on top of the
+  bar: `[bar] agents = ["claude"]`, empty by default, and nothing — Keychain, transcripts,
+  network — is touched until it is set. `AgentUsageProvider` asks Anthropic's undocumented
+  `api/oauth/usage` every `agents_refresh` seconds and on a panel open at most every 15 s,
+  honours a 429's `retry-after` even on a forced refresh, and keeps the last good limits in
+  `~/.local/state/toe/agents-claude.json` until each window resets. The token is Claude Code's,
+  read through `/usr/bin/security` (on that item's access list, so no prompt — measured for
+  #203) and **never refreshed**: rotating it would sign Claude Code out. The parsing,
+  refresh policy and transcript tally are `ClaudeUsage` and `ClaudeTranscripts` in ToeCore.
 
 The Focus state (Dnd) still waits on a permission toe does not ask for — it lives in a
 Full-Disk-Access-protected database — and has no provider.

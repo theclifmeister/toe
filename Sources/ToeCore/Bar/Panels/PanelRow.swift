@@ -1,13 +1,14 @@
 import Foundation
 
 /// Which panel — one per widget on the right of the bar, plus the clock's calendar. Omarchy's
-/// `plugins/panels/*`, in its order.
+/// `plugins/panels/*`, in its order, with `plugins/agents` first, where its widget stands.
 public enum PanelKind: Equatable, Hashable, Sendable, CaseIterable {
-    case bluetooth, network, audio, monitor, power, clock
+    case agents, bluetooth, network, audio, monitor, power, clock
 
     /// The widget the panel hangs from, and the one whose slot it is anchored under.
     public var widget: BarItem.Kind {
         switch self {
+        case .agents:    return .agents
         case .bluetooth: return .bluetooth
         case .network:   return .network
         case .audio:     return .audio
@@ -63,6 +64,12 @@ public enum PanelAction: Equatable, Sendable {
     case today
     /// The Calendar application — where a click on the clock went before it had a panel.
     case openCalendar
+    // Agents
+    /// Ask Anthropic again now, past the 15-second floor a panel open is held to.
+    case refreshAgents
+    /// claude.ai's own usage page — the agents panel's door, where the others have a
+    /// Settings pane.
+    case openAgentUsage
 
     /// What the action is *about*, so a row can be recognised after its action changed: a
     /// device that connects goes from `connectBluetooth` to `disconnectBluetooth` and is the
@@ -82,6 +89,8 @@ public enum PanelAction: Equatable, Sendable {
         case .toggleWeekStart:               return "weekstart"
         case .today:                         return "today"
         case .openCalendar:                  return "calendar"
+        case .refreshAgents:                 return "agents:refresh"
+        case .openAgentUsage:                return "agents:usage"
         }
     }
 }

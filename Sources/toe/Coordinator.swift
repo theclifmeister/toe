@@ -34,6 +34,9 @@ final class Coordinator: WindowTrackerDelegate {
     /// Starts with the rest but reads nothing until the Bluetooth grant exists — see
     /// `BluetoothProvider`; the panel's first open is what asks.
     private let bluetooth = BluetoothProvider()
+    /// Claude Code's limits — not in `providers`, because it runs only while `[bar] agents`
+    /// asks for it, not whenever the bar is up. See `applyBarSetting`.
+    private let agents = AgentUsageProvider()
     private var providers: [BarProvider] { [keyboard, bluetooth, network, audio, power] }
     /// The panel under a widget — one window for all six, see `BarPanelWindow`.
     private let barPanel = BarPanelWindow()
@@ -321,7 +324,7 @@ final class Coordinator: WindowTrackerDelegate {
             barPanel.close()
         }
         clock.onTick = { [weak self] in self?.refreshStatus() }
-        for provider in providers { provider.onChange = { [weak self] in self?.refreshStatus() } }
+        for provider in providers + [agents] { provider.onChange = { [weak self] in self?.refreshStatus() } }
         barPanel.onAction = { [weak self] action in self?.panelAction(action) }
         barPanel.onSlide = { [weak self] slider, value in self?.panelSlide(slider, to: value) }
         barPanel.onSwitch = { [weak self] delta in self?.switchPanel(by: delta) }
@@ -1142,8 +1145,17 @@ final class Coordinator: WindowTrackerDelegate {
         } else {
             clock.stop()
             for provider in providers { provider.stop() }
+            agents.stop()
             if status == nil { status = makeStatusItem() }
             barPanel.close()
+        }
+        // Opt-in on top of the bar: nothing is read — no Keychain, no transcripts, no request —
+        // until `[bar] agents` lists Claude, and a reload that takes it out stops the timer.
+        if wanted, config.bar.agents.contains("claude") {
+            agents.setInterval(config.bar.agentsRefresh)
+            agents.start()
+        } else {
+            agents.stop()
         }
         bar.enabled = wanted
         bar.peekEnabled = config.bar.menuBarPeek
@@ -1199,9 +1211,13 @@ final class Coordinator: WindowTrackerDelegate {
             items.append(BarItems.keyboardLayout(layout.label, full: layout.name))
         }
 
-        // The right section, in Omarchy's order: tray and agents are not portable and are left
-        // out; bluetooth, network, audio, monitor, power follow. Bluetooth draws the generic
-        // "on" glyph until the grant exists: toe cannot know better, and "off" would be a claim.
+        // The right section, in Omarchy's order: the tray is not portable and is left out; agents,
+        // while `[bar] agents` asks for it, then bluetooth, network, audio, monitor, power.
+        // Bluetooth draws the generic "on" glyph until the grant exists: toe cannot know better,
+        // and "off" would be a claim.
+        if let usage = agents.usage {
+            items.append(BarWidgets.agents(usage, metrics: metrics))
+        }
         let bt = bluetooth.state
         items.append(BarWidgets.bluetooth(on: bt.access != .granted || bt.powered,
                                           connected: bt.access == .granted ? bt.connected : 0,
@@ -1254,6 +1270,9 @@ final class Coordinator: WindowTrackerDelegate {
     /// panel whose widget is not on the bar, which is a panel that cannot open.
     private func panelRows(_ kind: PanelKind) -> [PanelRow]? {
         switch kind {
+        case .agents:
+            guard let usage = agents.usage else { return nil }
+            return AgentsPanel.rows(usage, now: Date())
         case .power:
             guard let battery = power.state else { return nil }
             return PowerPanel.rows(battery)
@@ -1297,6 +1316,9 @@ final class Coordinator: WindowTrackerDelegate {
         // The one permission a panel asks for, and only this one: the first open of the
         // Bluetooth panel puts macOS's sheet up, and the panel says so until it is answered.
         if kind == .bluetooth, bluetooth.needsRequest { bluetooth.request() }
+        // Upstream's `refreshLimits` on open, held to one request every 15 s so opening and
+        // shutting the panel is not a request per flick; the rows arrive through `onChange`.
+        if kind == .agents { agents.refresh(force: false) }
         if kind == .clock, barPanel.kind != .clock {
             let now = ClockPanel.gregorian.dateComponents([.year, .month], from: Date())
             calendarView = ClockPanel.View(year: now.year ?? 2000, month: now.month ?? 1)
@@ -1373,6 +1395,10 @@ final class Coordinator: WindowTrackerDelegate {
             }, verify: { ClockPanel.weekdayNames[$0.bar.weekStart] == next })
         case .openCalendar:
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+        case .refreshAgents:
+            agents.refresh(force: true)
+        case .openAgentUsage:
+            NSWorkspace.shared.open(URL(string: "https://claude.ai/settings/usage")!)
         case .toggleWifi:
             network.toggleWifiPower()
         case .connectBluetooth(let address):
@@ -1421,6 +1447,12 @@ final class Coordinator: WindowTrackerDelegate {
             Self.openAccessibilitySettings()
         case (.keyboardLayout, .left):
             keyboard.selectNext()
+        case (.agents, .left):
+            openPanel(.agents, on: display)
+        case (.agents, .right):
+            // Upstream's right click launches the agent; toe names no terminal, so it is the
+            // panel's `r` instead — fresh numbers now, past the 15-second floor.
+            agents.refresh(force: true)
         case (.power, .left):
             // A panel of toe's own, under the widget — Omarchy's, cut to what a Mac exposes.
             // The Settings pane each widget used to open is the panel's last row.

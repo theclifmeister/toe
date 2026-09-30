@@ -1,6 +1,6 @@
 import Foundation
 
-/// One GET that will not take in more than it was told to, from anywhere but GitHub.
+/// One GET that will not take in more than it was told to, from anywhere but the hosts it names.
 ///
 /// Both of toe's network readers — the catalogue and the theme downloader — cap what they will
 /// accept, and both used to apply the cap with `data.count <= limit` in a completion handler.
@@ -17,6 +17,11 @@ import Foundation
 /// same callback for the same reason — there is no point buffering the body of a 404, or of a
 /// redirect that left GitHub, to refuse it at the end.
 ///
+/// The hosts and the headers are the caller's: GitHub's by default, for the theme catalogue and
+/// downloader it was written for; `api.anthropic.com` and a bearer token for the agents widget,
+/// which is also why a refusal carries its status and `retry-after` — a 401 is a sign-in that has
+/// lapsed and a 429 a server asking for quiet, and neither is the same as no answer.
+///
 /// The delegate is the task's own (`URLSessionTask.delegate`) rather than a session's, which is
 /// what lets it ride on `URLSession.shared` — one connection pool for the six pictures of a theme —
 /// instead of a session per request that would have to be invalidated to let go of it. A task
@@ -30,6 +35,10 @@ final class BoundedGET: NSObject, URLSessionDataDelegate {
 
     struct Failure: Error, CustomStringConvertible {
         let description: String
+        /// The HTTP status of an answer that was refused for it; nil when there was no answer.
+        var status: Int? = nil
+        /// `retry-after`, in seconds, when a refused answer carried one.
+        var retryAfter: TimeInterval? = nil
     }
 
     /// A task for `request` that completes with at most `limit` bytes, on the session's delegate
@@ -38,26 +47,30 @@ final class BoundedGET: NSObject, URLSessionDataDelegate {
     /// The `User-Agent` is set here because it is what every request toe makes has in common:
     /// GitHub refuses an unidentified client on some paths and rate-limits by IP; saying who
     /// this is costs nothing and makes the request explicable at the far end.
-    static func task(_ request: URLRequest, limit: Int,
+    static func task(_ request: URLRequest, limit: Int, allowedHosts: Set<String> = Upstream.allowedHosts,
+                     headers: [String: String] = [:],
                      completion: @escaping (Result<Data, Failure>) -> Void) -> URLSessionTask {
         var request = request
         request.setValue("toe (macOS window manager)", forHTTPHeaderField: "User-Agent")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let task = URLSession.shared.dataTask(with: request)
         // The task retains its delegate until it completes, so nothing else has to.
-        task.delegate = BoundedGET(limit: limit, completion: completion)
+        task.delegate = BoundedGET(limit: limit, allowedHosts: allowedHosts, completion: completion)
         return task
     }
 
     private let limit: Int
+    private let allowedHosts: Set<String>
     private let completion: (Result<Data, Failure>) -> Void
     private var body = Data()
     /// Why *this* delegate cancelled the task, when it did. `didCompleteWithError` cannot tell a
     /// cancellation it asked for from one the caller made — both arrive as `NSURLErrorCancelled`
     /// — so the reason is written down before the cancel is asked for.
-    private var refusal: String?
+    private var refusal: Failure?
 
-    private init(limit: Int, completion: @escaping (Result<Data, Failure>) -> Void) {
+    private init(limit: Int, allowedHosts: Set<String>, completion: @escaping (Result<Data, Failure>) -> Void) {
         self.limit = limit
+        self.allowedHosts = allowedHosts
         self.completion = completion
     }
 
@@ -69,11 +82,15 @@ final class BoundedGET: NSObject, URLSessionDataDelegate {
         // After redirects, not before: what matters is where the bytes came from. The response
         // seen here is the final one — a redirect that is followed never reaches this callback —
         // so its URL is where the body is about to come from.
-        guard let host = response.url?.host, Upstream.allowedHosts.contains(host) else {
-            return refuse("redirected off github.com", completionHandler)
+        guard let host = response.url?.host, allowedHosts.contains(host) else {
+            return refuse("redirected off \(allowedHosts.sorted().first ?? "its host")", completionHandler)
         }
         guard http.statusCode == 200 else {
-            return refuse("HTTP \(http.statusCode)", completionHandler)
+            // `retry-after` is seconds on every server toe talks to; the HTTP-date form is not
+            // worth a parser, and reads as absent.
+            let retry = (http.value(forHTTPHeaderField: "Retry-After")).flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
+            return refuse(Failure(description: "HTTP \(http.statusCode)", status: http.statusCode, retryAfter: retry),
+                          completionHandler)
         }
         // A `Content-Length` past the limit is refused before any of it arrives. Absent, it is
         // `-1`, and the check below on what actually turns up is the one that binds.
@@ -88,7 +105,7 @@ final class BoundedGET: NSObject, URLSessionDataDelegate {
         guard refusal == nil else { return }
         body.append(data)
         guard body.count <= limit else {
-            refusal = "the answer was too large"
+            refusal = Failure(description: "the answer was too large")
             body = Data()
             return dataTask.cancel()
         }
@@ -98,7 +115,7 @@ final class BoundedGET: NSObject, URLSessionDataDelegate {
         // Once, and last: Foundation calls this exactly one time per task, after the final data
         // callback, whether the task finished, failed, or was cancelled from either side.
         if let refusal {
-            completion(.failure(Failure(description: refusal)))
+            completion(.failure(refusal))
         } else if let error {
             // A cancellation with no refusal recorded is the caller's — the theme downloader's
             // deadline. Reported as what it is rather than as Foundation's "cancelled", which
@@ -111,7 +128,11 @@ final class BoundedGET: NSObject, URLSessionDataDelegate {
     }
 
     private func refuse(_ why: String, _ completionHandler: (URLSession.ResponseDisposition) -> Void) {
-        refusal = why
+        refuse(Failure(description: why), completionHandler)
+    }
+
+    private func refuse(_ failure: Failure, _ completionHandler: (URLSession.ResponseDisposition) -> Void) {
+        refusal = failure
         completionHandler(.cancel)
     }
 }

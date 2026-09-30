@@ -117,6 +117,21 @@ public enum BarWidgets {
         return BarItems.icon(.bluetooth, glyph: glyph, tooltip: tooltip, metrics: metrics)
     }
 
+    /// `plugins/agents/Panel.qml`'s bar widget: the one glyph, in `active` when any window is at
+    /// 90% or more — upstream's `alarming`. The tooltip carries the numbers the glyph does not,
+    /// the fullest window first, since that is the one that will stop you.
+    public static func agents(_ usage: AgentUsage?, metrics: BarMetrics) -> BarItem {
+        let tooltip: String
+        if let usage, let binding = usage.binding {
+            tooltip = "Claude: \(binding.label) \(AgentsPanel.percent(binding.fraction))"
+                + (usage.problem.map { " — \($0.headline.lowercased())" } ?? "")
+        } else {
+            tooltip = usage?.problem.map { "Claude: \($0.headline.lowercased())" } ?? "Claude usage"
+        }
+        return BarItems.icon(.agents, glyph: Glyphs.agents, active: usage?.alarming ?? false,
+                             tooltip: tooltip, metrics: metrics)
+    }
+
     /// `panels/monitor/Panel.qml`: one glyph for one display, another for more.
     public static func monitor(count: Int, metrics: BarMetrics) -> BarItem {
         BarItems.icon(.monitor, glyph: count > 1 ? Glyphs.monitors : Glyphs.monitor,
