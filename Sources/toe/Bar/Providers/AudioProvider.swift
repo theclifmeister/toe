@@ -7,8 +7,9 @@ import ToeCore
 /// Omarchy's `omarchy.audio`, read from the HAL rather than PipeWire.
 ///
 /// Property listeners and no timer: three on the system object — the default output changing,
-/// the default input changing, the device list changing — and two each on the current default
-/// output and input for their volume and mute. A device's pair are re-registered on the device
+/// the default input changing, the device list changing — and a handful each on the current
+/// default output and input for their volume and mute, the virtual main volume and every
+/// element's scalar and mute through a wildcard. A device's set are re-registered on the device
 /// that is current, because a listener is per object and a new default device is a new object.
 /// Every callback is delivered on the main queue, which is what
 /// `AudioObjectAddPropertyListenerBlock` takes a queue for.
@@ -16,6 +17,13 @@ import ToeCore
 /// `state` is nil while there is no output device at all — a Mac with its only device gone —
 /// and the widget is then not listed. The device lists are read on every change rather than
 /// held, since a change is what the listener said happened, and the list is a dozen devices.
+///
+/// Not every device has a volume. A Focusrite Scarlett, most USB interfaces and DACs, and an
+/// HDMI sink leave the level to a knob, and the HAL answers `VirtualMainVolume` with an error;
+/// the fallback of 0 drew such a device as muted while it played. So the volume and the mute
+/// are looked for before they are read — `AudioObjectIsPropertySettable` on the main element
+/// and then on each channel, since a device may carry its controls per channel and no main
+/// one — and a device with no volume anywhere is `fixedVolume`, which is not a level.
 final class AudioProvider: BarProvider {
 
     private(set) var state: AudioPanel.State?
@@ -28,17 +36,25 @@ final class AudioProvider: BarProvider {
     private var inputListener: AudioObjectPropertyListenerBlock?
 
     private static func address(_ selector: AudioObjectPropertySelector,
-                                _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+                                _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal,
+                                _ element: AudioObjectPropertyElement = kAudioObjectPropertyElementMain) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: element)
     }
 
     private static let defaultOutput = address(kAudioHardwarePropertyDefaultOutputDevice)
     private static let defaultInput = address(kAudioHardwarePropertyDefaultInputDevice)
     private static let deviceList = address(kAudioHardwarePropertyDevices)
     private static let outputVolume = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioObjectPropertyScopeOutput)
-    private static let outputMute = address(kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput)
     private static let inputVolume = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioObjectPropertyScopeInput)
-    private static let inputMute = address(kAudioDevicePropertyMute, kAudioObjectPropertyScopeInput)
+    /// Every channel's volume and mute, for the listeners only: a device whose controls are
+    /// per channel reports a change on the channel, not on the main element. A wildcard is
+    /// what a listener takes for "any element"; a read or a write needs a real one.
+    private static let outputChannels = [address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, kAudioObjectPropertyElementWildcard),
+                                         address(kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput, kAudioObjectPropertyElementWildcard)]
+    private static let inputChannels = [address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeInput, kAudioObjectPropertyElementWildcard),
+                                        address(kAudioDevicePropertyMute, kAudioObjectPropertyScopeInput, kAudioObjectPropertyElementWildcard)]
+    private static let outputWatched = [outputVolume, dataSource] + outputChannels
+    private static let inputWatched = [inputVolume] + inputChannels
     private static let transport = address(kAudioDevicePropertyTransportType)
     private static let dataSource = address(kAudioDevicePropertyDataSource, kAudioObjectPropertyScopeOutput)
     private static let name = address(kAudioObjectPropertyName)
@@ -60,27 +76,30 @@ final class AudioProvider: BarProvider {
             }
             self.systemListener = nil
         }
-        unwatch(&output, &outputListener, [Self.outputVolume, Self.outputMute, Self.dataSource])
-        unwatch(&input, &inputListener, [Self.inputVolume, Self.inputMute])
+        unwatch(&output, &outputListener, Self.outputWatched)
+        unwatch(&input, &inputListener, Self.inputWatched)
         state = nil
     }
 
     // MARK: - Writing
 
-    /// Right click on the widget, Return on the output slider, the hero's switch.
+    /// Right click on the widget, Return on the output slider, the hero's switch. Every mute
+    /// the device has, main or per channel, so that a device muted channel by channel is
+    /// unmuted the same way; nothing at all on a device that has none.
     func toggleMute() {
-        guard output != kAudioObjectUnknown, let state else { return }
-        set(output, Self.outputMute, UInt32(state.muted ? 0 : 1))
+        guard output != kAudioObjectUnknown, let state, state.canMute else { return }
+        writeMute(output, kAudioObjectPropertyScopeOutput, !state.muted)
     }
 
     func toggleInputMute() {
         guard input != kAudioObjectUnknown, let state else { return }
-        set(input, Self.inputMute, UInt32(state.inputMuted ? 0 : 1))
+        writeMute(input, kAudioObjectPropertyScopeInput, !state.inputMuted)
     }
 
-    /// The wheel: 5% a notch, as upstream's `wheelSteps × 0.05`, clamped.
+    /// The wheel: 5% a notch, as upstream's `wheelSteps × 0.05`, clamped. A fixed device has
+    /// no volume to step from — `state.volume` is the 0 nothing was read into.
     func adjustVolume(steps: Int) {
-        guard let state, steps != 0 else { return }
+        guard let state, !state.fixedVolume, steps != 0 else { return }
         setVolume(state.volume + Double(steps) * 0.05)
     }
 
@@ -88,12 +107,34 @@ final class AudioProvider: BarProvider {
     /// the value back, which is what redraws the widget and the panel.
     func setVolume(_ volume: Double) {
         guard output != kAudioObjectUnknown else { return }
-        set(output, Self.outputVolume, Float32(max(0, min(1, volume))))
+        writeVolume(output, kAudioObjectPropertyScopeOutput, volume)
     }
 
     func setInputVolume(_ volume: Double) {
         guard input != kAudioObjectUnknown else { return }
-        set(input, Self.inputVolume, Float32(max(0, min(1, volume))))
+        writeVolume(input, kAudioObjectPropertyScopeInput, volume)
+    }
+
+    /// `VirtualMainVolume` where the device will take it — it is the HAL's own reconciliation
+    /// of a main control and per-channel ones, balance kept — and each channel's scalar where
+    /// only those can be set. A fixed device has neither, and the write is skipped rather
+    /// than sent to fail.
+    private func writeVolume(_ device: AudioObjectID, _ scope: AudioObjectPropertyScope, _ volume: Double) {
+        let value = Float32(max(0, min(1, volume)))
+        let virtual = Self.address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope)
+        if Self.settable(device, virtual) {
+            set(device, virtual, value)
+            return
+        }
+        for element in Self.controls(device, kAudioDevicePropertyVolumeScalar, scope) {
+            set(device, Self.address(kAudioDevicePropertyVolumeScalar, scope, element), value)
+        }
+    }
+
+    private func writeMute(_ device: AudioObjectID, _ scope: AudioObjectPropertyScope, _ muted: Bool) {
+        for element in Self.controls(device, kAudioDevicePropertyMute, scope) {
+            set(device, Self.address(kAudioDevicePropertyMute, scope, element), UInt32(muted ? 1 : 0))
+        }
     }
 
     /// A device row pressed: the system's default, which is what the volume keys and every
@@ -123,14 +164,14 @@ final class AudioProvider: BarProvider {
         let newOutput = Self.get(AudioObjectID(kAudioObjectSystemObject), Self.defaultOutput, AudioObjectID(kAudioObjectUnknown))
         let newInput = Self.get(AudioObjectID(kAudioObjectSystemObject), Self.defaultInput, AudioObjectID(kAudioObjectUnknown))
         if newOutput != output {
-            unwatch(&output, &outputListener, [Self.outputVolume, Self.outputMute, Self.dataSource])
+            unwatch(&output, &outputListener, Self.outputWatched)
             output = newOutput
-            outputListener = watch(output, [Self.outputVolume, Self.outputMute, Self.dataSource])
+            outputListener = watch(output, Self.outputWatched)
         }
         if newInput != input {
-            unwatch(&input, &inputListener, [Self.inputVolume, Self.inputMute])
+            unwatch(&input, &inputListener, Self.inputWatched)
             input = newInput
-            inputListener = watch(input, [Self.inputVolume, Self.inputMute])
+            inputListener = watch(input, Self.inputWatched)
         }
         read()
     }
@@ -163,17 +204,63 @@ final class AudioProvider: BarProvider {
             return
         }
         let (outputs, inputs) = Self.devices()
+        let volume = Self.volume(of: output, kAudioObjectPropertyScopeOutput)
+        let mute = Self.mute(of: output, kAudioObjectPropertyScopeOutput)
         var next = AudioPanel.State(
-            volume: Double(Self.get(output, Self.outputVolume, Float32(0))),
-            muted: Self.get(output, Self.outputMute, UInt32(0)) != 0,
+            volume: volume ?? 0, muted: mute ?? false,
             outputs: outputs, defaultOutput: output,
-            inputs: inputs)
+            inputs: inputs,
+            fixedVolume: volume == nil, canMute: mute != nil)
         if input != kAudioObjectUnknown {
-            next.inputVolume = Double(Self.get(input, Self.inputVolume, Float32(0)))
-            next.inputMuted = Self.get(input, Self.inputMute, UInt32(0)) != 0
+            let inputVolume = Self.volume(of: input, kAudioObjectPropertyScopeInput)
+            next.inputVolume = inputVolume ?? 0
+            next.inputFixedVolume = inputVolume == nil
+            next.inputMuted = Self.mute(of: input, kAudioObjectPropertyScopeInput) ?? false
             next.defaultInput = input
         }
         state = next
+    }
+
+    /// The volume in `scope`, or nil when the device has none that can be set — the fixed
+    /// case, which must not read as 0. `VirtualMainVolume` first; failing that the mean of
+    /// the channels' own scalars, which is what the virtual property would have said.
+    private static func volume(of device: AudioObjectID, _ scope: AudioObjectPropertyScope) -> Double? {
+        let virtual = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope)
+        if settable(device, virtual) { return Double(get(device, virtual, Float32(0))) }
+        let elements = controls(device, kAudioDevicePropertyVolumeScalar, scope)
+        guard !elements.isEmpty else { return nil }
+        let sum = elements.reduce(0.0) {
+            $0 + Double(get(device, address(kAudioDevicePropertyVolumeScalar, scope, $1), Float32(0)))
+        }
+        return sum / Double(elements.count)
+    }
+
+    /// Whether `scope` is muted, or nil when the device has no mute that can be set. Muted
+    /// per channel means every channel muted — one channel off is a balance, not a mute.
+    private static func mute(of device: AudioObjectID, _ scope: AudioObjectPropertyScope) -> Bool? {
+        let elements = controls(device, kAudioDevicePropertyMute, scope)
+        guard !elements.isEmpty else { return nil }
+        return elements.allSatisfy { get(device, address(kAudioDevicePropertyMute, scope, $0), UInt32(0)) != 0 }
+    }
+
+    /// The elements of `selector` in `scope` that can be set: the main element when there is
+    /// one, which stands for the lot, and otherwise each channel, 1…n, that has its own. Empty
+    /// is a device with no such control anywhere. A property that is there but read-only — a
+    /// volume a driver reports and will not take — counts as absent, as System Settings counts
+    /// it when it greys the slider.
+    private static func controls(_ device: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                                 _ scope: AudioObjectPropertyScope) -> [AudioObjectPropertyElement] {
+        if settable(device, address(selector, scope)) { return [kAudioObjectPropertyElementMain] }
+        let count = channels(of: device, scope: scope)
+        guard count > 0 else { return [] }
+        return (1...UInt32(count)).filter { settable(device, address(selector, scope, $0)) }
+    }
+
+    private static func settable(_ device: AudioObjectID, _ address: AudioObjectPropertyAddress) -> Bool {
+        var address = address
+        guard AudioObjectHasProperty(device, &address) else { return false }
+        var settable: DarwinBoolean = false
+        return AudioObjectIsPropertySettable(device, &address, &settable) == noErr && settable.boolValue
     }
 
     /// Every device with at least one output channel, and every one with at least one input

@@ -3792,6 +3792,15 @@ h.test("the right-hand widgets pick their glyphs the way Omarchy's panels do") {
     t.equal(audio(0.1), Glyphs.volume[0], "quiet")
     t.equal(audio(0), Glyphs.muted, "and nothing at all is the muted glyph")
     t.equal(BarWidgets.audio(volume: 0.5, muted: false, headphones: false, metrics: m).tooltip, "Volume 50%", "tooltip")
+    // A Focusrite Scarlett: no volume to read, so 0 — which drew it muted while it played.
+    t.equal(BarWidgets.audio(volume: 0, muted: false, headphones: false, fixed: true, metrics: m).text, Glyphs.speaker,
+            "a fixed device is a speaker, not a level and not muted")
+    t.equal(BarWidgets.audio(volume: 0, muted: false, headphones: false, fixed: true, metrics: m).tooltip, "Fixed volume",
+            "and says so")
+    t.equal(BarWidgets.audio(volume: 0, muted: true, headphones: false, fixed: true, metrics: m).text, Glyphs.muted,
+            "a fixed device with a mute of its own, muted, is muted")
+    t.equal(BarWidgets.audio(volume: 0, muted: false, headphones: true, fixed: true, metrics: m).text, Glyphs.headphones,
+            "headphones still first")
 
     // connectionIcon / wifiIconFor: ceil(strength / 20) − 1.
     func wifi(_ s: Int, restricted: Bool = false) -> BarItem {
@@ -4358,6 +4367,42 @@ h.test("the audio panel is the hero's switch, two sliders and the devices") { t 
         t.equal(AudioPanel.volumeName(v, muted: false), word, "\(v)")
     }
     t.equal(AudioPanel.volumeName(0.9, muted: true), "Muted", "muted trumps the number")
+}
+
+h.test("a fixed-volume device is not a muted one") { t in
+    let scarlett = AudioPanel.Device(id: 77, name: "Scarlett 2i2 USB", transport: .usb)
+    let fixed = AudioPanel.State(volume: 0, muted: false, outputs: [scarlett], defaultOutput: 77,
+                                 inputVolume: 0, inputs: [scarlett], defaultInput: 77,
+                                 fixedVolume: true, canMute: false, inputFixedVolume: true)
+    let rows = AudioPanel.rows(fixed)
+    t.equal(rows[0].kind, .hero(glyph: Glyphs.speaker, title: "Audio", status: "Fixed volume", trailing: nil),
+            "the hero: a speaker, 'Fixed volume', and no switch that would flip back")
+    t.equal(rows[0].action, .none, "nothing to press")
+    t.expect(!rows[0].isSelectable, "so the cursor steps over it")
+    t.equal(rows[2].kind, .header("Output", trailing: "Fixed"), "the header says Fixed where the percentage was")
+    t.expect(!rows.contains { $0.slider != nil }, "and neither slider is there to take the arrows and do nothing")
+    t.equal(rows[3].action, .pickOutput(77), "the devices follow the header directly")
+    t.expect(rows.contains { $0.kind == .header("Input", trailing: "Fixed") }, "a knob for gain is Fixed too")
+    t.equal(rows.last?.action, .openSettings(.sound), "the door is still last")
+
+    // Fixed, with a mute of its own: the switch is back, and muted reads as muted.
+    var mutable = fixed; mutable.canMute = true; mutable.muted = true
+    let muted = AudioPanel.rows(mutable)
+    t.equal(muted[0].kind, .hero(glyph: Glyphs.muted, title: "Audio", status: "Muted", trailing: .toggle(on: false)),
+            "a mute that can be set is a mute")
+    t.equal(muted[0].action, .toggleOutputMute, "and the switch works it")
+    mutable.muted = false
+    t.equal(AudioPanel.rows(mutable)[0].kind,
+            .hero(glyph: Glyphs.speaker, title: "Audio", status: "Fixed volume", trailing: .toggle(on: true)),
+            "unmuted, fixed again")
+
+    // A normal device at 0 is still silenced, and the defaults are the normal device.
+    let silent = AudioPanel.State(volume: 0, muted: false, outputs: [scarlett], defaultOutput: 77)
+    t.expect(!silent.fixedVolume && silent.canMute && !silent.inputFixedVolume, "the defaults are a device with controls")
+    t.equal(AudioPanel.rows(silent)[0].kind,
+            .hero(glyph: Glyphs.muted, title: "Audio", status: "Silenced", trailing: .toggle(on: true)),
+            "volume 0 on a device that has a volume is silenced, as before")
+    t.equal(AudioPanel.rows(silent)[3].kind, .slider(.outputVolume, value: 0, dimmed: false), "with its slider")
 }
 
 h.test("the network panel is the connection's switch and numbers, and never a name") { t in

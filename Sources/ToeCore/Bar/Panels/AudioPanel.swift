@@ -47,10 +47,23 @@ public enum AudioPanel {
         public var inputMuted: Bool
         public var inputs: [Device]
         public var defaultInput: UInt32?
+        /// The default output has no volume anybody can set — a Focusrite Scarlett, most USB
+        /// interfaces and DACs, an HDMI sink: the level is the knob on the front of the box.
+        /// `volume` then means nothing (the HAL has no number to give, and the provider's
+        /// fallback of 0 was drawn as muted, which is what this field exists to stop), so the
+        /// widget draws a plain speaker and the panel has no slider, as System Settings greys
+        /// its own out for the same device.
+        public var fixedVolume: Bool
+        /// The default output has a mute that can be set. False for the same fixed boxes as a
+        /// rule, and then the hero has no switch — a switch that flips back is worse than none.
+        public var canMute: Bool
+        /// `fixedVolume` for the default input: an interface whose gain is a knob.
+        public var inputFixedVolume: Bool
 
         public init(volume: Double, muted: Bool, outputs: [Device] = [], defaultOutput: UInt32? = nil,
                     inputVolume: Double? = nil, inputMuted: Bool = false, inputs: [Device] = [],
-                    defaultInput: UInt32? = nil) {
+                    defaultInput: UInt32? = nil, fixedVolume: Bool = false, canMute: Bool = true,
+                    inputFixedVolume: Bool = false) {
             self.volume = volume
             self.muted = muted
             self.outputs = outputs
@@ -59,6 +72,9 @@ public enum AudioPanel {
             self.inputMuted = inputMuted
             self.inputs = inputs
             self.defaultInput = defaultInput
+            self.fixedVolume = fixedVolume
+            self.canMute = canMute
+            self.inputFixedVolume = inputFixedVolume
         }
 
         /// Whether the default output is headphones — the widget's rule, from `isHeadphones`.
@@ -114,36 +130,48 @@ public enum AudioPanel {
         return "Whisper"
     }
 
-    /// `outputIcon`, the widget's rule, for the hero.
+    /// `outputIcon`, the widget's rule, for the hero — `BarWidgets.audioGlyph`, so the two
+    /// cannot drift.
     public static func heroGlyph(_ s: State) -> String {
-        if s.headphones { return Glyphs.headphones }
-        if s.muted || s.volume <= 0 { return Glyphs.muted }
-        if s.volume >= 0.67 { return Glyphs.volume[2] }
-        if s.volume >= 0.34 { return Glyphs.volume[1] }
-        return Glyphs.volume[0]
+        BarWidgets.audioGlyph(volume: s.volume, muted: s.muted, headphones: s.headphones, fixed: s.fixedVolume)
+    }
+
+    /// The hero's status line: upstream's word for the volume, or what a fixed device is.
+    public static func status(_ s: State) -> String {
+        if s.fixedVolume && !s.muted { return "Fixed volume" }
+        return volumeName(s.volume, muted: s.muted)
     }
 
     private static func percent(_ v: Double) -> String {
         "\(Int((max(0, min(1, v)) * 100).rounded()))%"
     }
 
+    /// A fixed device loses its slider rather than getting a dead one: a slider is a cursor
+    /// target whatever it holds (`PanelRow.isSelectable`), so a greyed one would still take
+    /// the arrows and do nothing with them. The header says "Fixed" where the percentage was,
+    /// which is the whole of what System Settings' greyed slider tells you.
     public static func rows(_ s: State) -> [PanelRow] {
         var rows: [PanelRow] = [
-            .hero(glyph: heroGlyph(s), title: "Audio", status: volumeName(s.volume, muted: s.muted),
-                  trailing: .toggle(on: !s.muted), action: .toggleOutputMute),
+            .hero(glyph: heroGlyph(s), title: "Audio", status: status(s),
+                  trailing: s.canMute ? .toggle(on: !s.muted) : nil,
+                  action: s.canMute ? .toggleOutputMute : .none),
             .separator,
-            .header("Output", trailing: percent(s.volume)),
-            .slider(.outputVolume, value: s.volume, dimmed: s.muted, action: .toggleOutputMute),
+            .header("Output", trailing: s.fixedVolume ? "Fixed" : percent(s.volume)),
         ]
+        if !s.fixedVolume {
+            rows.append(.slider(.outputVolume, value: s.volume, dimmed: s.muted, action: .toggleOutputMute))
+        }
         rows += s.outputs.map { d in
             .pick(glyph: outputGlyph(d), label: d.name, current: d.id == s.defaultOutput, action: .pickOutput(d.id))
         }
         if let inputVolume = s.inputVolume {
             rows += [
                 .separator,
-                .header("Input", trailing: percent(inputVolume)),
-                .slider(.inputVolume, value: inputVolume, dimmed: s.inputMuted, action: .toggleInputMute),
+                .header("Input", trailing: s.inputFixedVolume ? "Fixed" : percent(inputVolume)),
             ]
+            if !s.inputFixedVolume {
+                rows.append(.slider(.inputVolume, value: inputVolume, dimmed: s.inputMuted, action: .toggleInputMute))
+            }
             rows += s.inputs.map { d in
                 .pick(glyph: inputGlyph(d), label: d.name, current: d.id == s.defaultInput, action: .pickInput(d.id))
             }
