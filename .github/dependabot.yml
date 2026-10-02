@@ -1,0 +1,23 @@
+version: 2
+
+updates:
+  # The workflows pin actions by major version (actions/checkout@v7, claude-code-action@v1), and
+  # a release that depends on a stale one fails at tag time rather than in review. Grouped into
+  # one weekly PR, because a bump per action is a PR per action through a `main` that only takes
+  # changes by PR.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Package.swift has no dependencies today — the selftest is a plain executable precisely so
+  # that nothing beyond the toolchain is needed. This entry costs nothing until that changes,
+  # and means the first package added is watched without anybody remembering to come back here.
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
