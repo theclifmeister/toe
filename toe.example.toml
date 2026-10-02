@@ -137,9 +137,9 @@ slide_duration = 0.3
 # Animate the tiles when the layout changes: a swap, a split flipping, a split moving, a window
 # opening, closing or floating. The same trick as the slide's cards — a card per window over your
 # desktop picture, the real windows moved once underneath — and when a change arrives mid-motion,
-# holding SUPER+equal or pressing SUPER+SHIFT+arrow twice, the cards bend towards the new layout
-# rather than starting again. Workspace switches stay instant, and so does anything you do with
-# the mouse: a drag, a drop and whatever the drop rearranges.
+# pressing SUPER+SHIFT+arrow twice, the cards bend towards the new layout rather than starting
+# again. Workspace switches stay instant, and so do resizing with SUPER+-/= and anything you do
+# with the mouse: a drag, a drop and whatever the drop rearranges.
 #
 # SUPER+SPACE > Setup has this switch too, and it rewrites this line.
 tile_snap = true

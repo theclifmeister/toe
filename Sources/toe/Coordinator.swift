@@ -26,9 +26,12 @@ final class Coordinator: WindowTrackerDelegate {
         snap.onFinished = { [weak self] in self?.updateBorder() }
         return snap
     }()
-    /// True for the one `apply` that `endDrag` makes: a drop, and whatever the drop rearranges,
-    /// is the user's own move with the mouse and lands instantly — see `beginTileSnap`.
-    private var renderingDrop = false
+    /// True for the one `apply` that `applyInstantly` makes: a render the tile snap must not
+    /// animate. A drop, and whatever the drop rearranges, is the user's own move with the mouse;
+    /// a SUPER+-/= resize is a split nudged a step at a time while the user watches the edge it
+    /// moves, and a card between them and the window would only blur that edge. Both land
+    /// instantly — see `beginTileSnap`.
+    private var renderingInstantly = false
     private let pictures = WorkspacePictures()
     private let desktopPictures = DesktopPictures()
     private let hideBlocker = HideBlocker()
@@ -2711,15 +2714,17 @@ final class Coordinator: WindowTrackerDelegate {
     /// window raising itself are not layout changes and stay as instant as they always were.
     /// Once one is running, any change to what it is drawing — a slot, a window arriving or
     /// leaving, the focus and so the ring — retargets it (`TileSnap.Motion.retarget`), which is
-    /// what turns a held SUPER+equal into one glide rather than a run of restarts. A render that
-    /// changes none of that — the focus notifications that trail every command — leaves it be.
+    /// what turns two quick SUPER+SHIFT+arrows into one glide rather than a run of restarts. A
+    /// render that changes none of that — the focus notifications that trail every command —
+    /// leaves it be.
     ///
     /// Everything the prototype skipped, this still skips, and a running snap is cancelled by
     /// the same things: a swipe's slide, a Space change, a native-fullscreen window, a window
-    /// coming back from the stash (a workspace switch, which is instant), and the mouse. A drag
-    /// is the user moving a window by hand, and so is the drop that ends it and whatever the drop
-    /// rearranges: animating any of that would put a card between the user and the window they
-    /// just let go of.
+    /// coming back from the stash (a workspace switch, which is instant), the mouse, and a
+    /// SUPER+-/= resize. A drag is the user moving a window by hand, and so is the drop that ends
+    /// it and whatever the drop rearranges: animating any of that would put a card between the
+    /// user and the window they just let go of. A keyboard resize is the same thing done a step
+    /// at a time — see `renderingInstantly`, which is where a new exception belongs.
     private func beginTileSnap(_ plan: RenderPlan) -> Bool {
         guard config.animations.tileSnap else { cancelTileSnap(); return false }
         let visible = plan.frames.merging(plan.floating) { _, floating in floating }
@@ -2736,7 +2741,7 @@ final class Coordinator: WindowTrackerDelegate {
             guard moving else { return false }
         }
 
-        guard draggedWindow == nil, !renderingDrop else { cancelTileSnap(); return false }
+        guard draggedWindow == nil, !renderingInstantly else { cancelTileSnap(); return false }
         // Not over a swipe's slide or a Space change — each has the screen already.
         guard slidePhase == .idle, spaceSettle == nil else { cancelTileSnap(); return false }
         // A window coming back from the stash is a workspace switch: what was on screen before
@@ -2801,6 +2806,16 @@ final class Coordinator: WindowTrackerDelegate {
 
     private func cancelTileSnap() {
         tileSnap.cancel()
+    }
+
+    /// `apply`, with the tile snap kept out of it — see `renderingInstantly`. A snap already up
+    /// is cancelled rather than bent towards this layout, so the frames land where the user can
+    /// see them now. Inside a `batch` the render is held as any other and the batch's own one
+    /// decides, since that is the render that reaches the screen.
+    private func applyInstantly(refocus: Bool) {
+        renderingInstantly = true
+        apply(refocus: refocus)
+        renderingInstantly = false
     }
 
     private func updateBorder() {
@@ -2970,9 +2985,7 @@ final class Coordinator: WindowTrackerDelegate {
         }
         desired.removeValue(forKey: id)
         corrections.removeValue(forKey: id)
-        renderingDrop = true
-        apply(refocus: false)
-        renderingDrop = false
+        applyInstantly(refocus: false)
     }
 
     /// Everything that must happen before toe goes away, whichever way it is going: the Quit menu
@@ -3262,7 +3275,8 @@ final class Coordinator: WindowTrackerDelegate {
                 Log.info("\(CommandLabel.describe(command)): nothing to move for window \(id) — no split on that axis")
                 return
             }
-            apply(refocus: false)
+            // Instant, not snapped: see `renderingInstantly`.
+            applyInstantly(refocus: false)
 
         case .exec(let commandLine):
             let process = Process()
@@ -3559,10 +3573,10 @@ extension Coordinator {
             }
 
         case .growActive(let dx, let dy):
-            if workspaces.growWindow(id, dx: dx, dy: dy) { apply(refocus: false) }
+            if workspaces.growWindow(id, dx: dx, dy: dy) { applyInstantly(refocus: false) }
 
         case .resizeActive(let dx, let dy):
-            if workspaces.resizeWindow(id, dx: dx, dy: dy) { apply(refocus: false) }
+            if workspaces.resizeWindow(id, dx: dx, dy: dy) { applyInstantly(refocus: false) }
 
         case .fullscreen:
             // By id there is no "window in front" question: the tracker keeps a suspended window
