@@ -2237,6 +2237,14 @@ h.test("the slide on a swipe is configurable and on by default") { t in
     t.equal(badSnap.animations.tileSnap, false, "a non-boolean keeps it off")
     t.equal(badSnap.animations.tileSnapDuration, 0.25, "out of range keeps the default")
     t.equal(badSnap.warnings.contains { $0.contains("animations.tile_snap:") }, true, "the boolean is named")
+    t.equal(c.animations.tileSnapOpacity, 0.85, "the cards let a little through by default")
+    t.equal(c.animations.tileSnapStill, .card, "and still windows are cards")
+    let seeThrough = try Config.parse("[animations]\ntile_snap_opacity = 0.6\ntile_snap_still = \"live\"\n")
+    t.equal(seeThrough.animations.tileSnapOpacity, 0.6, "opacity")
+    t.equal(seeThrough.animations.tileSnapStill, .live, "still windows shown live")
+    let clear = try Config.parse("[animations]\ntile_snap_opacity = 0\ntile_snap_still = \"gone\"\n")
+    t.equal(clear.animations.tileSnapOpacity, 0.85, "an invisible panel is refused")
+    t.equal(clear.animations.tileSnapStill, .card, "an unknown style keeps the default")
 }
 
 h.test("the slide follows the target, not the fingers") { t in

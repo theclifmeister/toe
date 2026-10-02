@@ -34,7 +34,11 @@ final class TileSnapOverlay {
     }
 
     private let panel: NSPanel
+    /// The desktop picture's container: the ground the cards move over, and the layer the
+    /// holes are cut in when the windows that stay put are shown live — see `run`.
+    private let ground = CALayer()
     private let backdrop = CALayer()
+    private let groundMask = CAShapeLayer()
     private let cards = CALayer()
     /// Bumped by every `run` and `cancel`, so the completion of an animation that was removed
     /// rather than finished — Core Animation calls it either way — takes down nothing.
@@ -63,10 +67,14 @@ final class TileSnapOverlay {
         let view = NSView(frame: .zero)
         view.wantsLayer = true
         view.layer?.masksToBounds = true
-        for layer in [backdrop, cards] {
+        for layer in [ground, cards] {
             layer.anchorPoint = .zero
             view.layer?.addSublayer(layer)
         }
+        backdrop.anchorPoint = .zero
+        ground.addSublayer(backdrop)
+        groundMask.anchorPoint = .zero
+        groundMask.fillRule = .evenOdd          // the area, less every hole
         panel.contentView = view
     }
 
@@ -74,12 +82,22 @@ final class TileSnapOverlay {
     /// at once, over `desktop` filling the display's `frame` — `SlideOverlay`'s backdrop rule.
     /// After `duration` the panel fades over `dissolve` and comes down, and `completion` runs.
     ///
+    /// `opacity` is the whole panel's — desktop and cards together — so that below 1 the real
+    /// windows show through. They have already jumped to their new frames by then, so what
+    /// shows is the end state ghosted under the motion.
+    ///
+    /// With `liveStill` a window that is not moving gets no card at all: the ground has a hole
+    /// cut where it is (grown by the ring for the focused one, so the real border shows too) and
+    /// the real window is simply seen. That is safe for tiles because tiles never overlap, so no
+    /// moving window's new frame lies inside a still one's hole; a moving card that sweeps over a
+    /// hole is drawn on top of it, as the moving window would be.
+    ///
     /// The caller writes the real frames a couple of refreshes *after* this returns, not before:
     /// the panel has to be composited before anything under it moves, or the windows' jump
     /// shows for a frame first. See `Coordinator.slidePanelLatency`.
     func run(_ moves: [Move], over area: Box, display frame: Box, desktop: CGImage?,
              style: SlideOverlay.CardStyle, duration: Double, dissolve: Double,
-             completion: @escaping () -> Void) {
+             opacity: Double, liveStill: Bool, completion: @escaping () -> Void) {
         generation += 1
         let mine = generation
         isRunning = true
@@ -91,8 +109,9 @@ final class TileSnapOverlay {
         panel.contentView?.layer?.removeAllAnimations()
         panel.setFrame(rect, display: false)
         panel.contentView?.frame = bounds
-        panel.contentView?.layer?.opacity = 1
+        panel.contentView?.layer?.opacity = Float(opacity)
         let scale = panel.backingScaleFactor
+        ground.frame = bounds
         cards.frame = bounds
         cards.sublayers = nil
         backdrop.contentsScale = scale
@@ -108,6 +127,22 @@ final class TileSnapOverlay {
             backdrop.frame = bounds
             backdrop.contents = nil
             backdrop.backgroundColor = style.backdrop
+        }
+        if liveStill {
+            let path = CGMutablePath()
+            path.addRect(bounds)
+            for move in moves where move.from == move.to {
+                let w = move.focused ? style.borderWidth : 0
+                let rect = CGRect(x: move.to.x - w, y: bounds.height - move.to.y - move.to.h - w,
+                                  width: move.to.w + 2 * w, height: move.to.h + 2 * w)
+                let radius = min(move.radius + w, min(rect.width, rect.height) / 2)
+                path.addRoundedRect(in: rect, cornerWidth: radius, cornerHeight: radius)
+            }
+            groundMask.frame = bounds
+            groundMask.path = path
+            ground.mask = groundMask
+        } else {
+            ground.mask = nil
         }
         CATransaction.commit()
 
@@ -127,7 +162,7 @@ final class TileSnapOverlay {
                 self.hide(); completion()
             }
             let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = 1
+            fade.fromValue = opacity
             fade.toValue = 0
             fade.duration = dissolve
             fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -136,7 +171,7 @@ final class TileSnapOverlay {
             CATransaction.commit()
         }
         let height = bounds.height
-        for move in moves {
+        for move in moves where !(liveStill && move.from == move.to) {
             add(move, to: cards, height: height, style: style, scale: scale, duration: duration)
         }
         CATransaction.commit()
@@ -162,6 +197,7 @@ final class TileSnapOverlay {
         panel.contentView?.layer?.removeAllAnimations()
         panel.contentView?.layer?.opacity = 1
         cards.sublayers = nil
+        ground.mask = nil
         backdrop.contents = nil
         backdrop.backgroundColor = nil
         CATransaction.commit()

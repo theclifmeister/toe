@@ -2760,7 +2760,9 @@ final class Coordinator: WindowTrackerDelegate {
             let desktop = screen.flatMap { desktopPictures.image(for: $0) }
             overlay.run(moves, over: area, display: monitor.frame, desktop: desktop, style: style,
                         duration: config.animations.tileSnapDuration,
-                        dissolve: Self.slideDissolveTime) { [weak self] in
+                        dissolve: Self.slideDissolveTime,
+                        opacity: config.animations.tileSnapOpacity,
+                        liveStill: config.animations.tileSnapStill == .live) { [weak self] in
                 // The windows have stopped; the border may have drawn mid-move.
                 self?.updateBorder()
             }

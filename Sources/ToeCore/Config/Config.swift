@@ -126,7 +126,20 @@ public struct AnimationConfig: Equatable {
     public var tileSnap: Bool = false
     /// How long the cards take to travel, in seconds. The dissolve comes after.
     public var tileSnapDuration: Double = 0.25
+    /// The snap panel's opacity, desktop and cards together: below 1 the real windows, already
+    /// at their new frames, show through the motion.
+    public var tileSnapOpacity: Double = 0.85
+    /// What a window that is not moving looks like during a snap — see `TileSnapStill`.
+    public var tileSnapStill: TileSnapStill = .card
     public init() {}
+}
+
+/// PROTOTYPE: how the tile snap draws the windows a layout change leaves where they are.
+public enum TileSnapStill: String, Equatable, Sendable, CaseIterable {
+    /// A card like the moving ones, so the whole display is cards for the snap.
+    case card
+    /// No card, and a hole in the panel where the window is: the real window shows.
+    case live
 }
 
 /// What the slide moves across the screen, since it cannot move the windows themselves.
@@ -764,6 +777,19 @@ public struct Config: Equatable {
             if let v = number(a["tile_snap_duration"], "animations.tile_snap_duration", in: 0.05...2,
                               keeping: config.animations.tileSnapDuration, warnings: &config.warnings) {
                 config.animations.tileSnapDuration = v
+            }
+            if let v = number(a["tile_snap_opacity"], "animations.tile_snap_opacity", in: 0.1...1,
+                              keeping: config.animations.tileSnapOpacity, warnings: &config.warnings) {
+                config.animations.tileSnapOpacity = v
+            }
+            if let raw = a["tile_snap_still"]?.stringValue {
+                if let still = TileSnapStill(rawValue: raw) {
+                    config.animations.tileSnapStill = still
+                } else {
+                    config.warnings.append("animations.tile_snap_still: '\(raw)' is not one of "
+                                           + TileSnapStill.allCases.map(\.rawValue).joined(separator: ", ")
+                                           + ", using \(config.animations.tileSnapStill.rawValue)")
+                }
             }
         }
 
