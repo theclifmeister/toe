@@ -244,19 +244,22 @@ public struct StyleMenu: Equatable {
 /// The case names the line it writes — which table, which key, and how to read it back — because
 /// everything between the row and the file is otherwise the same code once per switch: the menu
 /// builds a row from `value(in:)`, `MenuState` hands the case straight back, and
-/// `Coordinator.toggle` writes `key` into `table` and reloads. A seventh switch is a case here and
+/// `Coordinator.toggle` writes `key` into `table` and reloads. An eighth switch is a case here and
 /// nothing anywhere else.
 ///
 /// Only settings that are *worth* a row belong here — a switch in the menu is a switch somebody
-/// will throw while looking at what it does, so it wants an effect they can see. The first four
-/// change the screen the moment they are written; the fifth changes the next SUPER+TAB and the
-/// sixth the next SUPER+W, keys under the same hand that closed the menu, and close enough to
-/// count. That is the bar to clear: `restore_session` shows nothing until the next launch, and
+/// will throw while looking at what it does, so it wants an effect they can see. Most change the
+/// screen the moment they are written; the tile animation shows on the next layout change, the
+/// cycling switch on the next SUPER+TAB and the last on the next SUPER+W — keys under the same
+/// hand that closed the menu, and close enough to count. That is the bar to clear: `restore_session` shows nothing until the next launch, and
 /// is not here.
 public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     /// `[animations] slide_on_swipe`. The one that can ask for a permission, with
     /// `slide_style = "pictures"` — see `Coordinator.toggle` on why the flip goes through the file.
     case slide
+    /// `[animations] tile_snap`. Beside the slide, its sibling: the cards again, for a layout
+    /// change instead of a workspace switch.
+    case tileSnap
     /// `[border] enabled`. The gradient around the focused window.
     case border
     /// `[misc] autohide_dock`. Hands the Dock's strip of screen back to the tiles.
@@ -274,6 +277,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     public var title: String {
         switch self {
         case .slide:  return "Workspace slide"
+        case .tileSnap: return "Tile animation"
         case .border: return "Focus border"
         case .dock:   return "Auto-hide Dock"
         case .bar:    return "Menu bar"
@@ -285,6 +289,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     public var table: String {
         switch self {
         case .slide:  return "animations"
+        case .tileSnap: return "animations"
         case .border: return "border"
         case .dock:   return "misc"
         case .bar:    return "bar"
@@ -296,6 +301,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     public var key: String {
         switch self {
         case .slide:  return "slide_on_swipe"
+        case .tileSnap: return "tile_snap"
         case .border: return "enabled"
         case .dock:   return "autohide_dock"
         case .bar:    return "enabled"
@@ -307,6 +313,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     public func value(in config: Config) -> Bool {
         switch self {
         case .slide:  return config.animations.slideOnSwipe
+        case .tileSnap: return config.animations.tileSnap
         case .border: return config.border.enabled
         case .dock:   return config.misc.autohideDock
         case .bar:    return config.bar.enabled
@@ -320,6 +327,7 @@ public enum ConfigSwitch: String, Equatable, Sendable, CaseIterable {
     public func set(_ on: Bool, in config: inout Config) {
         switch self {
         case .slide:  config.animations.slideOnSwipe = on
+        case .tileSnap: config.animations.tileSnap = on
         case .border: config.border.enabled = on
         case .dock:   config.misc.autohideDock = on
         case .bar:    config.bar.enabled = on

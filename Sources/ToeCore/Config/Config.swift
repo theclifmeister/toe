@@ -120,6 +120,18 @@ public struct AnimationConfig: Equatable {
     public var slideStyle: SlideStyle = .cards
     /// How long the slide takes, in seconds.
     public var slideDuration: Double = 0.3
+    /// Animate a layout change — a tile moving, splitting, growing, a window opening or
+    /// closing — with stand-ins on a panel over the display, the real frames written once
+    /// underneath. See `TileSnap` for the motion and `TileSnapOverlay` for the panel. On by
+    /// default, like the slide: it asks for nothing, and Hyprland, which this layout is a port
+    /// of, animates its windows out of the box.
+    public var tileSnap: Bool = true
+    /// The spring's duration in seconds: roughly when the motion looks done. The dissolve
+    /// starts as the cards land and takes `Coordinator.slideDissolveTime` more.
+    public var tileSnapDuration: Double = 0.3
+    /// How far the cards overshoot their slots before settling: the snap. 0 is a glide with no
+    /// overshoot; 0.2 passes a 1000-point move's slot by about 15 points.
+    public var tileSnapBounce: Double = 0.2
     public init() {}
 }
 
@@ -747,6 +759,28 @@ public struct Config: Equatable {
                               keeping: config.animations.slideDuration, warnings: &config.warnings) {
                 config.animations.slideDuration = v
             }
+            if let raw = a["tile_snap"] {
+                if let v = raw.boolValue {
+                    config.animations.tileSnap = v
+                } else {
+                    config.warnings.append("animations.tile_snap: must be true or false, using \(config.animations.tileSnap)")
+                }
+            }
+            // Bounded for `slide_duration`'s reason: it sets the length of every keyframe
+            // animation the snap hands the render server.
+            if let v = number(a["tile_snap_duration"], "animations.tile_snap_duration", in: 0.05...2,
+                              keeping: config.animations.tileSnapDuration, warnings: &config.warnings) {
+                config.animations.tileSnapDuration = v
+            }
+            // Past 0.6 the damping ratio is under 0.4 and a card rings round its slot three or four
+            // times before it stops — a wobble, not a snap.
+            if let v = number(a["tile_snap_bounce"], "animations.tile_snap_bounce", in: 0...0.6,
+                              keeping: config.animations.tileSnapBounce, warnings: &config.warnings) {
+                config.animations.tileSnapBounce = v
+            }
+            // `tile_snap_still` and `tile_snap_opacity` were the prototype's (t-0004) and are gone:
+            // the cards are opaque and every window is one. Unknown keys are ignored, so a config
+            // that still has them loads as it is.
         }
 
         if let m = root["menu"]?.tableValue {

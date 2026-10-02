@@ -2227,6 +2227,108 @@ h.test("the slide on a swipe is configurable and on by default") { t in
 
     let slow = try Config.parse("[animations]\nslide_duration = 10\n")
     t.equal(slow.animations.slideDuration, 0.3, "out of range keeps the default")
+
+    // The tile snap: on by default, its spring bounded so Core Animation is never handed nonsense.
+    t.equal(c.animations.tileSnap, true, "the tile snap is on out of the box")
+    t.equal(c.animations.tileSnapDuration, 0.3, "about the slide's length")
+    t.equal(c.animations.tileSnapBounce, 0.2, "and it lands with a little snap")
+    let snap = try Config.parse("[animations]\ntile_snap = false\ntile_snap_duration = 0.4\ntile_snap_bounce = 0\n")
+    t.equal(snap.animations.tileSnap, false, "off")
+    t.equal(snap.animations.tileSnapDuration, 0.4, "its duration")
+    t.equal(snap.animations.tileSnapBounce, 0, "no bounce is a plain glide")
+    let badSnap = try Config.parse("[animations]\ntile_snap = 1\ntile_snap_duration = 9\ntile_snap_bounce = 0.9\n")
+    t.equal(badSnap.animations.tileSnap, true, "a non-boolean keeps the default")
+    t.equal(badSnap.animations.tileSnapDuration, 0.3, "out of range keeps the default")
+    t.equal(badSnap.animations.tileSnapBounce, 0.2, "and so does a wobble")
+    t.equal(badSnap.warnings.contains { $0.contains("animations.tile_snap:") }, true, "the boolean is named")
+    t.equal(badSnap.warnings.contains { $0.contains("animations.tile_snap_bounce") }, true, "and the bounce")
+    // The prototype's knobs are still in the config of whoever tried it; they must not break it.
+    let prototype = try Config.parse("[animations]\ntile_snap = true\ntile_snap_still = \"card\"\ntile_snap_opacity = 1\n")
+    t.equal(prototype.animations.tileSnap, true, "a prototype config still loads")
+    t.equal(prototype.warnings, [], "and quietly")
+}
+
+h.test("the tile snap's spring lands, overshoots by its bounce, and retargets without a jump") { t in
+    let glide = TileSnap.Spring(duration: 0.3, bounce: 0)
+    let snappy = TileSnap.Spring(duration: 0.3, bounce: 0.2)
+    let from = box(0, 0, 400, 300), to = box(1000, 0, 400, 300)
+
+    // The ends of one leg.
+    let track = TileSnap.Track(from: from, to: to, start: 10)
+    t.equalBox(track.frame(at: 10, snappy), from, "it starts where the window was")
+    t.equalBox(track.frame(at: 9, snappy), from, "and is there before it starts")
+    t.equalBox(track.frame(at: 12, snappy), to, "and ends in the slot")
+
+    // The snap: a critically damped spring never passes its slot; a bouncy one does, by the
+    // overshoot it advertises.
+    var furthest = 0.0, furthestGlide = 0.0
+    for i in 0...600 {
+        let time = 10 + Double(i) / 600
+        furthest = max(furthest, track.frame(at: time, snappy).x)
+        furthestGlide = max(furthestGlide, track.frame(at: time, glide).x)
+    }
+    t.expect(furthestGlide <= 1000.001, "no bounce never overshoots: got \(furthestGlide)")
+    t.near((furthest - 1000) / 1000, snappy.overshoot, "the bounce overshoots by what it says")
+    t.expect(snappy.overshoot > 0.01 && snappy.overshoot < 0.03, "0.2 is a click, not a wobble: \(snappy.overshoot)")
+    t.equal(glide.overshoot, 0, "and no bounce is none")
+
+    // Landing and rest: in order, finite, and the land is near enough to the slot.
+    let landed = track.time(within: TileSnap.landDistance, snappy)
+    let rest = track.time(within: TileSnap.restDistance, snappy)
+    t.expect(landed > 10 && landed < rest && rest < 11, "lands, then rests, within a second: \(landed) \(rest)")
+    t.expect(abs(track.frame(at: landed, snappy).x - 1000) < TileSnap.landDistance, "landed is close")
+    t.expect(landed - 10 < 0.5, "a long move lands in under half a second at 0.3: \(landed - 10)")
+    // The energy test, not the distance: a bouncy spring is at its slot at every crossing, long
+    // before it has stopped.
+    let crossing = (0...600).map { 10 + Double($0) / 1000 }.first { track.frame(at: $0, snappy).x >= 1000 }!
+    t.expect(crossing < landed, "crossing the slot at speed is not landing")
+
+    // A window already in place does not move and is at rest at once.
+    let still = TileSnap.Track(from: to, to: to, start: 0)
+    t.equal(still.time(within: TileSnap.restDistance, snappy), 0, "nothing to do")
+
+    // The retarget: the second leg starts exactly where and as fast as the first had got to.
+    var motion = TileSnap.Motion(spring: snappy)
+    let changed = motion.retarget(to: [1: to, 2: box(0, 400, 400, 300)],
+                                  from: [1: from, 2: box(0, 400, 400, 300)], at: 0)
+    t.equal(changed, [1, 2], "both windows are new to the motion")
+    t.equal(motion.landing(after: 0) > 0, true, "and one of them has somewhere to go")
+    let mid = 0.06
+    let before = motion.tracks[1]!.state(at: mid, snappy)
+    let elsewhere = box(1000, 400, 400, 300)
+    let second = motion.retarget(to: [1: elsewhere, 2: box(0, 400, 400, 300)], from: [:], at: mid)
+    t.equal(second, [1], "only the window whose slot changed starts a new leg")
+    t.equal(motion.tracks[2]?.start, 0, "the other keeps its own")
+    let after = motion.tracks[1]!.state(at: mid, snappy)
+    t.equalBox(after.frame, before.frame, "no jump in position")
+    t.near(after.velocity.x, before.velocity.x, "nor in speed")
+    t.expect(before.velocity.x > 1000, "and it was moving fast when it was redirected: \(before.velocity.x)")
+    t.equalBox(motion.frame(of: 1, at: 5), elsewhere, "it ends at the new slot")
+    let justAfter = motion.tracks[1]!.frame(at: mid + 0.001, snappy)
+    t.expect(abs(justAfter.x - (before.frame.x + before.velocity.x * 0.001)) < 1,
+             "and carries on along the way it was going: \(justAfter.x - before.frame.x)")
+
+    // Windows that leave, and windows that arrive from nowhere.
+    motion.retarget(to: [1: elsewhere, 3: box(500, 500, 200, 100)], from: [:], at: 0.1)
+    t.equal(motion.tracks[2] == nil, true, "a closed window's card goes")
+    t.equalBox(motion.tracks[3]?.from, box(508, 504, 184, 92), "a window from nowhere grows into its slot")
+
+    // Keyframes: from now, to the slot exactly, and nothing for a window at rest.
+    let frames = motion.samples(of: 1, from: 0.1)
+    t.equalBox(frames.first, motion.frame(of: 1, at: 0.1)!, "the keyframes start where the card is")
+    t.equal(frames.last, elsewhere, "and end in the slot, exactly")
+    t.expect(frames.count > 10 && frames.count < 240, "at 120 a second: \(frames.count)")
+    t.equal(motion.samples(of: 1, from: 30), [elsewhere], "a card at rest is one frame")
+    t.equal(motion.samples(of: 9, from: 0), [], "and a window the motion does not have is none")
+    t.expect(motion.rest(after: 0.1) >= motion.landing(after: 0.1), "rest comes after landing")
+}
+
+h.test("the tile snap stacks its cards as the window server does") { t in
+    // `CGWindowListCopyWindowInfo` lists frontmost first; the cards are drawn back to front.
+    t.equal(TileSnap.drawOrder([1, 2, 3], frontToBack: [3, 1, 2]), [2, 1, 3], "the list, reversed")
+    t.equal(TileSnap.drawOrder([1, 2, 9, 8], frontToBack: [2, 7, 1]), [1, 2, 8, 9],
+            "a window the list has not got yet goes on top, in a stable order")
+    t.equal(TileSnap.drawOrder(Set<WindowID>([5, 4]), frontToBack: []), [4, 5], "with no list at all, by id")
 }
 
 h.test("the slide follows the target, not the fingers") { t in
@@ -4669,7 +4771,7 @@ h.test("a submenu is entered, backed out of, and clears the query on the way in"
     t.equal(m.breadcrumb, ["Setup"], "the level is named")
     t.equal(m.prompt, "Setup…", "and the placeholder says where you are")
     t.equal(m.visible.map(\.title),
-            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
+            ["Run on startup", "Workspace slide", "Tile animation", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "what toe can actually change for you")
     t.equal(m.pop(), .popped, "Escape climbs one level")
@@ -4830,8 +4932,8 @@ h.test("the switches live under Setup, and each row is the line it writes") { t 
         return rows
     }
     let shipped = try Config.parse(Config.defaultTOML)
-    t.equal(setup(shipped).map(\.title).suffix(6),
-            ["Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
+    t.equal(setup(shipped).map(\.title).suffix(7),
+            ["Workspace slide", "Tile animation", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "toe's own switches, under the config and the startup row")
 
@@ -4881,7 +4983,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // Omarchy's `setup.config` first, then toe's own row — the ported rows lead.
     let shipped = try rows(Config.defaultTOML)
     t.equal(shipped.map(\.title),
-            ["Config", "Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
+            ["Config", "Run on startup", "Workspace slide", "Tile animation", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "every row, Omarchy's leading")
     t.equal(shipped.first?.action,
@@ -4901,7 +5003,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // An exec that opens something else is not an editor for this file.
     let unrelated = try rows("[binds]\n\"super-enter\" = \"exec open -a Ghostty\"\n")
     t.equal(unrelated.map(\.title),
-            ["Run on startup", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
+            ["Run on startup", "Workspace slide", "Tile animation", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "no binding that opens the config, no row offering to")
     t.equal(MenuModel.root(loginItem: .unavailable("needs /Applications"),
@@ -4913,7 +5015,7 @@ h.test("the Config row is your binding, not toe's idea of an editor") { t in
     // The row is there even when the startup toggle cannot be.
     let buildDir = try rows(Config.defaultTOML, loginItem: .unavailable("needs /Applications"))
     t.equal(buildDir.map(\.title),
-            ["Config", "Workspace slide", "Focus border", "Auto-hide Dock", "Menu bar",
+            ["Config", "Workspace slide", "Tile animation", "Focus border", "Auto-hide Dock", "Menu bar",
              "Cycle empty workspaces", "Quit app on last window"],
             "the rows that work are still offered")
 }
