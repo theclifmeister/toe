@@ -143,6 +143,23 @@ slide_style = "cards"
 # Seconds. Spaces takes about a third of one.
 slide_duration = 0.3
 
+# Animate the tiles when the layout changes: a swap, a split flipping, a split moving, a window
+# opening, closing or floating. The same trick as the slide's cards — a card per window over your
+# desktop picture, the real windows moved once underneath — and when a change arrives mid-motion,
+# holding SUPER+equal or pressing SUPER+SHIFT+arrow twice, the cards bend towards the new layout
+# rather than starting again. Workspace switches stay instant, and so does anything you do with
+# the mouse: a drag, a drop and whatever the drop rearranges.
+#
+# SUPER+SPACE > Setup has this switch too, and it rewrites this line.
+tile_snap = true
+# Seconds, roughly: the cards are on a spring, and this is about when the motion looks done. The
+# panel then dissolves into the real windows over another 0.15.
+tile_snap_duration = 0.3
+# The snap at the end: how far a card passes its slot before it settles back, so the window
+# lands rather than coasts in. 0 is a glide with no overshoot, 0.2 a click into place, 0.4 a
+# visible bounce; up to 0.6.
+tile_snap_bounce = 0.2
+
 [misc]
 # Ctrl+↑ and Ctrl+↓ open the same Mission Control and App Exposé the vertical swipe does. These
 # are symbolic hotkeys, resolved inside the window server, so nothing an event tap can do reaches

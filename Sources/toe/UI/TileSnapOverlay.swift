@@ -1,282 +1,305 @@
 import AppKit
 import ToeCore
 
-/// PROTOTYPE — the tile snap, animated with stand-ins (`[animations] tile_snap`, off by default).
+/// The tile snap: a layout change — a swap, a split flipping or moving, a window opening,
+/// closing or floating — animated with stand-ins (`[animations] tile_snap`).
 ///
 /// The same trick as `SlideOverlay`'s cards, pointed at a layout change instead of a workspace
-/// switch. Moving the real windows at animation speed is out for the reasons that panel's doc
-/// comment gives — every step is a blocking Accessibility round trip, the app repaints when it
-/// likes, and each step would trip `windowFrameChangedExternally`'s corrections — so the real
-/// frames are written once, underneath, and what moves is a card per window on a click-through
-/// panel over the display: from where each window was to where it is going, on the GPU, in step
-/// with the display. When the cards have stopped over the real windows the panel dissolves and
-/// the windows, which have had the whole motion to repaint at their new size, are simply there.
+/// switch, and on the same panels (`OverlayHost`). Moving the real windows at animation speed is
+/// out for the reasons that panel's doc comment gives — every step is a blocking Accessibility
+/// round trip, the app repaints when it likes, and each step would trip
+/// `windowFrameChangedExternally`'s corrections — so the real frames are written once, underneath,
+/// and what moves is a card per window on a click-through panel over each display involved: from
+/// where each window was to where it is going. When the cards have landed over the real windows,
+/// and the windows have said they are there, the panel dissolves and the windows, which have had
+/// the whole motion to repaint at their new size, are simply there.
 ///
-/// toe cannot hide a window without SIP off, so the panel covers the whole tiling area and
-/// draws *every* window on it — the ones that do not move as well, and the floats — over the
-/// desktop picture. A panel that drew only the movers would sweep their cards across windows
-/// that have already jumped to their new places underneath.
+/// toe cannot hide a window without SIP off, so the panel covers the whole tiling area and draws
+/// *every* window on it — the ones that do not move as well, and the floats — over the desktop
+/// picture. A panel that drew only the movers would sweep their cards across windows that have
+/// already jumped to their new places underneath; and the prototype's "live" variant, which cut
+/// holes for the windows that stayed put, looked wrong on screen, as did a see-through panel.
 ///
-/// One of these per display that has something moving; see `Coordinator.beginTileSnap`. Not the
-/// final architecture: no shared animation model, no retargeting — a render that moves a tile
-/// mid-snap cancels this one and starts the next from the frames the last one was heading for.
+/// The motion is `TileSnap.Motion`'s, a spring per window. It is handed to the render server as
+/// keyframes sampled from the model, so the main thread — which spends up to a quarter of a
+/// second in an Accessibility call when an app is slow — never has to be on time for a frame.
+/// A layout arriving mid-motion *retargets*: each card whose slot changed starts a new leg from
+/// where the model says it is now, at the speed it is moving now, which is exactly where the
+/// render server is drawing it, since that is what it was given. Reading the presentation layer
+/// would give the same position and no velocity.
 final class TileSnapOverlay {
 
-    /// One window's stand-in: where it was and where it is going, both relative to the area's
-    /// top-left with y down, as `WorkspaceSlide.Card`'s box is. A nil `from` is a window that
-    /// had nowhere to come from on this display, and fades in at its new frame instead.
-    struct Move {
-        var id: WindowID
-        var from: Box?
-        var to: Box
-        var radius: Double
-        var focused: Bool
+    /// A display the snap may draw on: its id, the tiling area the panel covers, the whole frame
+    /// the desktop picture fills, and that picture.
+    struct Display {
+        var id: UInt32
+        var area: Box
+        var frame: Box
+        var desktop: CGImage?
     }
 
-    private let panel: NSPanel
-    /// The desktop picture's container: the ground the cards move over, and the layer the
-    /// holes are cut in when the windows that stay put are shown live — see `run`.
-    private let ground = CALayer()
-    private let backdrop = CALayer()
-    private let groundMask = CAShapeLayer()
-    private let cards = CALayer()
-    /// Bumped by every `run` and `cancel`, so the completion of an animation that was removed
-    /// rather than finished — Core Animation calls it either way — takes down nothing.
-    private var generation = 0
-    private(set) var isRunning = false
+    /// Everything a snap needs to know about the screen, from the coordinator, in AX coordinates.
+    struct Scene {
+        /// Where every visible window is going.
+        var targets: [WindowID: Box]
+        /// Where a window new to the motion was before this layout, if anywhere.
+        var origins: [WindowID: Box]
+        var radii: [WindowID: Double]
+        var focused: WindowID?
+        /// The window server's order, frontmost first — `WindowStack.frontToBack`.
+        var frontToBack: [WindowID]
+        var displays: [Display]
+        var style: CardStyle
+        var spring: TileSnap.Spring
+        var dissolve: Double
+    }
 
-    /// Hyprland's `easeOutQuint`, the curve Omarchy's `windows` animation uses: fast off the
-    /// mark and a long, soft landing, with no overshoot.
-    private static let curve = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    /// How long past landing the hand-off waits for a window that has not reported its new frame
+    /// before dissolving anyway. An app that refuses the frame — a minimum size bigger than its
+    /// tile — never reports one, and the screen is not held for it. Long enough for an app busy
+    /// laying itself out at the new size to answer; short enough that a wait is not a hang.
+    private static let handoffTimeout: TimeInterval = 0.25
 
-    init() {
-        // The panel is `SlideOverlay`'s, setting for setting, for the reasons given there.
-        panel = NSPanel(contentRect: .zero,
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.ignoresMouseEvents = true
-        panel.isFloatingPanel = true
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue - 1)
-        panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
-        panel.animationBehavior = .none
+    private let host: OverlayHost
+    private var motion: TileSnap.Motion?
+    /// One per display the snap is drawing on, until it ends.
+    private var stages: [UInt32: StageState] = [:]
+    private var focused: WindowID?
+    /// Real windows not yet seen at their new frames.
+    private var awaiting: Set<WindowID> = []
+    private var hasLanded = false
+    private var landing: DispatchWorkItem?
+    private var deadline: DispatchWorkItem?
+    private var dissolving = 0
+    /// When the current snap began, for the log line at the hand-off.
+    private var began: CFTimeInterval = 0
+    /// Called when a snap has finished — dissolved, not cancelled.
+    var onFinished: (() -> Void)?
 
-        let view = NSView(frame: .zero)
-        view.wantsLayer = true
-        view.layer?.masksToBounds = true
-        for layer in [ground, cards] {
-            layer.anchorPoint = .zero
-            view.layer?.addSublayer(layer)
+    private final class StageState {
+        let stage: OverlayStage
+        let area: Box
+        var cards: [WindowID: Card] = [:]
+        init(stage: OverlayStage, area: Box) { self.stage = stage; self.area = area }
+
+        /// A box in AX coordinates as a layer rect on this stage: relative to the area's
+        /// top-left, then flipped, y up.
+        func rect(_ box: Box) -> CGRect {
+            CGRect(x: box.x - area.x, y: area.h - (box.y - area.y) - box.h, width: box.w, height: box.h)
         }
-        backdrop.anchorPoint = .zero
-        ground.addSublayer(backdrop)
-        groundMask.anchorPoint = .zero
-        groundMask.fillRule = .evenOdd          // the area, less every hole
-        panel.contentView = view
     }
 
-    /// Puts the cards up over `area` at their old frames and sets them moving to their new ones
-    /// at once, over `desktop` filling the display's `frame` — `SlideOverlay`'s backdrop rule.
-    /// After `duration` the panel fades over `dissolve` and comes down, and `completion` runs.
-    ///
-    /// `opacity` is the whole panel's — desktop and cards together — so that below 1 the real
-    /// windows show through. They have already jumped to their new frames by then, so what
-    /// shows is the end state ghosted under the motion.
-    ///
-    /// With `liveStill` a window that is not moving gets no card at all: the ground has a hole
-    /// cut where it is (grown by the ring for the focused one, so the real border shows too) and
-    /// the real window is simply seen. That is safe for tiles because tiles never overlap, so no
-    /// moving window's new frame lies inside a still one's hole; a moving card that sweeps over a
-    /// hole is drawn on top of it, as the moving window would be.
-    ///
-    /// The caller writes the real frames a couple of refreshes *after* this returns, not before:
-    /// the panel has to be composited before anything under it moves, or the windows' jump
-    /// shows for a frame first. See `Coordinator.slidePanelLatency`.
-    func run(_ moves: [Move], over area: Box, display frame: Box, desktop: CGImage?,
-             style: SlideOverlay.CardStyle, duration: Double, dissolve: Double,
-             opacity: Double, liveStill: Bool, completion: @escaping () -> Void) {
-        generation += 1
-        let mine = generation
-        isRunning = true
-        let rect = Coordinates.toCocoa(area)
-        let bounds = CGRect(origin: .zero, size: rect.size)
+    init(host: OverlayHost) { self.host = host }
 
+    var isRunning: Bool { motion != nil }
+
+    /// Where the snap last sent `id`, if it has it: for the coordinator, which retargets only
+    /// when a window's slot has actually changed.
+    func target(of id: WindowID) -> Box? { motion?.tracks[id]?.to }
+    var windows: Set<WindowID> { Set(motion?.tracks.keys.map { $0 } ?? []) }
+    var focusedWindow: WindowID? { focused }
+
+    /// Starts a snap, or retargets the one in flight, towards `scene`.
+    ///
+    /// The caller writes the real frames a couple of refreshes *after* this returns, not
+    /// before: a stage that has just been put up has to be composited before anything under it
+    /// moves, or the windows' jump shows for a frame first. See `Coordinator.slidePanelLatency`.
+    func run(_ scene: Scene) {
+        let now = CACurrentMediaTime()
+        if self.motion == nil { began = now }
+        var motion = self.motion ?? TileSnap.Motion(spring: scene.spring)
+        motion.spring = scene.spring
+        let changed = motion.retarget(to: scene.targets, from: scene.origins, at: now)
+        self.motion = motion
+        let refocused = focused != scene.focused
+        let oldFocus = focused
+        focused = scene.focused
+
+        func overlaps(_ box: Box, _ area: Box) -> Bool {
+            let clipped = box.intersection(area)
+            return clipped.w > 0 && clipped.h > 0
+        }
+        /// The windows a display has to draw: every window whose card is, or will be, on it.
+        func residents(of area: Box) -> [WindowID] {
+            motion.tracks.compactMap { id, track in
+                let here = track.frame(at: now, motion.spring)
+                return overlaps(here, area) || overlaps(track.to, area) ? id : nil
+            }
+        }
+        let order = TileSnap.drawOrder(motion.tracks.keys, frontToBack: scene.frontToBack)
+        let depth = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+
+        var fresh: [StageState] = []
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        panel.contentView?.layer?.removeAllAnimations()
-        panel.setFrame(rect, display: false)
-        panel.contentView?.frame = bounds
-        panel.contentView?.layer?.opacity = Float(opacity)
-        let scale = panel.backingScaleFactor
-        ground.frame = bounds
-        cards.frame = bounds
-        cards.sublayers = nil
-        backdrop.contentsScale = scale
-        if let desktop {
-            let display = Coordinates.toCocoa(frame)
-            backdrop.frame = CGRect(x: display.minX - rect.minX, y: display.minY - rect.minY,
-                                    width: display.width, height: display.height)
-            backdrop.contentsGravity = .resizeAspectFill
-            backdrop.masksToBounds = true
-            backdrop.contents = desktop
-            backdrop.backgroundColor = nil
-        } else {
-            backdrop.frame = bounds
-            backdrop.contents = nil
-            backdrop.backgroundColor = style.backdrop
-        }
-        if liveStill {
-            let path = CGMutablePath()
-            path.addRect(bounds)
-            for move in moves where move.from == move.to {
-                let w = move.focused ? style.borderWidth : 0
-                let rect = CGRect(x: move.to.x - w, y: bounds.height - move.to.y - move.to.h - w,
-                                  width: move.to.w + 2 * w, height: move.to.h + 2 * w)
-                let radius = min(move.radius + w, min(rect.width, rect.height) / 2)
-                path.addRoundedRect(in: rect, cornerWidth: radius, cornerHeight: radius)
+        for display in scene.displays {
+            let living = residents(of: display.area)
+            // A display joins the snap when a card that is moving is on it; one already in the
+            // snap stays until the end, so a card that leaves it is not cut off mid-flight.
+            let moving = living.contains { id in
+                guard let track = motion.tracks[id] else { return false }
+                return !track.isWithin(TileSnap.restDistance, at: now, motion.spring)
             }
-            groundMask.frame = bounds
-            groundMask.path = path
-            ground.mask = groundMask
-        } else {
-            ground.mask = nil
-        }
-        CATransaction.commit()
+            var state = stages[display.id]
+            if state == nil {
+                guard moving else { continue }
+                let stage = host.claim(display.id, by: self) { [weak self] in
+                    self?.evicted(from: display.id)
+                }
+                stage.prepare(over: display.area)
+                stage.setDesktop(display.desktop, display: display.frame, area: display.area,
+                                 fallback: scene.style.backdrop)
+                let made = StageState(stage: stage, area: display.area)
+                stages[display.id] = made
+                fresh.append(made)
+                state = made
+            }
+            guard let state else { continue }
+            state.stage.holdDissolve()
 
-        // A second transaction for the motion, so its completion block — the start of the
-        // dissolve — is the moves' own and not the setup's.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        CATransaction.setCompletionBlock { [weak self] in
-            guard let self, self.generation == mine else { return }
-            guard dissolve > 0, let root = self.panel.contentView?.layer else {
-                self.hide(); completion(); return
+            // Cards for windows that have gone — closed, sent away — go with them.
+            for (id, card) in state.cards where !living.contains(id) && motion.tracks[id] == nil {
+                card.remove()
+                state.cards.removeValue(forKey: id)
             }
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            CATransaction.setCompletionBlock { [weak self] in
-                guard let self, self.generation == mine else { return }
-                self.hide(); completion()
+            for id in living {
+                let ringed = id == scene.focused
+                let needsRing = refocused && (id == scene.focused || id == oldFocus)
+                var card = state.cards[id]
+                let isNew = card == nil || needsRing
+                if isNew {
+                    card?.remove()
+                    let made = Card(radius: scene.radii[id] ?? Double(SystemCornerRadius.points),
+                                    ringed: ringed, style: scene.style, scale: state.stage.scale)
+                    made.add(to: state.stage.content)
+                    state.cards[id] = made
+                    card = made
+                }
+                guard let card else { continue }
+                card.setDepth(depth[id] ?? order.count)
+                // A card made just now — a display joining, a ring moving to another window —
+                // takes up the motion where the model has it, as does every card whose slot moved.
+                if changed.contains(id) || isNew {
+                    let frames = motion.samples(of: id, from: now).map(state.rect)
+                    card.animate(frames, step: 1.0 / 120, begin: now)
+                }
             }
-            let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = opacity
-            fade.toValue = 0
-            fade.duration = dissolve
-            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            root.add(fade, forKey: "dissolve")
-            root.opacity = 0
-            CATransaction.commit()
-        }
-        let height = bounds.height
-        for move in moves where !(liveStill && move.from == move.to) {
-            add(move, to: cards, height: height, style: style, scale: scale, duration: duration)
         }
         CATransaction.commit()
-        // Sent now rather than at the end of the run loop turn, as `SlideOverlay.begin` does:
-        // the caller is about to move the real windows.
-        CATransaction.flush()
-        panel.orderFront(nil)
+        for state in fresh { state.stage.show() }
+        if fresh.isEmpty { CATransaction.flush() }
+
+        guard !stages.isEmpty else { finish(); return }
+        awaiting.formIntersection(Set(motion.tracks.keys))
+        hasLanded = false
+        dissolving = 0
+        dissolveDuration = scene.dissolve
+        schedule(landingAt: motion.landing(after: now), from: now)
+        Log.info("tile snap: \(changed.count) of \(motion.tracks.count) card(s) set moving"
+                 + " on \(stages.count) display(s)"
+                 + (fresh.isEmpty ? ", retargeted" : "")
+                 + (scene.displays.contains { $0.desktop == nil && stages[$0.id] != nil }
+                    ? " — no desktop picture yet, over the theme colour" : ""))
     }
 
-    /// Takes the panel down at once. The real windows under it are already where the model
+    private var dissolveDuration = 0.15
+
+    /// The windows whose real frames are being written for the layout `run` was just given: the
+    /// hand-off waits for each to report its new frame.
+    func expect(_ ids: Set<WindowID>) {
+        guard isRunning else { return }
+        awaiting.formUnion(ids.intersection(windows))
+    }
+
+    /// A real window has reported the frame it was written: one fewer to wait for.
+    func arrived(_ id: WindowID) {
+        guard awaiting.remove(id) != nil, hasLanded, awaiting.isEmpty else { return }
+        handOff()
+    }
+
+    /// Takes every stage down at once. The real windows under them are already where the model
     /// says — or about to be, a refresh or two from now — so nothing is lost but the motion.
     func cancel() {
         guard isRunning else { return }
-        generation += 1
-        hide()
+        teardown()
     }
 
-    private func hide() {
-        isRunning = false
-        panel.orderOut(nil)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        panel.contentView?.layer?.removeAllAnimations()
-        panel.contentView?.layer?.opacity = 1
-        cards.sublayers = nil
-        ground.mask = nil
-        backdrop.contents = nil
-        backdrop.backgroundColor = nil
-        CATransaction.commit()
+    // MARK: - The hand-off
+
+    private func schedule(landingAt time: Double, from now: Double) {
+        landing?.cancel()
+        deadline?.cancel()
+        deadline = nil
+        let work = DispatchWorkItem { [weak self] in self?.landed() }
+        landing = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, time - now), execute: work)
     }
 
-    // MARK: - Cards
-
-    /// A card for `move` in `container`, its model frame the new one and an animation from the
-    /// old — and the focused one's ring with it, the gradient and the band that masks it each
-    /// animated the same way, since a mask does not follow its layer's bounds on its own.
-    private func add(_ move: Move, to container: CALayer, height: CGFloat,
-                     style: SlideOverlay.CardStyle, scale: CGFloat, duration: Double) {
-        func flip(_ box: Box) -> CGRect {
-            CGRect(x: box.x, y: height - box.y - box.h, width: box.w, height: box.h)
-        }
-        let to = flip(move.to)
-        let from = move.from.map(flip)
-        // Core Animation traps on a radius over half the shorter side rather than clamping, and
-        // the radius is not animated, so it has to fit the smaller of the two frames.
-        let smallest = min(to.width, to.height, from?.width ?? .infinity, from?.height ?? .infinity)
-        let radius = min(move.radius, smallest / 2)
-
-        let face = CALayer()
-        face.frame = to
-        face.backgroundColor = style.fill
-        face.cornerRadius = radius
-        face.cornerCurve = .continuous
-        face.contentsScale = scale
-        container.addSublayer(face)
-        animate(face, from: from, to: to, duration: duration)
-
-        guard move.focused, style.borderWidth > 0 else { return }
-        let w = style.borderWidth
-        let ringTo = to.insetBy(dx: -w, dy: -w)
-        let ringFrom = from?.insetBy(dx: -w, dy: -w)
-        let ring = CAGradientLayer()
-        ring.frame = ringTo
-        ring.colors = style.borderColors
-        ring.startPoint = style.borderStart
-        ring.endPoint = style.borderEnd
-        ring.contentsScale = scale
-        let band = CALayer()
-        band.frame = CGRect(origin: .zero, size: ringTo.size)
-        band.borderColor = NSColor.white.cgColor
-        band.borderWidth = w
-        band.cornerRadius = BorderGeometry.outerRadius(inner: radius, width: w)
-        band.cornerCurve = .continuous
-        band.contentsScale = scale
-        ring.mask = band
-        container.addSublayer(ring)
-        animate(ring, from: ringFrom, to: ringTo, duration: duration)
-        animate(band, from: ringFrom.map { CGRect(origin: .zero, size: $0.size) },
-                to: band.frame, duration: duration)
-    }
-
-    /// `position` and `bounds` from `from` to `to` — a frame is not animatable, its two parts
-    /// are — or, with no `from`, a fade in where the layer already is.
-    private func animate(_ layer: CALayer, from: CGRect?, to: CGRect, duration: Double) {
-        guard let from else {
-            let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = 0
-            fade.toValue = 1
-            fade.duration = duration
-            fade.timingFunction = Self.curve
-            layer.add(fade, forKey: "snap.opacity")
+    /// The cards are within a couple of points of their slots. The real windows are almost
+    /// always there already — they were written 35 ms in — and then the dissolve starts now;
+    /// one that has not said so yet gets `handoffTimeout`.
+    private func landed() {
+        landing = nil
+        hasLanded = true
+        guard awaiting.isEmpty else {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                Log.info("tile snap: \(self.awaiting.count) window(s) never reported their frame,"
+                         + " dissolving anyway")
+                self.handOff()
+                self.awaiting.removeAll()
+            }
+            deadline = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.handoffTimeout, execute: work)
             return
         }
-        guard from != to else { return }
-        let position = CABasicAnimation(keyPath: "position")
-        position.fromValue = CGPoint(x: from.midX, y: from.midY)
-        position.toValue = CGPoint(x: to.midX, y: to.midY)
-        let bounds = CABasicAnimation(keyPath: "bounds.size")
-        bounds.fromValue = from.size
-        bounds.toValue = to.size
-        for animation in [position, bounds] {
-            animation.duration = duration
-            animation.timingFunction = Self.curve
+        handOff()
+    }
+
+    private func handOff() {
+        deadline?.cancel()
+        deadline = nil
+        guard dissolving == 0 else { return }
+        Log.info("tile snap: dissolving after \(Int((CACurrentMediaTime() - began) * 1000)) ms"
+                 + (awaiting.isEmpty ? "" : ", \(awaiting.count) window(s) not heard from"))
+        dissolving = stages.count
+        for (_, state) in stages {
+            state.stage.dissolve(over: dissolveDuration) { [weak self] in
+                guard let self else { return }
+                self.dissolving -= 1
+                if self.dissolving == 0 { self.finish() }
+            }
         }
-        layer.add(position, forKey: "snap.position")
-        layer.add(bounds, forKey: "snap.bounds")
+    }
+
+    private func finish() {
+        teardown()
+        onFinished?()
+    }
+
+    private func teardown() {
+        landing?.cancel()
+        deadline?.cancel()
+        landing = nil
+        deadline = nil
+        for (_, state) in stages { host.release(state.stage, by: self) }
+        stages.removeAll()
+        motion = nil
+        focused = nil
+        awaiting.removeAll()
+        hasLanded = false
+        dissolving = 0
+    }
+
+    /// The slide has taken a display: the snap gives it up there, and is over if that was the
+    /// last one it had.
+    private func evicted(from display: UInt32) {
+        stages.removeValue(forKey: display)
+        if stages.isEmpty { teardown(); return }
+        // Its dissolve, if it had one, will never report: the hide that evicted it saw to that.
+        if dissolving > 0 {
+            dissolving -= 1
+            if dissolving == 0 { finish() }
+        }
     }
 }

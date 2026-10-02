@@ -101,4 +101,22 @@ enum WindowStack {
             return Box(x: rect.minX, y: rect.minY, w: rect.width, h: rect.height)
         }
     }
+
+    /// Every ordinary window on screen, frontmost first: the order the tile snap stacks its cards
+    /// in (`TileSnap.drawOrder`). One call, and only on a render that is about to animate. toe's
+    /// own windows are left out — the border and the snap's own panels would otherwise sort
+    /// themselves among the windows they are drawn over.
+    static func frontToBack() -> [WindowID] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
+        return list.compactMap { info in
+            guard info[kCGWindowOwnerPID as String] as? Int != ownPID,
+                  let layer = info[kCGWindowLayer as String] as? Int, levels.contains(layer)
+            else { return nil }
+            return info[kCGWindowNumber as String] as? WindowID
+        }
+    }
 }
