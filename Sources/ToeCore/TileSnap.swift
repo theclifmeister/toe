@@ -7,9 +7,9 @@ import Foundation
 /// keypress.
 ///
 /// **Why a spring and not a curve.** The prototype ran each card along Hyprland's `easeOutQuint`
-/// for a fixed time, and a layout arriving mid-motion — SUPER+equal held down, two quick
-/// SUPER+SHIFT+arrows — could only cancel it and start the next from where the real windows had
-/// already gone: a run of short jumps. A timing curve has no answer to "carry on from here, at
+/// for a fixed time, and a layout arriving mid-motion — two quick SUPER+SHIFT+arrows — could
+/// only cancel it and start the next from where the real windows had already gone: a run of
+/// short jumps. A timing curve has no answer to "carry on from here, at
 /// this speed, somewhere else"; a spring is nothing *but* that answer. Its state is a position
 /// and a velocity, a new target is a new rest point, and the motion through the change is
 /// continuous in both — one glide that bends, which is what UIKit and SwiftUI retarget with for
@@ -176,7 +176,7 @@ public enum TileSnap {
         /// - A window with a track keeps it when its target has not changed — a retarget for
         ///   one tile must not restart the others' motion — and otherwise starts a new leg from
         ///   exactly where and how fast it is moving now. That is the retarget, and it is why a
-        ///   held SUPER+equal reads as one glide.
+        ///   run of quick SUPER+SHIFT+arrows reads as one glide.
         /// - A window new to the motion starts from `origins` — where it was before this layout
         ///   — at rest. With no origin it starts `appearInset` smaller than its slot, centred.
         /// - A window no longer in `targets` is dropped: closed, sent to another workspace, or
