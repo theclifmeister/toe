@@ -120,6 +120,12 @@ public struct AnimationConfig: Equatable {
     public var slideStyle: SlideStyle = .cards
     /// How long the slide takes, in seconds.
     public var slideDuration: Double = 0.3
+    /// PROTOTYPE: animate a layout change — a tile moving, splitting or growing — with cards
+    /// on a panel over the display, the real frames written once underneath. Off by default
+    /// and deliberately missing from the shipped default config while it is being judged.
+    public var tileSnap: Bool = false
+    /// How long the cards take to travel, in seconds. The dissolve comes after.
+    public var tileSnapDuration: Double = 0.25
     public init() {}
 }
 
@@ -746,6 +752,18 @@ public struct Config: Equatable {
             if let v = number(a["slide_duration"], "animations.slide_duration", in: 0.05...2,
                               keeping: config.animations.slideDuration, warnings: &config.warnings) {
                 config.animations.slideDuration = v
+            }
+            if let raw = a["tile_snap"] {
+                if let v = raw.boolValue {
+                    config.animations.tileSnap = v
+                } else {
+                    config.warnings.append("animations.tile_snap: must be true or false, using \(config.animations.tileSnap)")
+                }
+            }
+            // Bounded for `slide_duration`'s reason: it goes straight into a `CABasicAnimation`.
+            if let v = number(a["tile_snap_duration"], "animations.tile_snap_duration", in: 0.05...2,
+                              keeping: config.animations.tileSnapDuration, warnings: &config.warnings) {
+                config.animations.tileSnapDuration = v
             }
         }
 

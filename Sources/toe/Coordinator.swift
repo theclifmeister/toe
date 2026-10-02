@@ -16,6 +16,9 @@ final class Coordinator: WindowTrackerDelegate {
     private let dockSwipes = DockSwipeTap()
     private let snapshot = ScreenSnapshot()
     private let slide = SlideOverlay()
+    /// PROTOTYPE: the tile snap's panels, one per display that has had something to animate.
+    /// See `beginTileSnap`.
+    private var tileSnaps: [UInt32: TileSnapOverlay] = [:]
     private let pictures = WorkspacePictures()
     private let desktopPictures = DesktopPictures()
     private let hideBlocker = HideBlocker()
@@ -1023,6 +1026,8 @@ final class Coordinator: WindowTrackerDelegate {
         // itself, and a kept picture carries the first of those without its fingerprint
         // knowing. Cheap to forget: the next swipe takes them again.
         pictures.forgetAll()
+        // The tile snap's cards stand on the same desktop picture as the slide's.
+        if isManaging, config.animations.tileSnap { desktopPictures.prepare() }
         guard isManaging, config.animations.slideOnSwipe else { return }
         if config.animations.slideStyle == .cards {
             desktopPictures.prepare()
@@ -1659,6 +1664,7 @@ final class Coordinator: WindowTrackerDelegate {
 
         // Whatever slide is in flight, the screen under it is already the end of that switch.
         cancelSlide()
+        cancelTileSnap()
 
         let monitorID = workspaces.focusedMonitorID
         let before = workspaces.activeWorkspace[monitorID]
@@ -2384,6 +2390,7 @@ final class Coordinator: WindowTrackerDelegate {
     func screensChanged() {
         // A slide in flight is a picture of a screen that no longer exists in that shape.
         cancelSlide()
+        cancelTileSnap()
         refreshMonitors()
         // The panels are framed against the screens, so they are re-framed against the new ones
         // — before the layout, since the tiles are about to be put under them. A popover under
@@ -2600,6 +2607,19 @@ final class Coordinator: WindowTrackerDelegate {
 
         let plan = workspaces.render()
 
+        // PROTOTYPE: with `[animations] tile_snap` on, cards over the display now, and the real
+        // frames written a couple of refreshes from now rather than in the loops below — see
+        // `beginTileSnap`. Before the loops because it needs `desired` as it was.
+        let snapping = beginTileSnap(plan)
+        var deferred: [(window: ManagedWindow, box: Box)] = []
+        func write(_ box: Box, _ window: ManagedWindow) {
+            if snapping {
+                deferred.append((window, box))
+            } else {
+                WindowMover.setFrame(box, element: window.element, pid: window.pid)
+            }
+        }
+
         for id in plan.stashed {
             guard let window = tracker.window(id), !window.isStashed else { continue }
             // A native-fullscreen window is on a Space of its own and will not take a position,
@@ -2632,7 +2652,7 @@ final class Coordinator: WindowTrackerDelegate {
             guard let window = tracker.window(id) else { continue }
             window.isStashed = false
             if let have = window.element.frame, Self.settled(have, box) { continue }
-            WindowMover.setFrame(box, element: window.element, pid: window.pid)
+            write(box, window)
         }
 
         for (id, box) in plan.frames {
@@ -2645,8 +2665,9 @@ final class Coordinator: WindowTrackerDelegate {
             // puts it in its tile once the drag is over. Its swap partner moves normally,
             // and that is the feedback the user sees.
             if id == draggedWindow { continue }
-            WindowMover.setFrame(box, element: window.element, pid: window.pid)
+            write(box, window)
         }
+        if !deferred.isEmpty { writeUnderTileSnap(deferred) }
 
         sinkUnfocusedFloats(plan)
 
@@ -2659,6 +2680,121 @@ final class Coordinator: WindowTrackerDelegate {
         updateBorder()
         refreshStatus()
         scheduleSessionSave()
+    }
+
+    // MARK: - Tile snap (prototype)
+
+    /// PROTOTYPE: puts `TileSnapOverlay`s up over every display a tile in `plan` is moving on,
+    /// with a card for every window there going from where it was to where `plan` puts it, and
+    /// answers whether it did — in which case the caller hands its frame writes to
+    /// `writeUnderTileSnap` instead of making them now.
+    ///
+    /// The rule for a render mid-snap is `slidePhase`'s: cancel and show the truth. But only a
+    /// render that moves a tile counts; one that moves nothing — the focus notifications that
+    /// trail every command — would otherwise cut every snap off a frame after it began. A render
+    /// that does move one starts the next snap from the frames the last was heading for, which
+    /// is where the real windows are: cancel-and-snap, not retargeting.
+    private func beginTileSnap(_ plan: RenderPlan) -> Bool {
+        guard config.animations.tileSnap else { return false }
+        let moving = plan.frames.filter { id, box in desired[id] != box && tracker.window(id) != nil }
+        guard !moving.isEmpty else { return false }
+        cancelTileSnap()
+
+        // Not over a swipe's slide, a drag, or a Space change — each has the screen already.
+        guard slidePhase == .idle, draggedWindow == nil, spaceSettle == nil else { return false }
+        // A window coming back from the stash is a workspace switch: what was on screen before
+        // was a different set of windows, which the model no longer has frames for. Instant, as
+        // a key-bound switch has always been.
+        let visible = plan.frames.merging(plan.floating) { _, floating in floating }
+        guard !visible.keys.contains(where: { tracker.window($0)?.isStashed == true }) else { return false }
+        guard AX.frontmostFullscreenFrame == nil else { return false }
+
+        // Where each window is now. A tile is where toe last put it; a float, or a window toe
+        // has not placed yet — new, or just tiled — is asked, one round trip each, and only on
+        // a render that is about to animate.
+        var from: [WindowID: Box] = [:]
+        for id in visible.keys {
+            guard let window = tracker.window(id) else { continue }
+            if plan.floating[id] == nil, let had = desired[id] {
+                from[id] = had
+            } else if let had = window.element.frame {
+                from[id] = had
+            }
+        }
+
+        func overlaps(_ box: Box, _ area: Box) -> Bool {
+            let clipped = box.intersection(area)
+            return clipped.w > 0 && clipped.h > 0
+        }
+        let focused = workspaces.focusedWindow
+        let style = cardStyle
+        // Drawn tiles first, then floats, the focused window last — its ring lies over its
+        // neighbours' gaps. Sorted within each so the order does not follow a dictionary's.
+        let order = visible.keys.sorted { a, b in
+            func rank(_ id: WindowID) -> Int { id == focused ? 2 : plan.floating[id] != nil ? 1 : 0 }
+            return (rank(a), a) < (rank(b), b)
+        }
+        var snapped = 0
+        for monitor in workspaces.monitors {
+            let area = monitor.usable
+            guard moving.contains(where: { id, box in
+                overlaps(box, area) || from[id].map { overlaps($0, area) } == true
+            }) else { continue }
+
+            func relative(_ box: Box) -> Box {
+                Box(x: box.x - area.x, y: box.y - area.y, w: box.w, h: box.h)
+            }
+            var moves: [TileSnapOverlay.Move] = []
+            for id in order {
+                guard let box = visible[id] else { continue }
+                let had = from[id]
+                guard overlaps(box, area) || had.map({ overlaps($0, area) }) == true else { continue }
+                let radius = Double(WindowCornerRadius.points(for: id) ?? SystemCornerRadius.points)
+                moves.append(.init(id: id, from: had.map(relative), to: relative(box),
+                                   radius: radius, focused: id == focused))
+            }
+
+            let overlay = tileSnaps[monitor.id] ?? TileSnapOverlay()
+            tileSnaps[monitor.id] = overlay
+            let screen = NSScreen.screens.first { $0.displayID == monitor.id }
+            let desktop = screen.flatMap { desktopPictures.image(for: $0) }
+            overlay.run(moves, over: area, display: monitor.frame, desktop: desktop, style: style,
+                        duration: config.animations.tileSnapDuration,
+                        dissolve: Self.slideDissolveTime) { [weak self] in
+                // The windows have stopped; the border may have drawn mid-move.
+                self?.updateBorder()
+            }
+            snapped += 1
+            Log.info("tile snap: \(moves.count) card(s), \(moving.count) moving, on display \(monitor.id)"
+                     + (desktop == nil ? " — no desktop picture yet, over the theme colour" : ""))
+        }
+        return snapped > 0
+    }
+
+    /// The frame writes `apply` held back for a snap, made once the panel has been composited
+    /// over them — `slidePanelLatency`, the slide's own wait, for the slide's own reason.
+    ///
+    /// Not tied to the snap's lifetime: a snap cancelled in the meantime still owes these,
+    /// because `desired` already says they are made and the next `apply` will not make them
+    /// again. Each is checked to still be wanted — a later render may have sent the window
+    /// somewhere else, written there itself, and must not be undone by this one.
+    private func writeUnderTileSnap(_ writes: [(window: ManagedWindow, box: Box)]) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.slidePanelLatency) { [weak self] in
+            guard let self else { return }
+            let plan = self.workspaces.render()
+            for (window, box) in writes {
+                let id = window.id
+                guard self.tracker.window(id) === window, !window.isStashed, id != self.draggedWindow,
+                      self.desired[id] == box || plan.floating[id] == box
+                else { continue }
+                WindowMover.setFrame(box, element: window.element, pid: window.pid)
+            }
+            self.updateBorder()
+        }
+    }
+
+    private func cancelTileSnap() {
+        for overlay in tileSnaps.values { overlay.cancel() }
     }
 
     private func updateBorder() {

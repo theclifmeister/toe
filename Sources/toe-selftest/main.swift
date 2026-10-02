@@ -2227,6 +2227,16 @@ h.test("the slide on a swipe is configurable and on by default") { t in
 
     let slow = try Config.parse("[animations]\nslide_duration = 10\n")
     t.equal(slow.animations.slideDuration, 0.3, "out of range keeps the default")
+
+    // The tile snap prototype: opt-in, and its duration bounded like the slide's.
+    t.equal(c.animations.tileSnap, false, "the tile snap is off unless asked for")
+    let snap = try Config.parse("[animations]\ntile_snap = true\ntile_snap_duration = 0.4\n")
+    t.equal(snap.animations.tileSnap, true, "on")
+    t.equal(snap.animations.tileSnapDuration, 0.4, "its duration")
+    let badSnap = try Config.parse("[animations]\ntile_snap = 1\ntile_snap_duration = 9\n")
+    t.equal(badSnap.animations.tileSnap, false, "a non-boolean keeps it off")
+    t.equal(badSnap.animations.tileSnapDuration, 0.25, "out of range keeps the default")
+    t.equal(badSnap.warnings.contains { $0.contains("animations.tile_snap:") }, true, "the boolean is named")
 }
 
 h.test("the slide follows the target, not the fingers") { t in
