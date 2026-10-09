@@ -1739,6 +1739,12 @@ final class Coordinator: WindowTrackerDelegate {
         // The grant may have landed since the config was applied — read it now, and if the
         // displays have not been listed since, list them for the next swipe. This one switches
         // the plain way rather than wait on an enumeration of every window on the system.
+        // A cards slide that could not be drawn (no `after`) lands here too, and must not fall
+        // into the photograph path: from a swipe, that is the one route to ScreenCaptureKit.
+        guard config.animations.usesScreenPictures else {
+            apply(refocus: true)
+            return
+        }
         guard ScreenSnapshot.isGranted else {
             Log.info("slide: skipped — Screen Recording is not granted")
             apply(refocus: true)
@@ -2421,7 +2427,13 @@ final class Coordinator: WindowTrackerDelegate {
         // current.
         snapshot.forgetWallpapers()
         pictures.forgetAll()
-        snapshot.refresh { [weak self] in self?.warmSlide() }
+        // Only for the photographs. With a Screen Recording grant left over from an earlier
+        // run, `refresh` enumerates every window and warms a wallpaper capture — which macOS
+        // reports as toe recording the screen, on every display change, for a slide that never
+        // takes a picture. Same condition as `applyAnimationSetting`.
+        if isManaging, config.animations.usesScreenPictures {
+            snapshot.refresh { [weak self] in self?.warmSlide() }
+        }
         desired.removeAll()
         corrections.removeAll()
         apply(refocus: false)

@@ -2362,6 +2362,12 @@ h.test("the desktop picture is known by what it is, not by who draws it") { t in
 
 h.test("the slide's style is a word, and cards is the one that asks for nothing") { t in
     t.equal(Config().animations.slideStyle, .cards, "the default needs no permission")
+    var pictured = AnimationConfig()
+    t.equal(pictured.usesScreenPictures, false, "cards never reach ScreenCaptureKit")
+    pictured.slideStyle = .pictures
+    t.equal(pictured.usesScreenPictures, true, "pictures with the slide on do")
+    pictured.slideOnSwipe = false
+    t.equal(pictured.usesScreenPictures, false, "pictures with the slide off do not")
     t.equal(try Config.parse("[animations]\nslide_style = \"pictures\"\n").animations.slideStyle,
             .pictures, "pictures is the opt-in")
     let bad = try Config.parse("[animations]\nslide_style = \"video\"\n")
