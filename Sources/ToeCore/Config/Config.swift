@@ -118,6 +118,12 @@ public struct AnimationConfig: Equatable {
     public var slideOnSwipe: Bool = true
     /// What slides — see `SlideStyle`.
     public var slideStyle: SlideStyle = .cards
+    /// Whether the slide as configured is the one that takes photographs, and so the only
+    /// configuration under which anything may go near ScreenCaptureKit. macOS reports any
+    /// `SCShareableContent` or capture call as screen recording whenever a grant is held, so a
+    /// leftover grant with the slide off or on the cards must still find every such call
+    /// refused. Every path into `ScreenSnapshot` asks this first.
+    public var usesScreenPictures: Bool { slideOnSwipe && slideStyle == .pictures }
     /// How long the slide takes, in seconds.
     public var slideDuration: Double = 0.3
     /// Animate a layout change — a tile moving, splitting, growing, a window opening or
