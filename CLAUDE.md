@@ -349,16 +349,27 @@ shared, since only one copy ever runs and a swap should keep your layout.
 
 ## Releasing
 
-Push a tag; nothing in the tree carries the version. `.github/workflows/release.yml` derives it
-from the tag name, stamps `Info.plist` via `TOE_VERSION`, signs with the Developer ID cert,
-notarizes, staples, publishes the release, then opens *and merges* its own `Casks/toe.rb` bump PR.
+Merge the release PR. `.github/workflows/release-please.yml` keeps one open pull request,
+`chore: release X.Y.Z`, whose version and `CHANGELOG.md` entry come from the Conventional Commit
+subjects merged since the last tag — so **PR titles are Conventional Commits** (`feat:` a minor
+bump, `fix:` a patch, `!` breaking, which stays a minor bump while toe is pre-1.0), checked by
+`pr-title.yml`, and toe squash-merges, so the title is the commit. Merging that PR tags `vX.Y.Z`
+and creates the release; the same run then calls `.github/workflows/release.yml`, which stamps
+`Info.plist` via `TOE_VERSION`, signs with the Developer ID cert, notarizes, staples, attaches the
+asset to the release, then opens *and merges* its own `Casks/toe.rb` bump PR.
+
+It is called rather than triggered because release-please pushes the tag with `GITHUB_TOKEN`, and
+GitHub starts no workflow for an event `GITHUB_TOKEN` caused. The version lives in
+`.release-please-manifest.json`, which release-please owns; the source still carries none.
+Tagging by hand still works, and creates the release itself — for a release outside the PR:
 
 ```sh
 git tag -a v0.9.4 -m "toe 0.9.4 — <what changed>" && git push origin v0.9.4
 ```
 
 `main` requires changes to arrive by PR, which is why the cask bump is a self-merging PR marked
-`[skip ci]` rather than a push.
+`[skip ci]` rather than a push. Its subject is `chore:`, which release-please neither lists nor
+bumps for, so the bump after a release does not ask for another one.
 
 **The `claude-review` check reports `pass` while leaving inline comments.** `gh pr checks` does not
 surface them. Read `gh api repos/theclifmeister/toe/pulls/N/comments` before merging — a green

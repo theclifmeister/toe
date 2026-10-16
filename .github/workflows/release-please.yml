@@ -1,0 +1,45 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Two merges in quick succession must not race each other into two release PRs, or into a
+# release cut from a tree the second merge has already moved past.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  # Keeps one open pull request, "chore: release X.Y.Z", whose version and CHANGELOG.md entry
+  # are worked out from the Conventional Commit subjects merged since the last tag — which is
+  # why PR titles are checked (pr-title.yml): toe squash-merges, so the title is the commit.
+  # Merging that PR is what cuts a release: on the push it makes, this job tags vX.Y.Z and
+  # creates the GitHub release with the changelog entry as its notes.
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # The build is called from here rather than left to release.yml's `push: tags` trigger,
+  # because the tag above is pushed with GITHUB_TOKEN and GitHub starts no workflow for an
+  # event GITHUB_TOKEN caused. Tagging by hand still works the old way: release.yml keeps
+  # its tag trigger and notices whether a release already exists.
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

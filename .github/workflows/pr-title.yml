@@ -1,0 +1,35 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  # toe squash-merges, so a PR's title becomes the commit on main, and release-please reads
+  # those commits to choose the next version and write the changelog: feat: is a minor bump,
+  # fix: a patch, a ! or a BREAKING CHANGE footer a breaking one (minor while toe is pre-1.0,
+  # per bump-minor-pre-major). A title that does not parse is a change the release cannot see.
+  conventional:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          # The types release-please and the changelog know what to do with. A ! after the
+          # type (feat!:) marks a breaking change, and the action accepts it by default.
+          types: |
+            feat
+            fix
+            chore
+            docs
+            refactor
+            perf
+            ci
+            build
+            test
+          # Subjects here are sentences, so do not insist on a lowercase first word.
+          subjectPattern: ^.+$

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "pull-request-title-pattern": "chore: release ${version}",
+  "pull-request-header": "Merging this cuts the release: release-please tags it, and the Release workflow builds, signs, notarizes and publishes the asset, then bumps the cask.",
+  "bootstrap-sha": "85c63fb44ef9f39163d56e448a2a114ecb83f5fd",
+  "packages": {
+    ".": {
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}
