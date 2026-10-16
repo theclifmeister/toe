@@ -1,25 +1,24 @@
 name: Release
 
-# Two ways in. release-please.yml calls this with the tag it has just pushed — the usual
-# route, since a tag pushed with GITHUB_TOKEN would not start the `push` trigger below. A tag
-# pushed by hand still starts it directly, for a release cut outside release-please.
+# Started by a vX.Y.Z tag. release-please.yml makes that tag as the release GitHub App when
+# its release PR is merged, and the App's push starts this as a tag pushed by hand does; either
+# way github.ref is the tag. (Until 0.33.4 release-please.yml called this instead, because a
+# tag made with GITHUB_TOKEN starts no workflow.)
 on:
   push:
     tags: ["v*"]
-  workflow_call:
-    inputs:
-      tag:
-        description: The vX.Y.Z tag to build and publish.
-        required: true
-        type: string
+  # To rerun a release by hand: Actions → Release → Run workflow, with "Use workflow from" set
+  # to the tag. Run from a branch it does nothing, as the job's if: says.
+  workflow_dispatch:
 
 permissions:
+  # Uploading the asset and pushing the cask branch. The cask pull request is opened and
+  # merged with the release App's token instead.
   contents: write
-  # The cask bump below opens and merges its own pull request.
-  pull-requests: write
 
 jobs:
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -27,14 +26,11 @@ jobs:
           # Not shallow: the cask bump below pushes to main, and git refuses to push
           # from a shallow clone.
           fetch-depth: 0
-          # Called from release-please.yml, github.ref is main rather than the tag, and main
-          # may already have moved on; build exactly the tagged tree.
-          ref: ${{ inputs.tag || github.ref }}
 
       - name: Derive version
         id: version
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ github.ref_name }}
         run: |
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
@@ -159,7 +155,7 @@ jobs:
           echo "sha256=$(shasum -a 256 "$asset" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       # release-please has already created the release, with its changelog entry as the notes,
-      # by the time it calls this; only the asset is missing, so attach it. A hand-pushed tag
+      # by the time its tag starts this; only the asset is missing, so attach it. A hand-pushed tag
       # has no release yet, so create one with GitHub's generated notes as before. --clobber
       # lets a re-run of a failed job replace an asset it got as far as uploading.
       - name: Publish release
@@ -175,6 +171,14 @@ jobs:
               --title "$TAG" --generate-notes
           fi
 
+      # Made here and not at the start: an installation token lasts an hour, and signing and
+      # notarizing can take most of that before the cask step gets to use it.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+
       # main's ruleset requires every change to arrive through a pull request, so this cannot
       # push to main directly — it did until v0.2.0, where the push was rejected and left the
       # release published but the cask still pointing at the previous version. Nothing here
@@ -182,21 +186,18 @@ jobs:
       # tree was already tested. So open the PR and merge it, and the release stays a single
       # step. The ruleset permits no approvals and requires no checks, so this merges as-is.
       #
-      # The commit is marked [skip ci] because this PR opens and merges within seconds, and
-      # the workflows it would otherwise start cannot survive that: CI and Claude Code Review
-      # both trigger on pull_request, and the branch is deleted out from under them before
-      # they finish, so they fail. GitHub honours the marker on the head commit for push and
-      # pull_request events, so no run is created at all — no failed runs, no wasted minutes,
-      # and no Claude quota spent reviewing two mechanical lines. (A GITHUB_TOKEN-created PR
-      # does still trigger those workflows, whatever the recursion guard implies; v0.4.0 is
-      # where that was observed.) --subject on the merge below keeps the marker out of main.
+      # The PR is opened and merged as the release App, so CI runs on it like on any other PR
+      # (a GITHUB_TOKEN PR gets no run until somebody approves one). The commit used to carry
+      # a skip-CI marker, kept out of main by --subject, so that no run started on a branch
+      # about to be deleted. It carries none now, anywhere in the message: the rule toe took
+      # from terminatr when both moved their releases to this App.
       #
       # The subject is a Conventional Commit, chore:, because release-please reads every
       # commit on main: chore: is left out of the changelog and bumps nothing, so the bump
       # that follows each release does not itself ask for another one.
       - name: Bump cask
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           VERSION: ${{ steps.version.outputs.version }}
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
@@ -214,7 +215,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: bump toe cask to $VERSION [skip ci]" Casks/toe.rb
+          git commit -m "chore: bump toe cask to $VERSION" Casks/toe.rb
           # Force: the branch is named per version and owned by this job, so anything already
           # at that name is debris from a failed run of this same release.
           git push --force origin "$branch"
