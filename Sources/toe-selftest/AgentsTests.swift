@@ -202,7 +202,7 @@ func agentsTests(_ h: Harness) {
         t.expect(rows.contains(.progress(0.5)), "the last known limits are still shown")
 
         let limited = AgentsPanel.rows(AgentUsage(problem: .rateLimited(until: now + 125)), now: now)
-        t.equal(limited[1].kind, .note("Anthropic is rate limiting usage checks for 2m."), "how long the wait is")
+        t.equal(limited[1].kind, .note("Anthropic is rate-limiting usage checks for 2m."), "how long the wait is")
         let first = AgentsPanel.rows(AgentUsage(), now: now)
         t.equal(first[1].kind, .note("Checking Claude's limits…"), "before the first answer")
     }

@@ -69,7 +69,7 @@ public struct AgentUsage: Equatable, Sendable {
                 return "Claude Code's saved sign-in expired.\(kept) Start Claude Code to refresh it."
             case .rateLimited(let until):
                 let wait = until.map { $0 > now ? " for \(AgentsPanel.duration($0.timeIntervalSince(now)))" : "" } ?? ""
-                return "Anthropic is rate limiting usage checks\(wait).\(kept)"
+                return "Anthropic is rate-limiting usage checks\(wait).\(kept)"
             case .unreachable:
                 return "Couldn't reach Anthropic's usage endpoint.\(kept)"
             case .failed(let why):
