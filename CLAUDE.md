@@ -191,7 +191,7 @@ each widget from the numbers a Mac reports, `ClockFormat` the Qt-spelled formats
 read the system and say when it changed — a listener where one exists, never a poll — and
 `Coordinator.refreshBar` assembles a `BarSnapshot` on every `refreshStatus`.
 
-Four things to keep straight:
+Five things to keep straight:
 
 - **The exclusive zone is `usable`.** `refreshMonitors` reserves the bar's strip from the
   display's *frame* (`Monitor.reserving(top:)`) — the menu bar under the bar has already kept
@@ -234,7 +234,7 @@ widget inside the display) and one model per panel (`PowerPanel`, `MonitorPanel`
 from what the provider read to rows, all in the selftest. `toe/UI/BarPanelWindow.swift` is the one
 popover for all seven (`PanelView` draws), `Coordinator.openPanel` fills it, and `refreshBar` pushes new
 rows into it on every provider change so a slider you are holding shows the volume the device
-confirmed. Four rules:
+confirmed. Six rules:
 
 - **Every panel ends on its Settings pane** — the click that used to open the pane is the
   panel's last row, so nothing is lost. `PanelState` is not `MenuState`, though #177 asked for
