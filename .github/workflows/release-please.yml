@@ -19,14 +19,14 @@ jobs:
   # are worked out from the Conventional Commit subjects merged since the last tag — which is
   # why PR titles are checked (pr-title.yml). Merging that PR is what cuts a release: on the
   # push it makes, this job tags vX.Y.Z and creates the GitHub release with the changelog entry
-  # as its notes, and the tag starts release.yml.
+  # as its notes, and the tag starts release.yml through its push: tags trigger.
   #
   # All of it acts as the release GitHub App ("clifmeister-release-app", secrets RELEASE_APP_ID
   # and RELEASE_APP_KEY) rather than GITHUB_TOKEN, because GitHub starts no workflow for an
   # event GITHUB_TOKEN caused: the release PR got no CI run until somebody pressed "Approve and
-  # run", and the tag did not start release.yml, which 0.33.4 reached only by being called from
-  # here as a second job. As the App, the tag's push starts release.yml on its own, exactly as a
-  # tag pushed by hand does, so there is one way in instead of two.
+  # run", and the tag did not start release.yml, which this workflow therefore used to call as
+  # a second job (workflow_call). As the App, the tag starts release.yml on its own, exactly as
+  # a tag pushed by hand does — and keeping the call as well would build every release twice.
   release-please:
     runs-on: ubuntu-latest
     permissions: {}
@@ -34,7 +34,8 @@ jobs:
       # The App's installation token, for this repository only: Contents (the release branch,
       # the tag, the release), Pull requests (the release PR) and Issues (its autorelease:
       # labels, which go through the issues API), read and write. Pinned by sha, since it is
-      # handed a private key.
+      # handed a private key. app-id is deprecated in v3 in favour of client-id, but the secret
+      # holds the App's id, and app-id still accepts it.
       - id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -48,23 +49,3 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # release-please creates the release, and the release creates the tag. Should it ever
-      # create the release without the ref ("Tag already exists, skipping tag creation" is how
-      # terminatr met this), nothing starts release.yml, and the next run counts from the
-      # previous tag and opens the same release PR again. So make sure the ref exists, and make
-      # it as the App, whose push is what starts the build.
-      - name: Tag the release
-        if: steps.release.outputs.release_created == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          TAG: ${{ steps.release.outputs.tag_name }}
-          SHA: ${{ steps.release.outputs.sha }}
-        run: |
-          set -euo pipefail
-          if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" --silent 2>/dev/null; then
-            echo "::notice::$TAG exists; its push started release.yml"
-          else
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$TAG" -f sha="$SHA" --silent
-            echo "::notice::tagged $SHA as $TAG; the push starts release.yml"
-          fi

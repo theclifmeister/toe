@@ -1,24 +1,21 @@
 name: Release
 
-# Started by a vX.Y.Z tag. release-please.yml makes that tag as the release GitHub App when
-# its release PR is merged, and the App's push starts this as a tag pushed by hand does; either
-# way github.ref is the tag. (Until 0.33.4 release-please.yml called this instead, because a
-# tag made with GITHUB_TOKEN starts no workflow.)
+# Started by a vX.Y.Z tag, the only way in. release-please.yml makes that tag as the release
+# GitHub App when its release PR is merged, and the App's tag starts this exactly as a tag
+# pushed by hand does; either way github.ref is the tag. (Until this moved to the App,
+# release-please.yml called this through workflow_call instead, because a tag made with
+# GITHUB_TOKEN starts no workflow.) A failed release is rerun with "Re-run jobs" on its run.
 on:
   push:
     tags: ["v*"]
-  # To rerun a release by hand: Actions → Release → Run workflow, with "Use workflow from" set
-  # to the tag. Run from a branch it does nothing, as the job's if: says.
-  workflow_dispatch:
 
 permissions:
-  # Uploading the asset and pushing the cask branch. The cask pull request is opened and
-  # merged with the release App's token instead.
+  # Uploading the asset to the release. The cask branch and its pull request go through the
+  # release App's token instead.
   contents: write
 
 jobs:
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -26,6 +23,9 @@ jobs:
           # Not shallow: the cask bump below pushes to main, and git refuses to push
           # from a shallow clone.
           fetch-depth: 0
+          # GITHUB_TOKEN stays out of .git/config: the cask branch is pushed as the release
+          # App, and checkout's persisted header would be sent instead of the App's token.
+          persist-credentials: false
 
       - name: Derive version
         id: version
@@ -202,6 +202,9 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
           set -euo pipefail
+          # git authenticates through gh, which reads GH_TOKEN — the App's — so the branch is
+          # pushed as the App too, not just the pull request opened.
+          gh auth setup-git
           git fetch origin main
           branch="cask-$VERSION"
           git checkout -B "$branch" origin/main

@@ -358,10 +358,12 @@ and creates the release, and the tag starts `.github/workflows/release.yml`, whi
 `Info.plist` via `TOE_VERSION`, signs with the Developer ID cert, notarizes, staples, attaches the
 asset to the release, then opens *and merges* its own `Casks/toe.rb` bump PR.
 
-release-please, the tag and the cask PR act as the release GitHub App (`clifmeister-release-app`,
-secrets `RELEASE_APP_ID` and `RELEASE_APP_KEY`), not `GITHUB_TOKEN`: GitHub starts no workflow
-for an event `GITHUB_TOKEN` caused, so the release PR would wait on "Approve and run" for its CI
-and the tag would not start the build. The release job makes its App token just before the cask
+release-please, the tag, and the cask branch and PR act as the release GitHub App
+(`clifmeister-release-app`, secrets `RELEASE_APP_ID` and `RELEASE_APP_KEY`), not `GITHUB_TOKEN`:
+GitHub starts no workflow for an event `GITHUB_TOKEN` caused, so the release PR would wait on
+"Approve and run" for its CI and the tag would not start the build. That is why
+`release-please.yml` used to call `release.yml` itself; as the App the tag does, and calling it as
+well would build every release twice. The release job makes its App token just before the cask
 step, since a token lasts an hour. The version lives in `.release-please-manifest.json`, which
 release-please owns; the source still carries none. Tagging by hand still works, and creates the
 release itself — for a release outside the PR:
@@ -370,7 +372,7 @@ release itself — for a release outside the PR:
 git tag -a v0.9.4 -m "toe 0.9.4 — <what changed>" && git push origin v0.9.4
 ```
 
-To rerun a release, run `Release` from the Actions tab with the tag as the ref.
+`push: tags` is `release.yml`'s only trigger; a failed release is rerun with *Re-run jobs* on its run.
 
 `main` requires changes to arrive by PR, which is why the cask bump is a self-merging PR rather
 than a push. It carries no skip-CI marker — no commit message should — so CI runs on it. Its
