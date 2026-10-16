@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+# GITHUB_TOKEN is unused: everything below acts as the release GitHub App.
+permissions: {}
 
 # Two merges in quick succession must not race each other into two release PRs, or into a
-# release cut from a tree the second merge has already moved past.
+# release cut from a tree the second merge has already moved past. None is cancelled: a run
+# that has merged a release must get as far as its tag.
 concurrency:
   group: release-please
   cancel-in-progress: false
@@ -17,29 +17,35 @@ concurrency:
 jobs:
   # Keeps one open pull request, "chore: release X.Y.Z", whose version and CHANGELOG.md entry
   # are worked out from the Conventional Commit subjects merged since the last tag — which is
-  # why PR titles are checked (pr-title.yml): toe squash-merges, so the title is the commit.
-  # Merging that PR is what cuts a release: on the push it makes, this job tags vX.Y.Z and
-  # creates the GitHub release with the changelog entry as its notes.
+  # why PR titles are checked (pr-title.yml). Merging that PR is what cuts a release: on the
+  # push it makes, this job tags vX.Y.Z and creates the GitHub release with the changelog entry
+  # as its notes, and the tag starts release.yml through its push: tags trigger.
+  #
+  # All of it acts as the release GitHub App ("clifmeister-release-app", secrets RELEASE_APP_ID
+  # and RELEASE_APP_KEY) rather than GITHUB_TOKEN, because GitHub starts no workflow for an
+  # event GITHUB_TOKEN caused: the release PR got no CI run until somebody pressed "Approve and
+  # run", and the tag did not start release.yml, which this workflow therefore used to call as
+  # a second job (workflow_call). As the App, the tag starts release.yml on its own, exactly as
+  # a tag pushed by hand does — and keeping the call as well would build every release twice.
   release-please:
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+    permissions: {}
     steps:
+      # The App's installation token, for this repository only: Contents (the release branch,
+      # the tag, the release), Pull requests (the release PR) and Issues (its autorelease:
+      # labels, which go through the issues API), read and write. Pinned by sha, since it is
+      # handed a private key. app-id is deprecated in v3 in favour of client-id, but the secret
+      # holds the App's id, and app-id still accepts it.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
+          token: ${{ steps.app.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # The build is called from here rather than left to release.yml's `push: tags` trigger,
-  # because the tag above is pushed with GITHUB_TOKEN and GitHub starts no workflow for an
-  # event GITHUB_TOKEN caused. Tagging by hand still works the old way: release.yml keeps
-  # its tag trigger and notices whether a release already exists.
-  build:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.release-please.outputs.tag_name }}
-    secrets: inherit
