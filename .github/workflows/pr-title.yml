@@ -19,5 +19,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
+          # The types release-please and the changelog know what to do with. A ! after the
+          # type (feat!:) marks a breaking change, and the action accepts it by default.
+          types: |
+            feat
+            fix
+            chore
+            docs
+            refactor
+            perf
+            ci
+            build
+            test
           # Subjects here are sentences, so do not insist on a lowercase first word.
           subjectPattern: ^.+$
