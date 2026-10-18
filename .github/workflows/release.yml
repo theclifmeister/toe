@@ -138,8 +138,39 @@ jobs:
             exit 1
           fi
 
-          xcrun stapler staple build/Toe.app
-          xcrun stapler validate build/Toe.app
+      # Workaround for actions/runner-images#14924 — remove this step once that issue is
+      # fixed. Since about 2026-10-12 `xcrun stapler` fetches the ticket from Apple's CloudKit
+      # service (api.apple-cloudkit.com) over HTTP/3, i.e. UDP 443, and on GitHub's macOS
+      # runners those connections drop (NSURLErrorDomain -1005, "Error 68"); v0.33.5 failed
+      # four of four runs. Over TCP the same lookup works, and `return` refuses the packets
+      # at once so stapler falls back to TCP instead of waiting out a timeout. It sits after
+      # Notarize, so notarytool is untouched.
+      - name: Block UDP 443 (runner-images#14924)
+        run: |
+          set -euo pipefail
+          echo "block return out quick proto udp from any to any port 443" | sudo pfctl -f -
+          sudo pfctl -E
+          sudo pfctl -sr 2>&1 | grep -q 'proto udp.*port = https' \
+            || echo "::warning::pf rule blocking UDP 443 is not loaded; stapler may fail (runner-images#14924)"
+
+      # Retried because the ticket lookup is a network call that can still fail on its own:
+      # four tries, 15/30/45 s apart, failing only if all four do. spctl below stays the
+      # hard gate, and is not retried.
+      - name: Staple
+        run: |
+          set -euo pipefail
+          retry() {
+            local n
+            for n in 1 2 3 4; do
+              "$@" && return 0
+              [ "$n" -lt 4 ] || break
+              echo "attempt $n of 4 failed: $*; retrying in $((n * 15)) s"
+              sleep $((n * 15))
+            done
+            return 1
+          }
+          retry xcrun stapler staple build/Toe.app
+          retry xcrun stapler validate build/Toe.app
           # The end-to-end check: exactly the assessment Gatekeeper makes on a user's machine.
           spctl --assess --type execute --verbose=4 build/Toe.app
 
