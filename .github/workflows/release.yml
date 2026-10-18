@@ -138,6 +138,17 @@ jobs:
             exit 1
           fi
 
+          # Since about 2026-10-12 stapler fetches the ticket from Apple's CloudKit service
+          # (api.apple-cloudkit.com) over HTTP/3, i.e. UDP 443, and on GitHub's macOS runners
+          # those connections drop (NSURLErrorDomain -1005, "Error 68") about 7 s in; v0.33.5
+          # failed here four times. The same lookup over TCP works, so refuse outbound UDP 443
+          # and stapler falls back to it. Remove this once actions/runner-images#14924 is
+          # fixed. spctl below stays as the real Gatekeeper gate.
+          echo "block drop out quick proto udp from any to any port 443" \
+            | sudo pfctl -f - -e 2>&1 || true
+          sudo pfctl -sr 2>&1 | grep -q 'proto udp.*port = https' \
+            || echo "::warning::pf rule blocking UDP 443 is not loaded; stapler may fail (runner-images#14924)"
+
           xcrun stapler staple build/Toe.app
           xcrun stapler validate build/Toe.app
           # The end-to-end check: exactly the assessment Gatekeeper makes on a user's machine.
