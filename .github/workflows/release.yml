@@ -150,6 +150,8 @@ jobs:
           set -euo pipefail
           echo "block return out quick proto udp from any to any port 443" | sudo pfctl -f -
           sudo pfctl -E
+          sudo pfctl -sr 2>&1 | grep -q 'proto udp.*port = https' \
+            || echo "::warning::pf rule blocking UDP 443 is not loaded; stapler may fail (runner-images#14924)"
 
       # Retried because the ticket lookup is a network call that can still fail on its own:
       # four tries, 15/30/45 s apart, failing only if all four do. spctl below stays the
