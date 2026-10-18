@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.6](https://github.com/theclifmeister/toe/compare/v0.33.5...v0.33.6) (2026-10-18)
+
+
+### Bug Fixes
+
+* say that removetheme moves the folder to the Trash ([#224](https://github.com/theclifmeister/toe/issues/224)) ([9af9ced](https://github.com/theclifmeister/toe/commit/9af9cedc93c1d3269f237f5d4f064326d3c08fab))
+
 ## [0.33.5](https://github.com/theclifmeister/toe/compare/v0.33.4...v0.33.5) (2026-10-16)
 
 
