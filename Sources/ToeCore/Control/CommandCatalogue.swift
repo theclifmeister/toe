@@ -135,7 +135,7 @@ public enum CommandCatalogue {
                                  + "not got it. No argument hands your own colours back.",
                           sample: "theme tokyo-night"),
         CommandDescriptor(verb: "removetheme", aliases: ["theme-remove"], argument: "<name>",
-                          summary: "Delete a theme's folder from ~/.config/toe/themes.",
+                          summary: "Move a theme's folder out of ~/.config/toe/themes into the Trash.",
                           sample: "removetheme tokyo-night"),
         CommandDescriptor(verb: "background", aliases: ["bg"], argument: "<file>",
                           summary: "Put one of the current theme's pictures up.",
