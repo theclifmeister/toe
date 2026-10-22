@@ -53,11 +53,40 @@ final class BarPanel {
     /// bar would drop down, for `isMenuOpen`.
     private var displayFrame: NSRect = .zero
 
+    // MARK: Following macOS's auto-hide — `BarReveal`, driven
+
+    /// The menu bar under this strip is hidden by macOS until the pointer reaches the top
+    /// edge — *Automatically hide and show the menu bar* — so the bar is too: `sensor` stands
+    /// in for it until the pointer arrives. Set by `BarWindowSet`, which reads the setting.
+    var autoHides = false {
+        didSet {
+            guard autoHides != oldValue else { return }
+            reveal.reset()
+            if !autoHides { sensor.orderOut(nil) }
+        }
+    }
+    /// Whether something hanging from the bar — a panel — still needs it while the pointer is
+    /// elsewhere. Asked only while revealed under auto-hide.
+    var isHeld: (() -> Bool)?
+    private var reveal = BarReveal()
+    /// A one-point strip along the top edge that is on screen while an auto-hidden bar is not,
+    /// for the one thing a hidden panel cannot do: hear the pointer arrive. A tracking area
+    /// needs a window under the pointer, and the window server passes a pointer straight
+    /// through pixels of alpha 0, so its background is all but transparent rather than clear.
+    /// One point tall, so the most it takes from anyone is the top row of pixels — the row
+    /// macOS's own reveal is triggered from, which it should still be: the menu bar's auto-hide
+    /// follows the pointer's position, not the window under it. Not measured yet (T8: posting
+    /// pointer events needs a grant the build sandbox does not have).
+    private let sensor: NSPanel
+    private let sensorView = BarView()
+
     init(screen: NSScreen) {
         displayID = screen.displayID
         panel = TopStripPanel(contentRect: .zero,
                               styleMask: [.borderless, .nonactivatingPanel],
                               backing: .buffered, defer: false)
+        sensor = TopStripPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                               backing: .buffered, defer: false)
         panel.isOpaque = true
         panel.hasShadow = false
         // Clicks land: the whole point of a menu widget is pressing it. `.nonactivatingPanel`
@@ -83,6 +112,17 @@ final class BarPanel {
         panel.animationBehavior = .none
         panel.contentView = view
         view.onPointerEntered = { [weak self] in self?.startSampling() }
+
+        sensor.isOpaque = false
+        sensor.backgroundColor = NSColor(white: 0, alpha: 0.01)
+        sensor.hasShadow = false
+        sensor.ignoresMouseEvents = false
+        sensor.level = panel.level
+        sensor.isReleasedWhenClosed = false
+        sensor.collectionBehavior = panel.collectionBehavior
+        sensor.animationBehavior = .none
+        sensor.contentView = sensorView
+        sensorView.onPointerEntered = { [weak self] in self?.startSampling() }
     }
 
     /// Puts the panel across the top of `screen` at `height`, and draws `snapshot` into it with
@@ -96,18 +136,47 @@ final class BarPanel {
         panel.backgroundColor = NSColor(snapshot.background)
         view.centre = centre
         view.snapshot = snapshot
-        panel.orderFrontRegardless()
+        guard autoHides, !reveal.isRevealed else {
+            sensor.orderOut(nil)
+            panel.orderFrontRegardless()
+            return
+        }
+        // Waiting for the pointer. Not `conceal` unless there is a bar to take away: a redraw
+        // — the clock ticking — mid-way through the pointer arriving must not stop the
+        // sampling the sensor has just started, since the sensor will not hear it arrive twice.
+        if panel.isVisible { conceal() } else { placeSensor() }
     }
 
     /// Takes the panel off screen for the set's reasons — `bar hide`, a fullscreen window, the
     /// bar switched off — which end any peek: the bar is not coming back on its own.
     func hide() {
         stopSampling()
+        reveal.reset()
         panel.orderOut(nil)
+        sensor.orderOut(nil)
+    }
+
+    /// An auto-hidden bar going back off the screen, leaving the sensor to hear the pointer
+    /// come back. `onPeekChanged` tells the set, and through it the Coordinator, which closes
+    /// a panel hanging from a bar that has gone.
+    private func conceal() {
+        let wasShowing = panel.isVisible
+        stopSampling()
+        reveal.reset()
+        panel.orderOut(nil)
+        placeSensor()
+        if wasShowing { onPeekChanged?() }
+    }
+
+    /// The sensor along the top point of the strip.
+    private func placeSensor() {
+        let rect = NSRect(x: stripRect.minX, y: stripRect.maxY - 1, width: stripRect.width, height: 1)
+        if sensor.frame != rect { sensor.setFrame(rect, display: false) }
+        if !sensor.isVisible { sensor.orderFrontRegardless() }
     }
 
     private func startSampling() {
-        guard peekEnabled, sampler == nil else { return }
+        guard peekEnabled || autoHides, sampler == nil else { return }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.samplePointer() }
         // `.common` so the sampling survives a menu being tracked: a dropped-down menu runs
         // the run loop in event-tracking mode, and a timer on the default mode alone would
@@ -129,10 +198,15 @@ final class BarPanel {
             && stripRect.minY <= location.y && location.y <= stripRect.maxY
         let pointer = MenuBarPeek.pointer(y: onStrip ? Double(stripRect.maxY - location.y) : nil,
                                           height: Double(stripRect.height))
+        let now = ProcessInfo.processInfo.systemUptime
+        if autoHides {
+            sampleReveal(pointer, at: now)
+            return
+        }
         // The window list is asked only when the answer can matter — the pointer has left the
         // strip mid-peek — so a pointer resting on a widget costs no window-server round trip.
         let menuOpen = isPeeking && pointer == .away && isMenuOpen()
-        guard peek.sample(pointer, menuOpen: menuOpen, at: ProcessInfo.processInfo.systemUptime) else {
+        guard peek.sample(pointer, menuOpen: menuOpen, at: now) else {
             // Nothing pending and the pointer gone: the tracking area will start this again.
             if !peek.isPeeking, pointer == .away { stopSampling() }
             return
@@ -144,6 +218,44 @@ final class BarPanel {
             stopSampling()
         }
         onPeekChanged?()
+    }
+
+    /// One sample under auto-hide, where the reveal and the peek share the timer. It runs
+    /// from the pointer reaching the sensor until the bar is concealed again — the time the
+    /// user is spending on the bar, and no longer.
+    private func sampleReveal(_ pointer: MenuBarPeek.Pointer, at now: Double) {
+        guard reveal.isRevealed else {
+            if reveal.sample(pointer, held: false, at: now) {
+                sensor.orderOut(nil)
+                panel.orderFrontRegardless()
+                onPeekChanged?()
+            } else {
+                // The pointer brushed the sensor and went; the sensor will say when it is back.
+                stopSampling()
+            }
+            return
+        }
+        if peekEnabled {
+            let menuOpen = isPeeking && pointer == .away && isMenuOpen()
+            if peek.sample(pointer, menuOpen: menuOpen, at: now) {
+                isPeeking = peek.isPeeking
+                if isPeeking {
+                    panel.orderOut(nil)
+                    onPeekChanged?()
+                    return
+                }
+                // The menu bar is done with and the pointer is down in the window: under
+                // auto-hide that is the bar's own linger already served, so it does not come
+                // back for half a second only to go again.
+                if pointer == .away {
+                    conceal()
+                    return
+                }
+                panel.orderFrontRegardless()
+                onPeekChanged?()
+            }
+        }
+        if reveal.sample(pointer, held: isPeeking || isHeld?() == true, at: now) { conceal() }
     }
 
     /// Whether an application has a menu dropped down on this panel's display. Measured for

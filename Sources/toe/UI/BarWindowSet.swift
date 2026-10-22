@@ -7,8 +7,12 @@ import ToeCore
 /// Three things decide whether a panel shows, and they are kept apart because they change on
 /// different occasions. `enabled` is `[bar] enabled`, the config; `hidden` is `bar toggle`, the
 /// session; and a display with a native-fullscreen window in front has no bar on it whatever
-/// the other two say — `fullscreen`, per display, the way the border scopes it. `refresh` is
-/// the one place the three are combined.
+/// the other two say — `fullscreen`, per display, the way the border scopes it. The menu bar
+/// the bar covers has two more ways to go, and the bar follows both (T8): an application can
+/// put it away on its display (`menuBarHidden`, which hides the panel there like fullscreen),
+/// and macOS can be set to keep it hidden (`menuBarAutoHides`, which leaves the panel waiting
+/// at the top edge for the pointer, as the menu bar does). `refresh` is the one place all of
+/// it is combined.
 final class BarWindowSet {
 
     private var panels: [CGDirectDisplayID: BarPanel] = [:]
@@ -28,6 +32,20 @@ final class BarWindowSet {
     /// and a fullscreen Safari on one display says nothing about the bar on another. The panel
     /// is `.fullScreenAuxiliary` and would otherwise draw straight across the fullscreen Space.
     var fullscreen: Box?
+    /// The displays an application has put the menu bar away on — a game, a borderless
+    /// fullscreen that is no Space of its own; see `MenuBarHiding`. Hidden there as on a
+    /// fullscreen Space, and for the same reason: the bar is the menu bar's stand-in, and it
+    /// was drawing over the game (T8).
+    var menuBarHidden: Set<CGDirectDisplayID> = []
+    /// macOS's *Automatically hide and show the menu bar* is on for the desktop
+    /// (`_HIHideMenuBar`). Each display with a menu bar of its own then keeps its bar off the
+    /// screen until the pointer reaches the top edge — see `BarReveal` — and reserves nothing.
+    var menuBarAutoHides = false {
+        didSet { if menuBarAutoHides != oldValue { refresh(redraw: false) } }
+    }
+    /// Whether a panel hangs from the bar on a display, so an auto-hidden bar stays while it
+    /// does.
+    var isHeld: ((CGDirectDisplayID) -> Bool)?
     /// Hands every panel's clicks to one handler, with the display they came from.
     var onClick: ((CGDirectDisplayID, BarItem.Kind?, BarView.Button) -> Void)?
     /// The wheel, in whole notches — see `BarView.scrollWheel`.
@@ -44,8 +62,24 @@ final class BarWindowSet {
     /// 24 or 25 on an external one, where Omarchy's 26 already covers it. The bar takes the
     /// taller of the two and the slots scale with it, as they would with a taller `[bar]
     /// height`.
+    ///
+    /// An auto-hidden menu bar keeps no strip out of `visibleFrame`, so its height is not
+    /// there to read and is the one it slides in at instead: the notch's safe area and one
+    /// more on a notched display (33 pt, the menu bar window as the window list reports it),
+    /// the status bar's thickness elsewhere.
     func height(on screen: NSScreen, metrics: BarMetrics) -> Double {
-        max(metrics.height, Double(screen.frame.maxY - screen.visibleFrame.maxY))
+        let strip = Double(screen.frame.maxY - screen.visibleFrame.maxY)
+        guard strip <= 0, autoHides(on: screen) else { return max(metrics.height, strip) }
+        let menuBar = screen.safeAreaInsets.top > 0 ? Double(screen.safeAreaInsets.top) + 1
+                                                    : Double(NSStatusBar.system.thickness)
+        return max(metrics.height, menuBar)
+    }
+
+    /// Whether the bar on `screen` follows macOS's auto-hide: the setting is on, and the
+    /// display has a menu bar to hide. With *Displays have separate Spaces* off only the
+    /// primary display has one, and the bar on the others is a bar over nothing — it stays.
+    func autoHides(on screen: NSScreen) -> Bool {
+        menuBarAutoHides && (NSScreen.screensHaveSeparateSpaces || screen == NSScreen.screens.first)
     }
 
     /// Where the centre section is centred on `screen`, in the panel's own coordinates, or nil
@@ -97,6 +131,11 @@ final class BarWindowSet {
                 panel.hide()
                 continue
             }
+            if menuBarHidden.contains(id) {
+                panel.hide()
+                continue
+            }
+            panel.autoHides = autoHides(on: screen)
             // A panel that has stepped aside for the menu bar stays aside until its own
             // sampling ends the peek and says so through `onPeekChanged`; a redraw meanwhile
             // — the clock ticking — must not bring it back over the menu the user is in.
@@ -126,6 +165,7 @@ final class BarWindowSet {
         panel.onClick = { [weak self] kind, button in self?.onClick?(id, kind, button) }
         panel.onScroll = { [weak self] kind, steps in self?.onScroll?(kind, steps) }
         panel.peekEnabled = peekEnabled
+        panel.isHeld = { [weak self] in self?.isHeld?(id) ?? false }
         panel.onPeekChanged = { [weak self, weak panel] in
             self?.refresh(redraw: false)
             if let panel { self?.onPeek?(id, panel.isPeeking) }

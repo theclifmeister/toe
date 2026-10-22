@@ -63,6 +63,8 @@ final class Coordinator: WindowTrackerDelegate {
     /// `bar hide`, the session's answer as against the config's `[bar] enabled`: the panels
     /// are off screen and the menu bar under them is what shows, until `bar show` or a relaunch.
     private var barHidden = false
+    /// Where the menu bar under the bar has gone — see `MenuBarWatcher` and `refreshMenuBar`.
+    private let menuBar = MenuBarWatcher()
     private let quickMenu = QuickMenu()
     /// The `toe` you type, on the other end of a socket. See `ControlSocket` — it is
     /// opened by `applyCLISetting` rather than here, so that `[cli] enabled = false` is a
@@ -349,6 +351,15 @@ final class Coordinator: WindowTrackerDelegate {
         // on its display, losing key — ends in `BarPanelWindow.close`, so this is the one
         // place that needs to stop it. Stopping it for any other panel is a no-op.
         barPanel.onClose = { [weak self] in self?.network.stopTraffic() }
+        // An auto-hidden bar stays while a panel hangs from it, wherever the pointer has gone.
+        bar.isHeld = { [weak self] display in
+            guard let self else { return false }
+            return barPanel.isVisible && barPanel.displayID == display
+        }
+        // Read before anything lays out, since the auto-hide setting decides the strip.
+        bar.menuBarAutoHides = menuBar.autoHides
+        menuBar.onChange = { [weak self] in self?.refreshMenuBar() }
+        menuBar.start()
 
         installSignalHandlers()
         // Before the four repairs below, because the copy this replaces writes those journals on
@@ -1570,7 +1581,15 @@ final class Coordinator: WindowTrackerDelegate {
             // kept its strip out of `visibleFrame`, and `reserving` takes only what the bar
             // needs beyond that — a point or two on an external display, nothing on a notched
             // one, whose menu bar is taller than Omarchy's bar.
-            guard bar.enabled, !barHidden else { return monitor }
+            //
+            // Nothing under macOS's auto-hide: the bar is off the screen until the pointer
+            // asks for it, as the menu bar is, and comes in over the tiles the way the menu
+            // bar does — `visibleFrame` already gives them the whole height. An application
+            // hiding the menu bar (`menuBarHidden`) is deliberately *not* a reason: it lasts
+            // as long as a game is in front, the tiles are behind that game, and laying the
+            // desktop out again on the way in and the way out would be every window jumping
+            // twice for nothing anyone can see.
+            guard bar.enabled, !barHidden, !bar.autoHides(on: screen) else { return monitor }
             return monitor.reserving(top: bar.height(on: screen, metrics: BarMetrics(
                 height: config.bar.height, fontSize: config.bar.fontSize)))
         }
@@ -2417,6 +2436,9 @@ final class Coordinator: WindowTrackerDelegate {
         cancelSlide()
         cancelTileSnap()
         refreshMonitors()
+        // A game's display may be the one that went, and the auto-hide setting is read
+        // against the screens too.
+        refreshMenuBar()
         // The panels are framed against the screens, so they are re-framed against the new ones
         // — before the layout, since the tiles are about to be put under them. A popover under
         // one of them closes on its own: see `BarPanelWindow.observe`.
@@ -2559,6 +2581,8 @@ final class Coordinator: WindowTrackerDelegate {
         // display is the blink the border avoids by hiding. The read is early, but it is the
         // read that matters — the window is already reporting fullscreen.
         setBarFullscreen(AX.frontmostFullscreenFrame)
+        // A game that hides the menu bar may have just come into view on its Space, or gone.
+        refreshMenuBar()
         // Before the border, because it may be about to change which workspace is showing:
         // leaving a fullscreen Space is a Space change, and it is the moment a window that went
         // fullscreen on a since-hidden workspace asks for its workspace back.
@@ -2592,6 +2616,35 @@ final class Coordinator: WindowTrackerDelegate {
            BorderGeometry.isBehindFullscreen(window: Coordinates.toAX(screen.frame), fullscreen: fullscreen) {
             barPanel.close()
         }
+    }
+
+    /// The bar following the menu bar (T8): hidden on the display an application has put the
+    /// menu bar away on, and waiting at the top edge everywhere macOS's auto-hide keeps it
+    /// hidden. Reached from `MenuBarWatcher`, and from a Space or screen change, which can
+    /// move a game into view or take its display away. Nothing is redrawn unless an answer
+    /// changed, and the window list is only asked while an application's options say the menu
+    /// bar is away.
+    private func refreshMenuBar() {
+        let hidden = menuBar.hiddenDisplays()
+        if hidden != bar.menuBarHidden {
+            bar.menuBarHidden = hidden
+            bar.refresh(redraw: false)
+            // The panel goes with its display's bar, as it does for fullscreen.
+            if let display = barPanel.displayID, hidden.contains(display) { barPanel.close() }
+            Log.info(hidden.isEmpty ? "bar: the menu bar is back"
+                                    : "bar: menu bar put away by the active application on \(hidden.count) display(s)")
+        }
+        let autoHides = menuBar.autoHides
+        guard autoHides != bar.menuBarAutoHides else { return }
+        bar.menuBarAutoHides = autoHides
+        Log.info("bar: menu bar auto-hide \(autoHides ? "on" : "off")")
+        // The strip is the tiles' under auto-hide and the bar's without it — a monitor change
+        // and a relayout, as `bar hide` is.
+        guard isManaging else { return }
+        refreshMonitors()
+        desired.removeAll()
+        corrections.removeAll()
+        apply(refocus: false)
     }
 
     /// Opens — or extends — the quiet period the border sits out. See `spaceSettleLatency`.
