@@ -3597,6 +3597,49 @@ h.test("only a menu someone could see keeps the bar aside") { t in
     t.equal(peek.isPeeking, false, "on top again")
 }
 
+h.test("the bar goes where an application has put the menu bar away, and only there") { t in
+    // The values measured from outside for T8: another application's options as KVO
+    // reported them.
+    t.equal(MenuBarHiding.hidesMenuBar(presentationOptions: 0), false, "nothing in force")
+    t.equal(MenuBarHiding.hidesMenuBar(presentationOptions: 10), true, "hideDock | hideMenuBar")
+    t.equal(MenuBarHiding.hidesMenuBar(presentationOptions: 5), true, "autoHideDock | autoHideMenuBar")
+    t.equal(MenuBarHiding.hidesMenuBar(presentationOptions: 2), false, "hiding the Dock alone leaves the menu bar")
+    t.equal(MenuBarHiding.hidesMenuBar(presentationOptions: 1 << 10 | 1 << 2), true, "fullScreen")
+
+    let primary = Box(x: 0, y: 0, w: 2560, h: 1440)
+    let second = Box(x: 2560, y: 0, w: 1920, h: 1080)
+    let displays = [primary, second]
+    t.equal(MenuBarHiding.display(of: [second], among: displays), 1, "a game filling the second display")
+    t.equal(MenuBarHiding.display(of: [primary], among: displays), 0, "or the first")
+    t.equal(MenuBarHiding.display(of: [Box(x: 2400, y: 100, w: 800, h: 600)], among: displays), 1,
+            "a window across the boundary is on the display with most of it")
+    t.equal(MenuBarHiding.display(of: [Box(x: 3000, y: 0, w: 20, h: 1), primary], among: displays), 0,
+            "a sliver in front is passed over for the window behind it")
+    t.equal(MenuBarHiding.display(of: [], among: displays), nil, "no window: every display")
+    t.equal(MenuBarHiding.display(of: [Box(x: -5000, y: 0, w: 800, h: 600)], among: displays), nil,
+            "and so is a window on none of them")
+}
+
+h.test("under macOS's auto-hide the bar comes in at the edge and goes when the pointer has left") { t in
+    var reveal = BarReveal()
+    t.equal(reveal.sample(.away, held: false, at: 0), false, "the pointer elsewhere: still hidden")
+    t.equal(reveal.sample(.edge, held: false, at: 1), true, "the edge reveals it at once")
+    t.equal(reveal.isRevealed, true, "revealed")
+    t.equal(reveal.sample(.strip, held: false, at: 2), false, "on the strip it stays")
+    t.equal(reveal.sample(.away, held: false, at: 3), false, "leaving starts the linger")
+    t.equal(reveal.sample(.strip, held: false, at: 3.25), false, "and a return cancels it")
+    t.equal(reveal.sample(.away, held: true, at: 3.5), false, "a panel open holds it")
+    t.equal(reveal.sample(.away, held: true, at: 10), false, "for as long as it is open")
+    t.equal(reveal.sample(.away, held: false, at: 10.25), false, "the panel closed, the linger starts")
+    t.equal(reveal.sample(.away, held: false, at: 10.5), false, "a quarter second is not the linger")
+    t.equal(reveal.sample(.away, held: false, at: 10.75), true, "half a second is")
+    t.equal(reveal.isRevealed, false, "hidden again")
+    t.equal(reveal.sample(.strip, held: false, at: 11), true, "and the next arrival brings it back")
+    reveal.reset()
+    t.equal(reveal.isRevealed, false, "reset is hidden")
+    t.equal(reveal.sample(.away, held: false, at: 11.25), false, "with nothing carried over")
+}
+
 h.test("a click on the bar lands on the slot under it, and nowhere else") { t in
     let m = BarMetrics()
     let items = [BarItems.menu(markWidth: 7.2, metrics: m)]

@@ -191,7 +191,7 @@ each widget from the numbers a Mac reports, `ClockFormat` the Qt-spelled formats
 read the system and say when it changed — a listener where one exists, never a poll — and
 `Coordinator.refreshBar` assembles a `BarSnapshot` on every `refreshStatus`.
 
-Five things to keep straight:
+Six things to keep straight:
 
 - **The exclusive zone is `usable`.** `refreshMonitors` reserves the bar's strip from the
   display's *frame* (`Monitor.reserving(top:)`) — the menu bar under the bar has already kept
@@ -221,6 +221,15 @@ Five things to keep straight:
   the frontmost fullscreen window's frame, and only the panel on the display it overlaps
   hides. Read where `updateBorder` already reads it, and on its own at the start of a Space
   change and the end of the settle.
+- **The bar follows the menu bar** it covers (T8), the two ways native fullscreen does not
+  cover. A game or borderless fullscreen hides the menu bar through its presentation options,
+  which `NSApp.currentSystemPresentationOptions` reports for the active application by KVO with
+  no permission; `MenuBarWatcher` places it on a display by its frontmost window
+  (`MenuBarHiding`) and `BarWindowSet.menuBarHidden` hides that panel — without touching the
+  tiles' strip, since a relayout under a game would be every window jumping twice for nothing.
+  macOS's own *Automatically hide and show the menu bar* (`_HIHideMenuBar`) makes each panel
+  wait off screen behind a one-point `sensor` panel and come in at the edge (`BarReveal`), and
+  then the strip *is* the tiles', as the menu bar's is.
 
 **The panels.** A left click on a right-section widget — and on the clock — opens a panel of
 toe's own under it: Omarchy's `plugins/panels/*/Panel.qml`, cut to what a Mac exposes
