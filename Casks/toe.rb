@@ -2,8 +2,8 @@
 
 cask "toe" do
   # Both lines below are rewritten by .github/workflows/release.yml on each tag.
-  version "0.33.6"
-  sha256 "bf99644dab19cd6f5587fa4c18fcdf6aed2232a0b43d8772549ff548f206e11a"
+  version "0.33.7"
+  sha256 "4f5979a28ad1c7bd08c49ef30405dd2b385b0fae2c5a4a1188d7c693ead2ae93"
 
   url "https://github.com/theclifmeister/toe/releases/download/v#{version}/toe-#{version}-arm64.zip"
   name "Toe"
