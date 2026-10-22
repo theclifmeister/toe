@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.7](https://github.com/theclifmeister/toe/compare/v0.33.6...v0.33.7) (2026-10-22)
+
+
+### Bug Fixes
+
+* hide the bar where the menu bar has gone ([#227](https://github.com/theclifmeister/toe/issues/227)) ([8df6df2](https://github.com/theclifmeister/toe/commit/8df6df21ed429bcd5879e0f0cdfdda8b30ce004a))
+
 ## [0.33.6](https://github.com/theclifmeister/toe/compare/v0.33.5...v0.33.6) (2026-10-18)
 
 
