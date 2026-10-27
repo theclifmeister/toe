@@ -80,6 +80,34 @@ enum WindowStack {
         return Presence.Sample(existing: existing, onScreen: onScreen, covering: covering)
     }
 
+    /// The on-screen windows of the application `pid`, in Accessibility coordinates — what
+    /// `BorderGeometry.coveredDisplay` looks through for a game filling its display.
+    ///
+    /// The window list rather than Accessibility, because two of the three ways a game goes
+    /// fullscreen without macOS's fullscreen are invisible to `kAXFocusedWindow`: measured for
+    /// T9, a plain borderless window cannot become key, so its application reports no focused
+    /// window at all, and a display capture draws in a window at the shielding level that is
+    /// likewise nobody's focus. Every level from the ordinary one up counts — the capture's
+    /// window is at the very top — and none below it, which is where Finder keeps the desktop.
+    /// Transparent windows are left out: an application's invisible helper the size of the
+    /// display is not something the user is looking through.
+    static func frames(ownedBy pid: pid_t) -> [Box] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return list.compactMap { info in
+            guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer >= 0,
+                  (info[kCGWindowAlpha as String] as? Double ?? 1) >= 0.01,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+            else { return nil }
+            // No conversion, as in `ordinaryWindowsAbove`.
+            return Box(x: rect.minX, y: rect.minY, w: rect.width, h: rect.height)
+        }
+    }
+
     /// The ids of the windows above `id`. This is how toe knows whether a float it has already
     /// sunk is still down there, so a stack that is right is left alone rather than re-raised.
     static func windowsAbove(_ id: WindowID) -> Set<WindowID> {

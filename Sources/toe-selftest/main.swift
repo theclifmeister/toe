@@ -2878,6 +2878,57 @@ h.test("the border gives way only on the display a fullscreen window took over")
             "two points past it is a window really reaching onto that display")
 }
 
+// T9: a game that is fullscreen without macOS's fullscreen. Each case is one measured against
+// the real app with a test window: the frames are what the window list reported for it, on
+// the same two displays as above. The answer is a display frame, handed to
+// `isBehindFullscreen` exactly as a native fullscreen window's is.
+h.test("a game filling its display counts as fullscreen for the border, native or not") { t in
+    let builtIn = box(0, 0, 1512, 982)
+    let external = box(1512, 0, 2560, 1440)
+    let displays = [builtIn, external]
+    func covered(_ windows: [Box]) -> Box? {
+        BorderGeometry.coveredDisplay(by: windows, among: displays)
+    }
+
+    // Borderless and display-sized: no title bar, no AXFullScreen, and too plain to become
+    // key, so Accessibility reports no focused window at all.
+    t.equal(covered([builtIn]), builtIn, "a borderless window the size of its display")
+    // A standard window resized back over its tile until toe stopped correcting it.
+    t.equal(covered([box(1512, 0, 2560, 1440)]), external,
+            "a window fighting its tile back to the whole display")
+    // `CGDisplayCapture`: the shield and the game's own window at the shielding level, both
+    // the display's frame.
+    t.equal(covered([external, external]), external, "a captured display")
+    // A game that leaves its title bar above the top edge is bigger than the display.
+    t.equal(covered([box(-1, -28, 1514, 1011)]), builtIn,
+            "a window larger than its display still covers it")
+    t.equal(covered([box(0.5, 0, 1511.5, 982)]), builtIn,
+            "half a point short at an edge is a scaled display's rounding")
+
+    // Per-display scoping. The game on the external display leaves the built-in one's tiles
+    // their border; an oversized window spilling onto the neighbour does not take it over.
+    let tile = box(15, 48, 842, 934)
+    t.equal(BorderGeometry.isBehindFullscreen(window: tile, fullscreen: covered([external])),
+            false, "a game on the other display leaves this tile its border")
+    t.equal(BorderGeometry.isBehindFullscreen(window: tile, fullscreen: covered([builtIn])),
+            true, "a game on this display takes it")
+    t.equal(covered([box(1500, -28, 2580, 1470)]), external,
+            "spilling onto the neighbour answers with the display it covers")
+
+    // What must not read as fullscreen.
+    t.equal(covered([]), nil, "an application with no windows on screen")
+    t.equal(covered([box(0, 33, 1512, 949)]), nil,
+            "a tile filling the usable area stops at the menu bar's strip")
+    t.equal(covered([box(0, 0, 1512, 979)]), nil, "three points short is not the display")
+    t.equal(covered([box(0, 0, 900, 982), box(900, 0, 612, 982)]), nil,
+            "two windows between them are not one window covering it")
+    // A native fullscreen window on a notched display sits below the notch — measured, y 33
+    // on a 1117-high display — so the geometry alone does not see it. That is why the
+    // Coordinator asks AXFullScreen first, and this is the reason it must keep asking.
+    t.equal(BorderGeometry.coveredDisplay(by: [box(0, 33, 1728, 1084)], among: [box(0, 0, 1728, 1117)]),
+            nil, "native fullscreen under a notch is AXFullScreen's to find")
+}
+
 // Guards the reason `activeSpaceChanged` is its own callback rather than `windowStackChanged`.
 // `WindowStack.windowsAbove` returns an empty set for a window that is not on screen, and this
 // is what `raiseOrder` does with that — so a Space switch that ran the float sink would raise
