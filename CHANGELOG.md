@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.8](https://github.com/theclifmeister/toe/compare/v0.33.7...v0.33.8) (2026-10-27)
+
+
+### Bug Fixes
+
+* hide the focus border around a game filling its display ([#230](https://github.com/theclifmeister/toe/issues/230)) ([5f18453](https://github.com/theclifmeister/toe/commit/5f18453bbeb7180c5fee98792831a4e373bf2eb9))
+
 ## [0.33.7](https://github.com/theclifmeister/toe/compare/v0.33.6...v0.33.7) (2026-10-22)
 
 
