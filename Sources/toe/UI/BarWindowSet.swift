@@ -25,8 +25,9 @@ final class BarWindowSet {
     var peekEnabled = true {
         didSet { for panel in panels.values { panel.peekEnabled = peekEnabled } }
     }
-    /// The frame of the native-fullscreen window in front, if there is one, in Accessibility
-    /// coordinates — `AX.frontmostFullscreenFrame`. A panel whose display it covers is hidden;
+    /// The frame of the fullscreen window in front, if there is one, in Accessibility
+    /// coordinates — `Coordinator.fullscreenFrame`: a native one, or the display a game's own
+    /// window covers edge to edge (T9). A panel whose display it covers is hidden;
     /// the other displays keep theirs. Under *Displays have separate Spaces* — the default —
     /// each display shows its own Space, so "is anything fullscreen" is never the question,
     /// and a fullscreen Safari on one display says nothing about the bar on another. The panel

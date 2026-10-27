@@ -155,6 +155,11 @@ judge — it is not in the tree.
 border: the border panel is `.canJoinAllSpaces` + `.fullScreenAuxiliary`, so it will happily paint
 across a fullscreen Space unless something stops it. With *Displays have separate Spaces* on (the
 macOS default) "is anything fullscreen" is never the right question — scope it to a display.
+A game that skips native fullscreen — a borderless display-sized window, a standard one resized
+back over its tile, a display capture — counts too for the border and the bar
+(`Coordinator.fullscreenFrame`, `BorderGeometry.coveredDisplay`), read from the window list
+because Accessibility often reports no focused window for it. The verbs `suspendedByFullscreen`
+refuses still ask `AXFullScreen` alone.
 
 **State that outlives the process.** Symbolic hotkeys (`CGSSetSymbolicHotKeyEnabled`), the
 wallpaper-click and edge-tiling preferences and the Dock's auto-hide

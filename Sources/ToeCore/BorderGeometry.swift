@@ -55,6 +55,33 @@ public enum BorderGeometry {
         return clipped.w > epsilon && clipped.h > epsilon
     }
 
+    /// The display one of `windows` covers edge to edge, or nil when none does — the
+    /// fullscreen that `AXFullScreen` never hears of (T9). A game that skips native fullscreen
+    /// opens a borderless window the size of the display, or keeps resizing a standard one back
+    /// to it after toe has tiled it, or captures the display and draws at the shielding level;
+    /// none of those is a fullscreen window to Accessibility, and each is one the user is
+    /// looking at the whole display through. The rule is the user's: a focused application
+    /// filling its display gets no border, native or not.
+    ///
+    /// "Covers" is contains, not overlaps: a tile already fills its display's usable area,
+    /// and the menu bar's strip (or the bar's) is what keeps it from reading as fullscreen.
+    /// A window larger than the display — a game that leaves its title bar above the top edge —
+    /// still covers it. `epsilon` forgives the half-point a scaled display rounds an edge to.
+    ///
+    /// The display's frame comes back rather than the window's, so that `isBehindFullscreen`
+    /// scopes the answer exactly as it does a native fullscreen window: an oversized window
+    /// spilling a few points onto the neighbouring display has not taken that one over. A
+    /// window spanning two displays answers with the first; the border only needs one.
+    public static func coveredDisplay(by windows: [Box], among displays: [Box],
+                                      epsilon: Double = 1) -> Box? {
+        displays.first { display in
+            windows.contains { window in
+                window.minX <= display.minX + epsilon && window.maxX >= display.maxX - epsilon
+                    && window.minY <= display.minY + epsilon && window.maxY >= display.maxY - epsilon
+            }
+        }
+    }
+
     /// Whether anything in `others` covers part of the *band*, rather than merely sitting over
     /// the window's own interior — which the border never draws on anyway, so a dialog centred
     /// on the window hides none of it.

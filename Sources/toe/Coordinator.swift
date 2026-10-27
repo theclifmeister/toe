@@ -358,7 +358,13 @@ final class Coordinator: WindowTrackerDelegate {
         }
         // Read before anything lays out, since the auto-hide setting decides the strip.
         bar.menuBarAutoHides = menuBar.autoHides
-        menuBar.onChange = { [weak self] in self?.refreshMenuBar() }
+        // The border too: a game putting the menu bar away is very often a game going
+        // borderless fullscreen in a window toe tracks nothing of, so no Accessibility
+        // notification says that its display has just been covered (T9).
+        menuBar.onChange = { [weak self] in
+            self?.refreshMenuBar()
+            self?.updateBorder()
+        }
         menuBar.start()
 
         installSignalHandlers()
@@ -2580,7 +2586,7 @@ final class Coordinator: WindowTrackerDelegate {
         // the start of the animation, and a bar still drawn over a window growing to fill the
         // display is the blink the border avoids by hiding. The read is early, but it is the
         // read that matters — the window is already reporting fullscreen.
-        setBarFullscreen(AX.frontmostFullscreenFrame)
+        setBarFullscreen(fullscreenFrame)
         // A game that hides the menu bar may have just come into view on its Space, or gone.
         refreshMenuBar()
         // Before the border, because it may be about to change which workspace is showing:
@@ -2598,6 +2604,31 @@ final class Coordinator: WindowTrackerDelegate {
         // changed is still showing the old one. `reapply` checks before it writes, which is what
         // makes this affordable on a callback that fires every time you change Space.
         wallpaper.reapply()
+    }
+
+    /// What the border and the bar take for a fullscreen window: a native one, by
+    /// `AXFullScreen`, or failing that the display the frontmost application covers edge to
+    /// edge (T9) — a game in a borderless display-sized window, one resizing a standard window
+    /// back over its tile, one that has captured the display. The user's rule is that a
+    /// focused application filling its display never gets a border, whichever way it got
+    /// there. A frame either way, so `isBehindFullscreen` scopes both to their display.
+    ///
+    /// Both reads stay: a native fullscreen window on a notched display sits below the notch
+    /// rather than covering the display, so the geometry alone would miss the commonest case.
+    /// The window list is asked only once Accessibility has said no, and only about the
+    /// frontmost application's windows; never toe's own, since the slide and the tile snap
+    /// draw in panels the size of a display, and so does the border around a tile that is.
+    ///
+    /// Only the border and the bar ask this. The verbs `suspendedByFullscreen` refuses still
+    /// read `AX.frontmostFullscreenFrame` alone: they are about a fullscreen *Space* hiding
+    /// the workspace behind it, which a game's window on the desktop does not do.
+    private var fullscreenFrame: Box? {
+        if let native = AX.frontmostFullscreenFrame { return native }
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              pid != ProcessInfo.processInfo.processIdentifier
+        else { return nil }
+        return BorderGeometry.coveredDisplay(by: WindowStack.frames(ownedBy: pid),
+                                             among: NSScreen.screens.map { Coordinates.toAX($0.frame) })
     }
 
     /// Hides the bar on the display a fullscreen window covers, and shows it again when none
@@ -2657,7 +2688,7 @@ final class Coordinator: WindowTrackerDelegate {
             // The border may have returned early with nothing to draw — no focus, or a
             // stashed window — without reading; the bar still needs to know whether the
             // fullscreen window has gone.
-            self.setBarFullscreen(AX.frontmostFullscreenFrame)
+            self.setBarFullscreen(fullscreenFrame)
         }
         spaceSettle = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.spaceSettleLatency, execute: work)
@@ -2917,7 +2948,7 @@ final class Coordinator: WindowTrackerDelegate {
         // cross-process Accessibility round trip, and the guard above already turns the border
         // off in every case where there was nothing to draw. Both `show` paths below test
         // against it, because either can be the one pointed at a fullscreen display.
-        let fullscreen = AX.frontmostFullscreenFrame
+        let fullscreen = fullscreenFrame
         // The bar's answer is the same read: whichever display that window covers has no bar.
         setBarFullscreen(fullscreen)
 
